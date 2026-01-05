@@ -320,14 +320,16 @@ impl CommandExecutor {
             Command::Find { text, on, store } => {
                 let source = self.resolve_source(on)?;
                 let positions: Vec<usize> = source.match_indices(text).map(|(i, _)| i).collect();
+                let count = positions.len();
+                // Store one position per line (consistent with regex, works with count matches)
                 let result = positions
                     .iter()
                     .map(|p| p.to_string())
                     .collect::<Vec<_>>()
-                    .join(",");
+                    .join("\n");
                 self.store_result(store, result);
                 Ok(ExecutionResult::Continue {
-                    output: format!("Found {} occurrences", positions.len()),
+                    output: format!("Found {} occurrences", count),
                     sub_calls: 0,
                 })
             }
