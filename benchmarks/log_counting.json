@@ -1,0 +1,34 @@
+{
+  "name": "log_counting",
+  "category": "log",
+  "description": "Count different log levels in a server log",
+  "context_generator": "generate_log",
+  "context_params": {
+    "total_lines": 1000,
+    "distribution": {
+      "INFO": 600,
+      "DEBUG": 250,
+      "WARN": 100,
+      "ERROR": 40,
+      "FATAL": 10
+    }
+  },
+  "queries": [
+    {
+      "query": "How many ERROR lines are in this log?",
+      "expected": "40",
+      "match_type": "contains"
+    },
+    {
+      "query": "How many FATAL lines are in this log?",
+      "expected": "10",
+      "match_type": "contains"
+    },
+    {
+      "query": "What is the ratio of ERROR to WARN messages?",
+      "expected": "40",
+      "match_type": "regex",
+      "regex_pattern": "40.*100|0\\.4|40%|2:5"
+    }
+  ]
+}

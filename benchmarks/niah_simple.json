@@ -1,0 +1,19 @@
+{
+  "name": "niah_simple",
+  "category": "niah",
+  "description": "Simple needle-in-a-haystack: find a hidden passphrase",
+  "context_generator": "repeat_with_needle",
+  "context_params": {
+    "filler_line": "This is line {n} of the document. It contains routine information about various topics.",
+    "total_lines": 500,
+    "needle_line": 247,
+    "needle": "The secret passphrase is: PURPLE-ELEPHANT-42"
+  },
+  "queries": [
+    {
+      "query": "What is the secret passphrase mentioned in this document?",
+      "expected": "PURPLE-ELEPHANT-42",
+      "match_type": "contains"
+    }
+  ]
+}

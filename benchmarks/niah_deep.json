@@ -1,0 +1,29 @@
+{
+  "name": "niah_deep",
+  "category": "niah",
+  "description": "Deeper needle-in-a-haystack: find multiple related facts",
+  "context_generator": "repeat_with_needle",
+  "context_params": {
+    "filler_line": "Report entry {n}: Standard operational metrics within normal parameters. No significant deviations observed in sector {sector}.",
+    "total_lines": 2000,
+    "needle_line": 873,
+    "needle": "CRITICAL UPDATE: Agent codename NIGHTINGALE reported at coordinates 47.3N 122.4W at 0342 hours. Authorization code: DELTA-7-NOVEMBER. Contact: priority-one@secure.gov"
+  },
+  "queries": [
+    {
+      "query": "What is the agent's codename mentioned in this document?",
+      "expected": "NIGHTINGALE",
+      "match_type": "contains"
+    },
+    {
+      "query": "What are the coordinates reported?",
+      "expected": "47.3N 122.4W",
+      "match_type": "contains"
+    },
+    {
+      "query": "What is the authorization code?",
+      "expected": "DELTA-7-NOVEMBER",
+      "match_type": "contains"
+    }
+  ]
+}

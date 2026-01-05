@@ -1,0 +1,28 @@
+{
+  "name": "code_analysis",
+  "category": "code",
+  "description": "Find patterns in Python source code",
+  "context": "# Module: user_management.py\n\nimport hashlib\nimport secrets\nfrom datetime import datetime\nfrom typing import Optional, List\n\nclass User:\n    \"\"\"Represents a user in the system.\"\"\"\n    \n    def __init__(self, username: str, email: str):\n        self.username = username\n        self.email = email\n        self.created_at = datetime.now()\n        self.is_active = True\n    \n    def deactivate(self):\n        \"\"\"Deactivate the user account.\"\"\"\n        self.is_active = False\n    \n    def activate(self):\n        \"\"\"Activate the user account.\"\"\"\n        self.is_active = True\n\n\nclass AdminUser(User):\n    \"\"\"Admin user with elevated privileges.\"\"\"\n    \n    def __init__(self, username: str, email: str, admin_level: int = 1):\n        super().__init__(username, email)\n        self.admin_level = admin_level\n    \n    def promote(self):\n        \"\"\"Increase admin level.\"\"\"\n        self.admin_level += 1\n    \n    def demote(self):\n        \"\"\"Decrease admin level.\"\"\"\n        if self.admin_level > 1:\n            self.admin_level -= 1\n\n\nclass UserManager:\n    \"\"\"Manages user operations.\"\"\"\n    \n    def __init__(self):\n        self.users: List[User] = []\n    \n    def create_user(self, username: str, email: str) -> User:\n        \"\"\"Create a new user.\"\"\"\n        user = User(username, email)\n        self.users.append(user)\n        return user\n    \n    def find_user(self, username: str) -> Optional[User]:\n        \"\"\"Find a user by username.\"\"\"\n        for user in self.users:\n            if user.username == username:\n                return user\n        return None\n    \n    def delete_user(self, username: str) -> bool:\n        \"\"\"Delete a user by username.\"\"\"\n        user = self.find_user(username)\n        if user:\n            self.users.remove(user)\n            return True\n        return False\n    \n    def get_active_users(self) -> List[User]:\n        \"\"\"Get all active users.\"\"\"\n        return [u for u in self.users if u.is_active]\n    \n    def get_inactive_users(self) -> List[User]:\n        \"\"\"Get all inactive users.\"\"\"\n        return [u for u in self.users if not u.is_active]\n\n\ndef hash_password(password: str) -> str:\n    \"\"\"Hash a password using SHA-256.\"\"\"\n    salt = secrets.token_hex(16)\n    hashed = hashlib.sha256((password + salt).encode()).hexdigest()\n    return f\"{salt}:{hashed}\"\n\n\ndef verify_password(password: str, hashed: str) -> bool:\n    \"\"\"Verify a password against its hash.\"\"\"\n    salt, expected_hash = hashed.split(':')\n    actual_hash = hashlib.sha256((password + salt).encode()).hexdigest()\n    return actual_hash == expected_hash\n",
+  "queries": [
+    {
+      "query": "How many classes are defined in this code?",
+      "expected": "3",
+      "match_type": "contains"
+    },
+    {
+      "query": "List all the method names in the UserManager class.",
+      "expected": ["create_user", "find_user", "delete_user", "get_active_users", "get_inactive_users"],
+      "match_type": "contains_all"
+    },
+    {
+      "query": "Which class inherits from User?",
+      "expected": "AdminUser",
+      "match_type": "contains"
+    },
+    {
+      "query": "How many functions (not methods) are defined at module level?",
+      "expected": "2",
+      "match_type": "contains"
+    }
+  ]
+}
