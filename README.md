@@ -19,14 +19,23 @@ This handles inputs **2 orders of magnitude beyond model context windows**.
 
 | Component | Status | Description |
 |-----------|--------|-------------|
-| **Rust Orchestrator** | ✅ Working | Pure Rust, structured JSON commands |
+| **Rust Orchestrator** | ✅ Production | Pure Rust, structured JSON commands, WASM support |
+| **WASM Execution** | ✅ Working | Sandboxed dynamic code via wasmtime |
 | **Visualizer** | ✅ Working | Interactive HTML at `/visualize` |
-| **Python Implementation** | ✅ Working | Reference implementation |
 | **Multi-Provider** | ✅ Working | DeepSeek, Ollama (local/remote) |
+| **Python PoC** | 📦 Legacy | Original proof-of-concept (see below) |
+
+## Implementation Evolution
+
+This project evolved through several phases:
+
+1. **Python PoC** (`src/rlm.py`) - Initial proof-of-concept using Python's `exec()` for arbitrary code execution. Validated the RLM concept but had security concerns.
+
+2. **Rust + Structured Commands** - Replaced Python with pure Rust. LLM outputs JSON commands (`slice`, `find`, `regex`, etc.) instead of arbitrary code. Safer but less flexible.
+
+3. **Rust + WASM** (current) - Added WebAssembly support via wasmtime. LLM can now generate dynamic analysis code that runs in a sandboxed WASM environment. Best of both worlds: flexibility + safety.
 
 ## Quick Start
-
-### Option 1: Rust Server (Recommended)
 
 ```bash
 cd rlm-orchestrator
@@ -47,23 +56,14 @@ curl -X POST http://localhost:8080/query \
   -d '{"query": "How many errors?", "context": "Line 1: OK\nLine 2: ERROR\nLine 3: OK"}'
 ```
 
-### Option 2: Python CLI
+### Legacy Python CLI
+
+The original Python implementation is preserved at `src/rlm.py` for reference. It uses a different approach (Python code execution) and is not recommended for production use.
 
 ```bash
-# Install dependencies
+# For historical reference only
 pip install httpx rich typer pydantic
-
-# Run with Ollama
-python src/rlm.py \
-  --query "Find all function definitions" \
-  --context-file ./code.py
-
-# Run with DeepSeek
-export DEEPSEEK_API_KEY="your-key"
-python src/rlm.py \
-  --query "Summarize this" \
-  --context-file doc.txt \
-  --provider deepseek
+python src/rlm.py --query "..." --context-file ./file.txt
 ```
 
 ## Documentation
@@ -151,6 +151,17 @@ base_url = "http://localhost:11434"
 model = "qwen2.5-coder:14b"
 role = "sub"
 ```
+
+## Roadmap
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Parallel sub-LM execution | 🔜 Planned | Run multiple `llm_query` calls concurrently across GPU backends |
+| More WASM modules | 🔜 Planned | Pre-compiled modules for JSON, CSV, code analysis |
+| LLM-generated WAT | 🔬 Research | Have LLM generate WebAssembly Text format directly |
+| Streaming responses | 💭 Considered | Stream partial results during long analysis |
+
+See [docs/wasm-design.md](docs/wasm-design.md) for technical roadmap details.
 
 ## License
 

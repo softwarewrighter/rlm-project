@@ -5,9 +5,9 @@ This guide will have you running RLM queries in minutes.
 ## Prerequisites
 
 - An LLM provider (DeepSeek API key or Ollama installed locally)
-- Rust toolchain (for the server) or Python 3.8+ (for the CLI)
+- Rust toolchain
 
-## Option 1: Rust Server (Recommended)
+## Rust Server
 
 ### Step 1: Configure Providers
 
@@ -67,28 +67,14 @@ curl -X POST http://localhost:8080/query \
 **Using the visualizer:**
 Open http://localhost:8080/visualize in your browser for an interactive UI.
 
-## Option 2: Python CLI
+## Legacy: Python CLI (Reference Only)
 
-### Step 1: Install Dependencies
+The original Python implementation at `src/rlm.py` is preserved for historical reference. It uses a different approach (Python code execution via `exec()`) and is **not recommended for production use**. The Rust implementation above is the current, supported version.
 
 ```bash
+# For reference only - use the Rust server instead
 pip install httpx rich typer pydantic
-```
-
-### Step 2: Run a Query
-
-```bash
-# With Ollama (local)
-python src/rlm.py \
-  --query "Find all function definitions" \
-  --context-file ./your-code.py
-
-# With DeepSeek (API)
-export DEEPSEEK_API_KEY="your-key"
-python src/rlm.py \
-  --query "Summarize the main points" \
-  --context-file ./document.txt \
-  --provider deepseek
+python src/rlm.py --query "..." --context-file ./file.txt
 ```
 
 ## Understanding the Output

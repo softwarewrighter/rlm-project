@@ -207,6 +207,61 @@ Then evolve to **Phase 2 (Pre-compiled WASM)** for specialized analysis.
 - Good LLM prompting for WASM-friendly code
 - Consider only for advanced use cases
 
+## Roadmap
+
+### Near-term
+
+#### Parallel Sub-LM Execution
+Currently `llm_query` calls are sequential. With multiple Ollama backends (local + big72), we should parallelize:
+
+```rust
+// Current (sequential):
+for chunk in chunks {
+    let result = llm_query(chunk).await;
+}
+
+// Planned (parallel):
+let futures: Vec<_> = chunks.iter()
+    .map(|c| pool.complete_sub(c))
+    .collect();
+let results = futures::future::join_all(futures).await;
+```
+
+**Benefits:**
+- Faster analysis of multi-chunk contexts
+- Better utilization of distributed GPU backends
+- Scales with number of available GPUs
+
+**Hardware considerations:**
+- M3 (few fast cores): Limited benefit for orchestration, but sub-LM calls still parallelize over network
+- Dual Xeon (many cores): Better handling of concurrent HTTP connections to multiple backends
+- Multiple GPUs: Primary speedup comes from parallel inference, not orchestrator CPU
+
+#### More Pre-compiled WASM Modules
+
+| Module | Purpose |
+|--------|---------|
+| `json_query` | Parse JSON, run JSONPath queries |
+| `csv_analysis` | Parse CSV, compute statistics |
+| `code_parser` | Extract AST information from code |
+| `text_stats` | Word frequency, n-grams, similarity |
+
+### Medium-term
+
+#### LLM-Generated WAT
+Train/prompt LLMs to generate WebAssembly Text format directly for custom analysis. Requires:
+- WAT syntax in training data
+- Validation before execution
+- Fallback to structured commands
+
+### Long-term
+
+#### Streaming Results
+For long-running analysis, stream partial results to the client:
+- Server-Sent Events for `/query` endpoint
+- Progressive updates in visualizer
+- Early termination on user cancel
+
 ## References
 
 - [NVIDIA: Sandboxing Agentic AI with WebAssembly](https://developer.nvidia.com/blog/sandboxing-agentic-ai-workflows-with-webassembly/)
