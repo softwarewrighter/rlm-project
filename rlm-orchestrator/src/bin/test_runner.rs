@@ -75,6 +75,8 @@ struct DebugResponse {
     baseline_tokens: u32,
     #[serde(default)]
     token_savings_pct: f64,
+    #[serde(default)]
+    bypassed: bool,
 }
 
 #[derive(Debug)]
@@ -213,6 +215,7 @@ struct QueryMetrics {
     rlm_tokens: u32,
     baseline_tokens: u32,
     savings_pct: f64,
+    bypassed: bool,
 }
 
 async fn run_query(client: &Client, query: &str, context: &str) -> QueryMetrics {
@@ -241,6 +244,7 @@ async fn run_query(client: &Client, query: &str, context: &str) -> QueryMetrics 
                     rlm_tokens: 0,
                     baseline_tokens: 0,
                     savings_pct: 0.0,
+                    bypassed: false,
                 };
             }
 
@@ -253,6 +257,7 @@ async fn run_query(client: &Client, query: &str, context: &str) -> QueryMetrics 
                     rlm_tokens: data.total_prompt_tokens + data.total_completion_tokens,
                     baseline_tokens: data.baseline_tokens,
                     savings_pct: data.token_savings_pct,
+                    bypassed: data.bypassed,
                 },
                 Err(e) => QueryMetrics {
                     answer: String::new(),
@@ -262,6 +267,7 @@ async fn run_query(client: &Client, query: &str, context: &str) -> QueryMetrics 
                     rlm_tokens: 0,
                     baseline_tokens: 0,
                     savings_pct: 0.0,
+                    bypassed: false,
                 },
             }
         }
@@ -273,6 +279,7 @@ async fn run_query(client: &Client, query: &str, context: &str) -> QueryMetrics 
             rlm_tokens: 0,
             baseline_tokens: 0,
             savings_pct: 0.0,
+            bypassed: false,
         },
     }
 }
@@ -334,8 +341,9 @@ async fn run_test_suite(client: &Client, spec: BenchmarkSpec) -> Result<TestResu
         };
 
         if passed {
-            println!("  ✓ PASSED ({} iters, {:?}, {} tokens, {:.0}% saved)",
-                metrics.iterations, metrics.latency, metrics.rlm_tokens, metrics.savings_pct);
+            let bypass_indicator = if metrics.bypassed { " [BYPASS]" } else { "" };
+            println!("  ✓ PASSED ({} iters, {:?}, {} tokens, {:.0}% saved){}",
+                metrics.iterations, metrics.latency, metrics.rlm_tokens, metrics.savings_pct, bypass_indicator);
         } else {
             println!("  ✗ FAILED");
             if let Some(ref err) = metrics.error {

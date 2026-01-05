@@ -1,5 +1,24 @@
 # Local LLM Guide for RLM
 
+## Smart Bypass for Small Contexts
+
+RLM now automatically bypasses iteration for small contexts (< 4000 chars by default):
+
+```toml
+# config.toml
+bypass_enabled = true
+bypass_threshold = 4000  # chars (~1000 tokens)
+```
+
+| Context Size | Mode | Latency | Token Savings |
+|--------------|------|---------|---------------|
+| < 4K chars | Direct (bypass) | ~1-2s | ~20-25% |
+| > 4K chars | RLM iteration | ~10-30s | ~60-70% |
+
+This eliminates the overhead penalty for small contexts while preserving RLM benefits for large ones.
+
+---
+
 ## Why Model Size Matters for RLM
 
 The **root LLM** in RLM must:
@@ -25,6 +44,34 @@ Small models (7B-14B) typically fail because they:
 | 14B | ⚠️ Often malformed | ⚠️ Moderate | Unreliable |
 | 32-34B | ✅ Good | ✅ Good | Yes |
 | 70B+ | ✅ Excellent | ✅ Excellent | Yes (recommended) |
+
+## Small Models for Sub-Calls (2-12GB VRAM)
+
+Small models work well for **sub-LM calls** (simple summarization, extraction) since they don't need JSON protocol:
+
+| Model | Size | VRAM (Q4) | Sub-Call Quality |
+|-------|------|-----------|------------------|
+| Llama-3.2-3B | 3B | ~2GB | ⭐⭐⭐ Good |
+| Phi-3-mini | 3.8B | ~2.5GB | ⭐⭐⭐ Good |
+| Qwen2.5-7B-Instruct | 7B | ~4.5GB | ⭐⭐⭐⭐ Very Good |
+| Gemma-2-9B | 9B | ~6GB | ⭐⭐⭐⭐ Very Good |
+| Mistral-7B-Instruct | 7B | ~4.5GB | ⭐⭐⭐ Good |
+
+**Example config (API root + small local sub):**
+```toml
+# DeepSeek API for root (reliable JSON)
+[[providers]]
+provider_type = "deepseek"
+model = "deepseek-chat"
+role = "root"
+
+# Small local model for sub-calls (free)
+[[providers]]
+provider_type = "ollama"
+base_url = "http://localhost:11434"
+model = "llama3.2:3b"
+role = "sub"
+```
 
 ## Hardware Configurations
 

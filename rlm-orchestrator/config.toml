@@ -4,6 +4,11 @@ max_iterations = 20
 max_sub_calls = 50
 output_limit = 10000
 
+# Smart bypass: skip RLM for small contexts and send directly to LLM
+# This avoids RLM overhead when the full context fits easily
+bypass_enabled = true
+bypass_threshold = 4000  # chars (~1000 tokens) - contexts smaller than this use direct LLM
+
 # DeepSeek API for root LLM (production - requires DEEPSEEK_API_KEY)
 [[providers]]
 provider_type = "deepseek"

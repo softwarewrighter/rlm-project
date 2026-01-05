@@ -40,6 +40,8 @@ pub struct QueryResponse {
     pub iterations: usize,
     /// Total sub-LM calls made
     pub sub_calls: usize,
+    /// Whether RLM was bypassed (direct call for small contexts)
+    pub bypassed: bool,
 }
 
 impl From<RlmResult> for QueryResponse {
@@ -54,6 +56,7 @@ impl From<RlmResult> for QueryResponse {
             error: result.error,
             iterations: result.iterations,
             sub_calls: result.total_sub_calls,
+            bypassed: result.bypassed,
         }
     }
 }
@@ -85,6 +88,8 @@ pub struct DebugResponse {
     pub baseline_tokens: u32,
     /// Token savings percentage
     pub token_savings_pct: f64,
+    /// Whether RLM was bypassed (direct call for small contexts)
+    pub bypassed: bool,
 }
 
 /// JSON-serializable iteration record
@@ -183,6 +188,7 @@ async fn debug_query(
                 total_completion_tokens: result.total_completion_tokens,
                 baseline_tokens,
                 token_savings_pct,
+                bypassed: result.bypassed,
             }))
         }
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),

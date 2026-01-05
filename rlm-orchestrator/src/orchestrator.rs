@@ -75,6 +75,8 @@ pub struct RlmResult {
     pub total_completion_tokens: u32,
     /// Context size in characters (for comparison)
     pub context_chars: usize,
+    /// Whether RLM was bypassed (direct LLM call for small contexts)
+    pub bypassed: bool,
 }
 
 /// RLM Orchestrator
@@ -129,12 +131,69 @@ impl RlmOrchestrator {
         })
     }
 
+    /// Check if bypass should be used for this context size
+    pub fn should_bypass(&self, context_len: usize) -> bool {
+        self.config.bypass_enabled && context_len < self.config.bypass_threshold
+    }
+
+    /// Process directly without RLM iteration (for small contexts)
+    async fn process_direct(
+        &self,
+        query: &str,
+        context: &str,
+    ) -> Result<RlmResult, OrchestratorError> {
+        info!(
+            context_len = context.len(),
+            threshold = self.config.bypass_threshold,
+            "Bypassing RLM - context below threshold"
+        );
+
+        let system_prompt = "You are a helpful assistant. Answer the question based on the provided context. Be extremely concise - respond with just the answer (number, name, or short phrase). Do not explain or elaborate.";
+        let prompt = format!("Context:\n{}\n\nQuestion: {}", context, query);
+
+        let request = LlmRequest::new(system_prompt, &prompt);
+        let response = self.pool.complete(&request, false).await?;
+
+        let (prompt_tokens, completion_tokens) = response
+            .usage
+            .map(|u| (u.prompt_tokens, u.completion_tokens))
+            .unwrap_or((0, 0));
+
+        Ok(RlmResult {
+            answer: response.content,
+            iterations: 1,
+            history: vec![IterationRecord {
+                step: 1,
+                commands: "(direct)".to_string(),
+                output: "Bypassed RLM - small context".to_string(),
+                error: None,
+                sub_calls: 0,
+                tokens: IterationTokens {
+                    prompt_tokens,
+                    completion_tokens,
+                },
+            }],
+            total_sub_calls: 0,
+            success: true,
+            error: None,
+            total_prompt_tokens: prompt_tokens,
+            total_completion_tokens: completion_tokens,
+            context_chars: context.len(),
+            bypassed: true,
+        })
+    }
+
     /// Process a query over the given context
     pub async fn process(
         &self,
         query: &str,
         context: &str,
     ) -> Result<RlmResult, OrchestratorError> {
+        // Check if we should bypass RLM for small contexts
+        if self.should_bypass(context.len()) {
+            return self.process_direct(query, context).await;
+        }
+
         let mut history = Vec::new();
         let total_sub_calls = Arc::new(AtomicUsize::new(0));
         let mut total_prompt_tokens: u32 = 0;
@@ -201,6 +260,7 @@ impl RlmOrchestrator {
                             total_prompt_tokens,
                             total_completion_tokens,
                             context_chars,
+                            bypassed: false,
                         });
                     }
                     Ok(ExecutionResult::Continue { output, sub_calls }) => {
@@ -247,6 +307,7 @@ impl RlmOrchestrator {
                         total_prompt_tokens,
                         total_completion_tokens,
                         context_chars,
+                        bypassed: false,
                     });
                 }
 
@@ -274,6 +335,7 @@ impl RlmOrchestrator {
             total_prompt_tokens,
             total_completion_tokens,
             context_chars,
+            bypassed: false,
         })
     }
 

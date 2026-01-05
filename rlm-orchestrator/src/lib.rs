@@ -32,6 +32,16 @@ pub struct RlmConfig {
     #[serde(default = "default_output_limit")]
     pub output_limit: usize,
 
+    /// Enable bypass for small contexts (skip RLM, send directly to LLM)
+    #[serde(default = "default_bypass_enabled")]
+    pub bypass_enabled: bool,
+
+    /// Context size threshold for bypass (chars). Contexts smaller than this
+    /// will be sent directly to the LLM without RLM iteration.
+    /// Default: 4000 chars (~1000 tokens)
+    #[serde(default = "default_bypass_threshold")]
+    pub bypass_threshold: usize,
+
     /// Provider configuration
     pub providers: Vec<ProviderConfig>,
 }
@@ -39,6 +49,8 @@ pub struct RlmConfig {
 fn default_max_iterations() -> usize { 20 }
 fn default_max_sub_calls() -> usize { 50 }
 fn default_output_limit() -> usize { 10000 }
+fn default_bypass_enabled() -> bool { true }
+fn default_bypass_threshold() -> usize { 4000 }
 
 /// Configuration for a single LLM provider
 #[derive(Debug, Clone, serde::Deserialize)]
