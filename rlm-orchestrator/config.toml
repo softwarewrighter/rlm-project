@@ -4,16 +4,15 @@ max_iterations = 20
 max_sub_calls = 50
 output_limit = 10000
 
-# DeepSeek API for root LLM (smarter, follows structured output better)
+# DeepSeek API for root LLM (fast, smart)
 [[providers]]
 provider_type = "deepseek"
 base_url = "https://api.deepseek.com"
 model = "deepseek-chat"
-# API key from environment: DEEPSEEK_API_KEY
 role = "root"
 weight = 1
 
-# Local Ollama for sub-LM calls (cheaper, faster for simple queries)
+# Local Ollama for sub-LM calls
 [[providers]]
 provider_type = "ollama"
 base_url = "http://localhost:11434"
@@ -21,10 +20,10 @@ model = "qwen2.5-coder:14b"
 role = "sub"
 weight = 1
 
-# Remote Ollama on big72 (optional additional capacity)
-# [[providers]]
-# provider_type = "ollama"
-# base_url = "http://big72.local:11434"
-# model = "qwen2.5-coder:14b"
-# role = "sub"
-# weight = 1
+# Remote Ollama on big72 for sub-LM calls
+[[providers]]
+provider_type = "ollama"
+base_url = "http://big72.local:11434"
+model = "mistral:7b"
+role = "sub"
+weight = 1
