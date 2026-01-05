@@ -12,6 +12,10 @@ name = "rlm"
 name = "rlm-server"
 path = "src/bin/server.rs"
 
+[[bin]]
+name = "rlm-test"
+path = "src/bin/test_runner.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }

@@ -1,13 +1,12 @@
 //! LLM connection pool with load balancing
 
-use crate::provider::{HealthStatus, LlmProvider, LlmRequest, LlmResponse, ProviderError};
+use crate::provider::{LlmProvider, LlmRequest, LlmResponse, ProviderError};
 use dashmap::DashMap;
-use parking_lot::RwLock;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::interval;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// Statistics for a single provider
 #[derive(Debug, Default)]
@@ -141,8 +140,7 @@ impl LlmPool {
             return self
                 .providers
                 .iter()
-                .filter(|p| role_filter(p.role))
-                .next()
+                .find(|p| role_filter(p.role))
                 .map(|p| Arc::clone(&p.provider));
         }
 

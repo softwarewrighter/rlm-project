@@ -28,6 +28,15 @@ pub enum OrchestratorError {
     NoCommands,
 }
 
+/// Token usage for an iteration
+#[derive(Debug, Clone, Default)]
+pub struct IterationTokens {
+    /// Tokens in the prompt sent to root LLM
+    pub prompt_tokens: u32,
+    /// Tokens in the completion from root LLM
+    pub completion_tokens: u32,
+}
+
 /// Record of a single RLM iteration
 #[derive(Debug, Clone)]
 pub struct IterationRecord {
@@ -41,6 +50,8 @@ pub struct IterationRecord {
     pub error: Option<String>,
     /// Number of sub-LM calls made in this iteration
     pub sub_calls: usize,
+    /// Token usage for this iteration
+    pub tokens: IterationTokens,
 }
 
 /// Result of an RLM query
@@ -58,6 +69,12 @@ pub struct RlmResult {
     pub success: bool,
     /// Error message if failed
     pub error: Option<String>,
+    /// Total prompt tokens used (root LLM only)
+    pub total_prompt_tokens: u32,
+    /// Total completion tokens used (root LLM only)
+    pub total_completion_tokens: u32,
+    /// Context size in characters (for comparison)
+    pub context_chars: usize,
 }
 
 /// RLM Orchestrator
@@ -120,6 +137,9 @@ impl RlmOrchestrator {
     ) -> Result<RlmResult, OrchestratorError> {
         let mut history = Vec::new();
         let total_sub_calls = Arc::new(AtomicUsize::new(0));
+        let mut total_prompt_tokens: u32 = 0;
+        let mut total_completion_tokens: u32 = 0;
+        let context_chars = context.len();
 
         let system_prompt = self.build_system_prompt(context.len());
 
@@ -145,6 +165,14 @@ impl RlmOrchestrator {
             let request = LlmRequest::new(&system_prompt, &prompt);
             let response = self.pool.complete(&request, false).await?;
 
+            // Track token usage
+            let iter_tokens = response.usage.as_ref().map(|u| IterationTokens {
+                prompt_tokens: u.prompt_tokens,
+                completion_tokens: u.completion_tokens,
+            }).unwrap_or_default();
+            total_prompt_tokens += iter_tokens.prompt_tokens;
+            total_completion_tokens += iter_tokens.completion_tokens;
+
             debug!(content_len = response.content.len(), "Got LLM response");
 
             // Try to extract JSON commands first
@@ -160,6 +188,7 @@ impl RlmOrchestrator {
                             output: format!("FINAL: {}", &answer),
                             error: None,
                             sub_calls,
+                            tokens: iter_tokens,
                         });
 
                         return Ok(RlmResult {
@@ -169,6 +198,9 @@ impl RlmOrchestrator {
                             total_sub_calls: total_sub_calls.load(Ordering::Relaxed),
                             success: true,
                             error: None,
+                            total_prompt_tokens,
+                            total_completion_tokens,
+                            context_chars,
                         });
                     }
                     Ok(ExecutionResult::Continue { output, sub_calls }) => {
@@ -179,6 +211,7 @@ impl RlmOrchestrator {
                             output: truncated_output,
                             error: None,
                             sub_calls,
+                            tokens: iter_tokens,
                         });
                     }
                     Err(e) => {
@@ -188,6 +221,7 @@ impl RlmOrchestrator {
                             output: String::new(),
                             error: Some(e.to_string()),
                             sub_calls: 0,
+                            tokens: iter_tokens,
                         });
                         debug!("Command execution had error: {}", e);
                     }
@@ -195,6 +229,14 @@ impl RlmOrchestrator {
             } else {
                 // No JSON commands - check for FINAL in plain text (fallback)
                 if let Some(final_answer) = extract_final(&response.content) {
+                    history.push(IterationRecord {
+                        step: iteration + 1,
+                        commands: String::new(),
+                        output: format!("FINAL: {}", &final_answer),
+                        error: None,
+                        sub_calls: 0,
+                        tokens: iter_tokens,
+                    });
                     return Ok(RlmResult {
                         answer: final_answer,
                         iterations: iteration + 1,
@@ -202,6 +244,9 @@ impl RlmOrchestrator {
                         total_sub_calls: total_sub_calls.load(Ordering::Relaxed),
                         success: true,
                         error: None,
+                        total_prompt_tokens,
+                        total_completion_tokens,
+                        context_chars,
                     });
                 }
 
@@ -213,12 +258,23 @@ impl RlmOrchestrator {
                     output: String::new(),
                     error: Some("No JSON commands found in response".to_string()),
                     sub_calls: 0,
+                    tokens: iter_tokens,
                 });
             }
         }
 
-        // Max iterations reached
-        Err(OrchestratorError::MaxIterations(self.config.max_iterations))
+        // Max iterations reached - still return token info
+        Ok(RlmResult {
+            answer: String::new(),
+            iterations: self.config.max_iterations,
+            history,
+            total_sub_calls: total_sub_calls.load(Ordering::Relaxed),
+            success: false,
+            error: Some(format!("Max iterations ({}) exceeded", self.config.max_iterations)),
+            total_prompt_tokens,
+            total_completion_tokens,
+            context_chars,
+        })
     }
 
     fn build_system_prompt(&self, context_len: usize) -> String {

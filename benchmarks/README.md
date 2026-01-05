@@ -13,16 +13,23 @@ Count, categorize, and summarize log entries.
 ### 3. Code Analysis
 Find functions, classes, and patterns in source code.
 
-## Running Benchmarks
+## Running Tests
 
 ```bash
-# Start the server
-cd ../rlm-orchestrator
-DEEPSEEK_API_KEY="your-key" cargo run --bin rlm-server &
+# Start the server (in one terminal)
+cd rlm-orchestrator
+DEEPSEEK_API_KEY="your-key" cargo run --bin rlm-server
 
-# Run benchmarks
-python run_benchmarks.py
+# Run tests (in another terminal)
+cd rlm-orchestrator
+cargo run --bin rlm-test
 ```
+
+The test runner will:
+1. Find all JSON test files in `benchmarks/`
+2. Generate contexts from specs
+3. Run queries against the RLM server
+4. Report pass/fail with timing stats
 
 ## Metrics
 

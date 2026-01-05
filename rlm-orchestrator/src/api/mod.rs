@@ -4,7 +4,7 @@ use crate::orchestrator::{IterationRecord, RlmOrchestrator, RlmResult};
 use axum::{
     extract::State,
     http::StatusCode,
-    response::{Html, IntoResponse},
+    response::Html,
     routing::{get, post},
     Json, Router,
 };
@@ -75,8 +75,16 @@ pub struct DebugResponse {
     pub history: Vec<IterationRecordJson>,
     /// Original query
     pub query: String,
-    /// Context length
+    /// Context length in characters
     pub context_length: usize,
+    /// Total prompt tokens used (RLM approach)
+    pub total_prompt_tokens: u32,
+    /// Total completion tokens used (RLM approach)
+    pub total_completion_tokens: u32,
+    /// Estimated baseline tokens (full context approach)
+    pub baseline_tokens: u32,
+    /// Token savings percentage
+    pub token_savings_pct: f64,
 }
 
 /// JSON-serializable iteration record
@@ -87,6 +95,8 @@ pub struct IterationRecordJson {
     pub output: String,
     pub error: Option<String>,
     pub sub_calls: usize,
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
 }
 
 impl From<&IterationRecord> for IterationRecordJson {
@@ -97,6 +107,8 @@ impl From<&IterationRecord> for IterationRecordJson {
             output: r.output.clone(),
             error: r.error.clone(),
             sub_calls: r.sub_calls,
+            prompt_tokens: r.tokens.prompt_tokens,
+            completion_tokens: r.tokens.completion_tokens,
         }
     }
 }
@@ -148,16 +160,31 @@ async fn debug_query(
     let query = request.query.clone();
 
     match state.orchestrator.process(&request.query, &request.context).await {
-        Ok(result) => Ok(Json(DebugResponse {
-            success: result.success,
-            answer: result.answer,
-            error: result.error,
-            iterations: result.iterations,
-            total_sub_calls: result.total_sub_calls,
-            history: result.history.iter().map(|r| r.into()).collect(),
-            query,
-            context_length,
-        })),
+        Ok(result) => {
+            // Estimate baseline tokens: ~1 token per 4 chars for context + query overhead
+            let baseline_tokens = (context_length as u32 / 4) + 200; // 200 for query/system prompt
+            let rlm_total = result.total_prompt_tokens + result.total_completion_tokens;
+            let token_savings_pct = if baseline_tokens > 0 {
+                ((baseline_tokens as f64 - rlm_total as f64) / baseline_tokens as f64) * 100.0
+            } else {
+                0.0
+            };
+
+            Ok(Json(DebugResponse {
+                success: result.success,
+                answer: result.answer,
+                error: result.error,
+                iterations: result.iterations,
+                total_sub_calls: result.total_sub_calls,
+                history: result.history.iter().map(|r| r.into()).collect(),
+                query,
+                context_length,
+                total_prompt_tokens: result.total_prompt_tokens,
+                total_completion_tokens: result.total_completion_tokens,
+                baseline_tokens,
+                token_savings_pct,
+            }))
+        }
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
 }

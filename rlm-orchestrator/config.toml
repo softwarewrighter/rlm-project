@@ -4,13 +4,21 @@ max_iterations = 20
 max_sub_calls = 50
 output_limit = 10000
 
-# DeepSeek API for root LLM (fast, smart)
+# DeepSeek API for root LLM (production - requires DEEPSEEK_API_KEY)
 [[providers]]
 provider_type = "deepseek"
 base_url = "https://api.deepseek.com"
 model = "deepseek-chat"
 role = "root"
 weight = 1
+
+# Local Ollama for root LLM (uncomment for testing without API key)
+# [[providers]]
+# provider_type = "ollama"
+# base_url = "http://localhost:11434"
+# model = "qwen2.5-coder:14b"
+# role = "root"
+# weight = 1
 
 # Local Ollama for sub-LM calls
 [[providers]]

@@ -47,20 +47,22 @@ pub enum CommandError {
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Command {
     /// Slice the context: {"op": "slice", "start": 0, "end": 1000}
+    /// Supports Python-style negative indices (e.g., -20 means 20 from the end)
     Slice {
-        start: usize,
+        start: i64,
         #[serde(default)]
-        end: Option<usize>,
+        end: Option<i64>,
         #[serde(default)]
         store: Option<String>,
     },
 
     /// Get specific lines: {"op": "lines", "start": 0, "end": 100}
+    /// Supports Python-style negative indices (e.g., -10 means 10 lines from the end)
     Lines {
         #[serde(default)]
-        start: Option<usize>,
+        start: Option<i64>,
         #[serde(default)]
-        end: Option<usize>,
+        end: Option<i64>,
         #[serde(default)]
         store: Option<String>,
     },
@@ -265,6 +267,27 @@ impl CommandExecutor {
         self.last_result = value;
     }
 
+    /// Resolve a Python-style index (negative = from end) to a positive index
+    /// Returns None if the resulting index is out of bounds
+    fn resolve_index(idx: i64, len: usize) -> Option<usize> {
+        if idx >= 0 {
+            let pos = idx as usize;
+            if pos <= len {
+                Some(pos)
+            } else {
+                Some(len) // Clamp to length
+            }
+        } else {
+            // Negative index: count from end
+            let from_end = (-idx) as usize;
+            if from_end <= len {
+                Some(len - from_end)
+            } else {
+                Some(0) // Clamp to 0
+            }
+        }
+    }
+
     /// Execute a sequence of commands from JSON
     pub fn execute_json(&mut self, json: &str) -> Result<ExecutionResult, CommandError> {
         // Try to parse as array of commands first, then single command
@@ -327,15 +350,18 @@ impl CommandExecutor {
     fn execute_one(&mut self, cmd: &Command) -> Result<ExecutionResult, CommandError> {
         match cmd {
             Command::Slice { start, end, store } => {
-                let end = end.unwrap_or(self.context.len());
-                if *start > self.context.len() || end > self.context.len() || *start > end {
-                    return Err(CommandError::InvalidSlice {
-                        start: *start,
-                        end,
-                        len: self.context.len(),
-                    });
-                }
-                let result = self.context[*start..end].to_string();
+                let len = self.context.len();
+                let start_idx = Self::resolve_index(*start, len).unwrap_or(0);
+                let end_idx = end.map(|e| Self::resolve_index(e, len).unwrap_or(len)).unwrap_or(len);
+
+                // Ensure start <= end
+                let (start_idx, end_idx) = if start_idx > end_idx {
+                    (end_idx, start_idx)
+                } else {
+                    (start_idx, end_idx)
+                };
+
+                let result = self.context[start_idx..end_idx].to_string();
                 self.store_result(store, result);
                 Ok(ExecutionResult::Continue {
                     output: String::new(),
@@ -345,9 +371,18 @@ impl CommandExecutor {
 
             Command::Lines { start, end, store } => {
                 let lines: Vec<&str> = self.context.lines().collect();
-                let start = start.unwrap_or(0);
-                let end = end.unwrap_or(lines.len()).min(lines.len());
-                let result = lines[start..end].join("\n");
+                let len = lines.len();
+                let start_idx = start.map(|s| Self::resolve_index(s, len).unwrap_or(0)).unwrap_or(0);
+                let end_idx = end.map(|e| Self::resolve_index(e, len).unwrap_or(len)).unwrap_or(len);
+
+                // Ensure start <= end
+                let (start_idx, end_idx) = if start_idx > end_idx {
+                    (end_idx, start_idx)
+                } else {
+                    (start_idx, end_idx)
+                };
+
+                let result = lines[start_idx..end_idx].join("\n");
                 self.store_result(store, result);
                 Ok(ExecutionResult::Continue {
                     output: String::new(),
@@ -402,7 +437,7 @@ impl CommandExecutor {
 
             Command::Split { delimiter, on, store } => {
                 let source = self.resolve_source(on)?.to_string();
-                let parts: Vec<&str> = source.split(&*delimiter).collect();
+                let parts: Vec<&str> = source.split(delimiter.as_str()).collect();
                 let part_count = parts.len();
                 let result = parts.join("\n");
                 self.store_result(store, result);
@@ -663,6 +698,44 @@ mod tests {
         };
         exec.execute_one(&cmd).unwrap();
         assert_eq!(exec.get_variable("greeting"), Some(&"Hello".to_string()));
+    }
+
+    #[test]
+    fn test_slice_negative_indices() {
+        // Test Python-style negative indices
+        let mut exec = CommandExecutor::new("Hello, World!".to_string(), 10);
+
+        // -6 means 6 from end = position 7 ("World!")
+        let cmd = Command::Slice {
+            start: -6,
+            end: None,
+            store: Some("result".to_string()),
+        };
+        exec.execute_one(&cmd).unwrap();
+        assert_eq!(exec.get_variable("result"), Some(&"World!".to_string()));
+
+        // Start at 0, end at -1 means everything except last char
+        let cmd2 = Command::Slice {
+            start: 0,
+            end: Some(-1),
+            store: Some("result2".to_string()),
+        };
+        exec.execute_one(&cmd2).unwrap();
+        assert_eq!(exec.get_variable("result2"), Some(&"Hello, World".to_string()));
+    }
+
+    #[test]
+    fn test_lines_negative_indices() {
+        let mut exec = CommandExecutor::new("line1\nline2\nline3\nline4\nline5".to_string(), 10);
+
+        // Get last 2 lines
+        let cmd = Command::Lines {
+            start: Some(-2),
+            end: None,
+            store: Some("result".to_string()),
+        };
+        exec.execute_one(&cmd).unwrap();
+        assert_eq!(exec.get_variable("result"), Some(&"line4\nline5".to_string()));
     }
 
     #[test]
