@@ -1,5 +1,25 @@
 # Local LLM Guide for RLM
 
+> **Note:** This project is implemented entirely in Rust. All tools, scripts, and experiments are Rust-based.
+
+## Quick Start with Scripts
+
+Use the helper scripts in `rlm-orchestrator/scripts/` for repeatable builds and runs:
+
+```bash
+# Build everything
+./scripts/build-all.sh
+
+# Start the server (requires DEEPSEEK_API_KEY env var)
+export DEEPSEEK_API_KEY=your-key
+./scripts/run-server.sh
+
+# In another terminal, run benchmark tests
+./scripts/run-benchmark-tests.sh
+```
+
+---
+
 ## Smart Bypass for Small Contexts
 
 RLM now automatically bypasses iteration for small contexts (< 4000 chars by default):
@@ -253,3 +273,74 @@ weight = 1
 
 For development/testing: DeepSeek API is cheapest and fastest.
 For production/privacy: Local 70B+ is viable with proper hardware.
+
+---
+
+## LiteLLM Proxy Support
+
+RLM supports [LiteLLM](https://litellm.ai) as an OpenAI-compatible proxy. This allows:
+- **Usage tracking** via LiteLLM dashboard
+- **Budget management** across multiple providers
+- **Provider fallback** when one service is down
+- **Unified API** to access 100+ LLM providers
+
+### Configuration
+
+```toml
+# config.toml
+[[providers]]
+provider_type = "litellm"
+base_url = "http://localhost:4000"  # LiteLLM proxy URL
+model = "deepseek-chat"             # Model name as configured in LiteLLM
+role = "root"
+weight = 1
+```
+
+### Environment Variables
+
+Set one of these for authentication:
+```bash
+export LITELLM_API_KEY=sk-...
+# or
+export LITELLM_MASTER_KEY=sk-...
+```
+
+### Quick Start: Using RLM with LiteLLM
+
+**Step 1: Start LiteLLM**
+```bash
+cd ~/github/softwarewrighter/emacs-ai-api/llm-gateway
+docker compose up -d litellm
+```
+
+**Step 2: Start RLM Server with LiteLLM**
+```bash
+cd ~/github/softwarewrighter/rlm-project/rlm-orchestrator
+./scripts/run-server-litellm.sh
+```
+
+**Step 3: View Usage**
+Open http://localhost:4000/ui → Login (admin / your LITELLM_MASTER_KEY) → Usage tab
+
+**Stop RLM Server:**
+```bash
+./scripts/stop-server.sh
+```
+
+### LiteLLM Configuration Example
+
+In your LiteLLM `config.yaml`:
+```yaml
+model_list:
+  - model_name: deepseek-chat
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+  - model_name: coding-best
+    litellm_params:
+      model: deepseek/deepseek-coder
+      api_key: os.environ/DEEPSEEK_API_KEY
+```
+
+This routes requests through LiteLLM, which tracks usage per model and user.

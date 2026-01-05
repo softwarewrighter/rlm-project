@@ -165,12 +165,10 @@ impl LlmPool {
                 }
                 eligible.first().map(|p| Arc::clone(&p.provider))
             }
-            LoadBalanceStrategy::LeastLatency => {
-                eligible
-                    .iter()
-                    .min_by_key(|p| p.stats.health_latency_ms.load(Ordering::Relaxed))
-                    .map(|p| Arc::clone(&p.provider))
-            }
+            LoadBalanceStrategy::LeastLatency => eligible
+                .iter()
+                .min_by_key(|p| p.stats.health_latency_ms.load(Ordering::Relaxed))
+                .map(|p| Arc::clone(&p.provider)),
         }
     }
 
@@ -187,10 +185,7 @@ impl LlmPool {
         }
         .ok_or_else(|| ProviderError::ConnectionError("No providers available".to_string()))?;
 
-        let stats = self
-            .stats_map
-            .get(provider.name())
-            .map(|s| Arc::clone(&s));
+        let stats = self.stats_map.get(provider.name()).map(|s| Arc::clone(&s));
 
         if let Some(ref stats) = stats {
             stats.requests.fetch_add(1, Ordering::Relaxed);
@@ -219,7 +214,10 @@ impl LlmPool {
     pub async fn health_check_all(&self) {
         for pooled in &self.providers {
             let status = pooled.provider.health_check().await;
-            pooled.stats.healthy.store(status.healthy, Ordering::Relaxed);
+            pooled
+                .stats
+                .healthy
+                .store(status.healthy, Ordering::Relaxed);
 
             if let Some(latency) = status.latency_ms {
                 pooled

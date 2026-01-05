@@ -16,12 +16,19 @@ path = "src/bin/server.rs"
 name = "rlm-test"
 path = "src/bin/test_runner.rs"
 
+[[bin]]
+name = "multi-source-experiment"
+path = "src/bin/multi_source_experiment.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
 # HTTP client for LLM APIs
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking"], default-features = false }
+
+# Hashing for cache keys
+md5 = "0.7"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

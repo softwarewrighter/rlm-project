@@ -148,12 +148,54 @@ fn generate_context(spec: &BenchmarkSpec) -> String {
             let dist = params.distribution.as_ref().expect("distribution required");
 
             let messages: HashMap<&str, Vec<&str>> = [
-                ("INFO", vec!["Request processed", "User logged in", "Cache hit", "Connected"]),
-                ("DEBUG", vec!["Variable x=42", "Entering process()", "Loop iter 5", "Memory 45%"]),
-                ("WARN", vec!["High memory", "Slow query: 2.5s", "Deprecated API", "Rate limit"]),
-                ("ERROR", vec!["Connection refused", "Query timeout", "Invalid input", "Auth failed"]),
-                ("FATAL", vec!["Out of memory", "DB unreachable", "Critical failure", "Shutdown"]),
-            ].into_iter().collect();
+                (
+                    "INFO",
+                    vec![
+                        "Request processed",
+                        "User logged in",
+                        "Cache hit",
+                        "Connected",
+                    ],
+                ),
+                (
+                    "DEBUG",
+                    vec![
+                        "Variable x=42",
+                        "Entering process()",
+                        "Loop iter 5",
+                        "Memory 45%",
+                    ],
+                ),
+                (
+                    "WARN",
+                    vec![
+                        "High memory",
+                        "Slow query: 2.5s",
+                        "Deprecated API",
+                        "Rate limit",
+                    ],
+                ),
+                (
+                    "ERROR",
+                    vec![
+                        "Connection refused",
+                        "Query timeout",
+                        "Invalid input",
+                        "Auth failed",
+                    ],
+                ),
+                (
+                    "FATAL",
+                    vec![
+                        "Out of memory",
+                        "DB unreachable",
+                        "Critical failure",
+                        "Shutdown",
+                    ],
+                ),
+            ]
+            .into_iter()
+            .collect();
 
             let default_msgs = vec!["Unknown event"];
             let mut entries = Vec::new();
@@ -185,24 +227,32 @@ fn check_match(actual: &str, expected: &serde_json::Value, match_type: &str) -> 
     let actual_lower = actual.to_lowercase();
 
     match match_type {
-        "exact" => {
-            expected.as_str().map(|e| actual.trim() == e.trim()).unwrap_or(false)
-        }
-        "contains" => {
-            expected.as_str().map(|e| actual_lower.contains(&e.to_lowercase())).unwrap_or(false)
-        }
-        "contains_all" => {
-            expected.as_array().map(|arr| {
+        "exact" => expected
+            .as_str()
+            .map(|e| actual.trim() == e.trim())
+            .unwrap_or(false),
+        "contains" => expected
+            .as_str()
+            .map(|e| actual_lower.contains(&e.to_lowercase()))
+            .unwrap_or(false),
+        "contains_all" => expected
+            .as_array()
+            .map(|arr| {
                 arr.iter().all(|e| {
-                    e.as_str().map(|s| actual_lower.contains(&s.to_lowercase())).unwrap_or(false)
+                    e.as_str()
+                        .map(|s| actual_lower.contains(&s.to_lowercase()))
+                        .unwrap_or(false)
                 })
-            }).unwrap_or(false)
-        }
-        "regex" => {
-            expected.as_str().and_then(|pattern| {
-                Regex::new(&format!("(?i){}", pattern)).ok().map(|re| re.is_match(actual))
-            }).unwrap_or(false)
-        }
+            })
+            .unwrap_or(false),
+        "regex" => expected
+            .as_str()
+            .and_then(|pattern| {
+                Regex::new(&format!("(?i){}", pattern))
+                    .ok()
+                    .map(|re| re.is_match(actual))
+            })
+            .unwrap_or(false),
         _ => false,
     }
 }
@@ -290,7 +340,11 @@ async fn run_test_suite(client: &Client, spec: BenchmarkSpec) -> Result<TestResu
     println!("\n{}", "=".repeat(70));
     println!("Test Suite: {}", spec.name);
     println!("Category: {}", spec.category);
-    println!("Context size: {} chars (~{} tokens)", context.len(), context.len() / 4);
+    println!(
+        "Context size: {} chars (~{} tokens)",
+        context.len(),
+        context.len() / 4
+    );
     println!("{}", "=".repeat(70));
 
     let mut results = Vec::new();
@@ -319,7 +373,8 @@ async fn run_test_suite(client: &Client, spec: BenchmarkSpec) -> Result<TestResu
             consecutive_errors = 0;
         }
 
-        let passed = metrics.error.is_none() && check_match(&metrics.answer, &q.expected, &q.match_type);
+        let passed =
+            metrics.error.is_none() && check_match(&metrics.answer, &q.expected, &q.match_type);
 
         let actual_display = if metrics.answer.len() > 200 {
             format!("{}...", &metrics.answer[..200])
@@ -342,8 +397,14 @@ async fn run_test_suite(client: &Client, spec: BenchmarkSpec) -> Result<TestResu
 
         if passed {
             let bypass_indicator = if metrics.bypassed { " [BYPASS]" } else { "" };
-            println!("  ✓ PASSED ({} iters, {:?}, {} tokens, {:.0}% saved){}",
-                metrics.iterations, metrics.latency, metrics.rlm_tokens, metrics.savings_pct, bypass_indicator);
+            println!(
+                "  ✓ PASSED ({} iters, {:?}, {} tokens, {:.0}% saved){}",
+                metrics.iterations,
+                metrics.latency,
+                metrics.rlm_tokens,
+                metrics.savings_pct,
+                bypass_indicator
+            );
         } else {
             println!("  ✗ FAILED");
             if let Some(ref err) = metrics.error {
@@ -368,7 +429,7 @@ async fn run_test_suite(client: &Client, spec: BenchmarkSpec) -> Result<TestResu
 
     let avg_latency = if total > 0 {
         Duration::from_nanos(
-            results.iter().map(|r| r.latency.as_nanos()).sum::<u128>() as u64 / total as u64
+            results.iter().map(|r| r.latency.as_nanos()).sum::<u128>() as u64 / total as u64,
         )
     } else {
         Duration::ZERO
@@ -431,7 +492,11 @@ async fn main() -> anyhow::Result<()> {
             println!("No test files matching '{}' found in {:?}", name, bench_dir);
             println!("\nAvailable tests:");
             for e in fs::read_dir(&bench_dir)?.flatten() {
-                if e.path().extension().map(|ext| ext == "json").unwrap_or(false) {
+                if e.path()
+                    .extension()
+                    .map(|ext| ext == "json")
+                    .unwrap_or(false)
+                {
                     println!("  - {}", e.path().file_stem().unwrap().to_string_lossy());
                 }
             }
@@ -469,15 +534,13 @@ async fn main() -> anyhow::Result<()> {
     for path in test_files {
         match fs::read_to_string(&path) {
             Ok(content) => match serde_json::from_str::<BenchmarkSpec>(&content) {
-                Ok(spec) => {
-                    match run_test_suite(&client, spec).await {
-                        Ok(result) => results.push(result),
-                        Err(e) => {
-                            eprintln!("\n❌ Test suite aborted: {}", e);
-                            std::process::exit(2);
-                        }
+                Ok(spec) => match run_test_suite(&client, spec).await {
+                    Ok(result) => results.push(result),
+                    Err(e) => {
+                        eprintln!("\n❌ Test suite aborted: {}", e);
+                        std::process::exit(2);
                     }
-                }
+                },
                 Err(e) => eprintln!("Error parsing {:?}: {}", path, e),
             },
             Err(e) => eprintln!("Error reading {:?}: {}", path, e),
@@ -501,8 +564,14 @@ async fn main() -> anyhow::Result<()> {
     for r in &results {
         println!(
             "{:<25} {:<5} {:<5} {:<6.1} {:<10.0?} {:<10} {:<10} {:.0}%",
-            r.name, r.passed, r.failed, r.avg_iterations, r.avg_latency,
-            r.total_rlm_tokens, r.total_baseline_tokens, r.avg_savings_pct
+            r.name,
+            r.passed,
+            r.failed,
+            r.avg_iterations,
+            r.avg_latency,
+            r.total_rlm_tokens,
+            r.total_baseline_tokens,
+            r.avg_savings_pct
         );
     }
 
@@ -520,9 +589,14 @@ async fn main() -> anyhow::Result<()> {
     );
 
     if !results.is_empty() {
-        let avg_iters: f64 = results.iter().map(|r| r.avg_iterations).sum::<f64>() / results.len() as f64;
+        let avg_iters: f64 =
+            results.iter().map(|r| r.avg_iterations).sum::<f64>() / results.len() as f64;
         let avg_lat = Duration::from_nanos(
-            results.iter().map(|r| r.avg_latency.as_nanos()).sum::<u128>() as u64 / results.len() as u64
+            results
+                .iter()
+                .map(|r| r.avg_latency.as_nanos())
+                .sum::<u128>() as u64
+                / results.len() as u64,
         );
         let total_rlm: u32 = results.iter().map(|r| r.total_rlm_tokens).sum();
         let total_baseline: u32 = results.iter().map(|r| r.total_baseline_tokens).sum();

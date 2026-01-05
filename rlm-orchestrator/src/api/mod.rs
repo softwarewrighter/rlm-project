@@ -25,6 +25,12 @@ pub struct QueryRequest {
     pub query: String,
     /// The context to analyze
     pub context: String,
+    /// Optional: Override root model (e.g., "glm-4.7", "deepseek-chat")
+    #[serde(default)]
+    pub root_model: Option<String>,
+    /// Optional: Override sub model (e.g., "local-sub", "manager-gemma9b")
+    #[serde(default)]
+    pub sub_model: Option<String>,
 }
 
 /// Response from a query
@@ -150,7 +156,11 @@ async fn process_query(
     State(state): State<Arc<ApiState>>,
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, (StatusCode, String)> {
-    match state.orchestrator.process(&request.query, &request.context).await {
+    match state
+        .orchestrator
+        .process(&request.query, &request.context)
+        .await
+    {
         Ok(result) => Ok(Json(result.into())),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
@@ -164,7 +174,11 @@ async fn debug_query(
     let context_length = request.context.len();
     let query = request.query.clone();
 
-    match state.orchestrator.process(&request.query, &request.context).await {
+    match state
+        .orchestrator
+        .process(&request.query, &request.context)
+        .await
+    {
         Ok(result) => {
             // Estimate baseline tokens: ~1 token per 4 chars for context + query overhead
             let baseline_tokens = (context_length as u32 / 4) + 200; // 200 for query/system prompt

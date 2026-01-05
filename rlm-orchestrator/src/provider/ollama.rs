@@ -106,12 +106,7 @@ impl LlmProvider for OllamaProvider {
 
         let start = Instant::now();
 
-        let response = self
-            .client
-            .post(&url)
-            .json(&ollama_request)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&ollama_request).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -125,11 +120,15 @@ impl LlmProvider for OllamaProvider {
         let ollama_response: OllamaResponse = response.json().await?;
 
         // Use Ollama's reported duration (nanoseconds) or fall back to our measurement
-        let duration_ms = ollama_response.total_duration
+        let duration_ms = ollama_response
+            .total_duration
             .map(|ns| ns / 1_000_000)
             .unwrap_or_else(|| start.elapsed().as_millis() as u64);
 
-        let usage = match (ollama_response.prompt_eval_count, ollama_response.eval_count) {
+        let usage = match (
+            ollama_response.prompt_eval_count,
+            ollama_response.eval_count,
+        ) {
             (Some(prompt), Some(completion)) => Some(TokenUsage {
                 prompt_tokens: prompt,
                 completion_tokens: completion,

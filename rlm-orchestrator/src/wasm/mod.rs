@@ -46,9 +46,9 @@ pub struct WasmConfig {
 impl Default for WasmConfig {
     fn default() -> Self {
         Self {
-            fuel_limit: 1_000_000,        // 1M instructions
+            fuel_limit: 1_000_000,          // 1M instructions
             memory_limit: 64 * 1024 * 1024, // 64MB
-            timeout_ms: 5000,             // 5 seconds
+            timeout_ms: 5000,               // 5 seconds
         }
     }
 }
@@ -65,8 +65,8 @@ impl WasmExecutor {
         let mut engine_config = Config::new();
         engine_config.consume_fuel(true);
 
-        let engine = Engine::new(&engine_config)
-            .map_err(|e| WasmError::CompileError(e.to_string()))?;
+        let engine =
+            Engine::new(&engine_config).map_err(|e| WasmError::CompileError(e.to_string()))?;
 
         Ok(Self { engine, config })
     }
@@ -92,7 +92,9 @@ impl WasmExecutor {
     ) -> Result<String, WasmError> {
         // Create a store with fuel limit
         let mut store = Store::new(&self.engine, ());
-        store.set_fuel(self.config.fuel_limit).map_err(|e| WasmError::ExecutionError(e.to_string()))?;
+        store
+            .set_fuel(self.config.fuel_limit)
+            .map_err(|e| WasmError::ExecutionError(e.to_string()))?;
 
         // Compile the module
         let module = Module::new(&self.engine, wasm_bytes)
@@ -153,8 +155,14 @@ impl WasmExecutor {
             })?;
 
         // Get result
-        let result_ptr = get_result_ptr.call(&mut store, ()).map_err(|e| WasmError::ExecutionError(e.to_string()))? as usize;
-        let result_len = get_result_len.call(&mut store, ()).map_err(|e| WasmError::ExecutionError(e.to_string()))? as usize;
+        let result_ptr = get_result_ptr
+            .call(&mut store, ())
+            .map_err(|e| WasmError::ExecutionError(e.to_string()))?
+            as usize;
+        let result_len = get_result_len
+            .call(&mut store, ())
+            .map_err(|e| WasmError::ExecutionError(e.to_string()))?
+            as usize;
 
         // Read result from memory
         let mut result_bytes = vec![0u8; result_len];
@@ -168,11 +176,7 @@ impl WasmExecutor {
 
     /// Execute a simple expression-like WASM module
     /// This is a simpler API for basic operations
-    pub fn execute_simple(
-        &self,
-        wasm_bytes: &[u8],
-        context: &str,
-    ) -> Result<String, WasmError> {
+    pub fn execute_simple(&self, wasm_bytes: &[u8], context: &str) -> Result<String, WasmError> {
         self.execute(wasm_bytes, "analyze", context)
     }
 

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use rlm::api::{create_router, ApiState};
 use rlm::orchestrator::RlmOrchestrator;
 use rlm::pool::{LlmPool, LoadBalanceStrategy, ProviderRole};
-use rlm::provider::{DeepSeekProvider, OllamaProvider};
+use rlm::provider::{DeepSeekProvider, LiteLLMProvider, OllamaProvider};
 use rlm::RlmConfig;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -50,10 +50,8 @@ async fn main() -> Result<()> {
 
         match provider_config.provider_type.as_str() {
             "ollama" => {
-                let provider = OllamaProvider::new(
-                    &provider_config.base_url,
-                    &provider_config.model,
-                );
+                let provider =
+                    OllamaProvider::new(&provider_config.base_url, &provider_config.model);
                 info!(
                     provider = "ollama",
                     model = provider_config.model,
@@ -61,15 +59,13 @@ async fn main() -> Result<()> {
                     role = ?role,
                     "Added Ollama provider"
                 );
-                pool.add_provider(
-                    Arc::new(provider),
-                    provider_config.weight,
-                    role,
-                );
+                pool.add_provider(Arc::new(provider), provider_config.weight, role);
                 provider_count += 1;
             }
             "deepseek" => {
-                let api_key = provider_config.api_key.clone()
+                let api_key = provider_config
+                    .api_key
+                    .clone()
                     .or_else(|| deepseek_key.clone());
 
                 if let Some(key) = api_key {
@@ -80,14 +76,38 @@ async fn main() -> Result<()> {
                         role = ?role,
                         "Added DeepSeek provider"
                     );
-                    pool.add_provider(
-                        Arc::new(provider),
-                        provider_config.weight,
-                        role,
-                    );
+                    pool.add_provider(Arc::new(provider), provider_config.weight, role);
                     provider_count += 1;
                 } else {
-                    warn!("DeepSeek provider configured but no API key found (set DEEPSEEK_API_KEY)");
+                    warn!(
+                        "DeepSeek provider configured but no API key found (set DEEPSEEK_API_KEY)"
+                    );
+                }
+            }
+            "litellm" => {
+                let api_key = provider_config
+                    .api_key
+                    .clone()
+                    .or_else(|| std::env::var("LITELLM_API_KEY").ok())
+                    .or_else(|| std::env::var("LITELLM_MASTER_KEY").ok());
+
+                if let Some(key) = api_key {
+                    let provider = LiteLLMProvider::with_base_url(
+                        &provider_config.base_url,
+                        &key,
+                        &provider_config.model,
+                    );
+                    info!(
+                        provider = "litellm",
+                        model = provider_config.model,
+                        base_url = provider_config.base_url,
+                        role = ?role,
+                        "Added LiteLLM provider"
+                    );
+                    pool.add_provider(Arc::new(provider), provider_config.weight, role);
+                    provider_count += 1;
+                } else {
+                    warn!("LiteLLM provider configured but no API key found (set LITELLM_API_KEY or LITELLM_MASTER_KEY)");
                 }
             }
             _ => {

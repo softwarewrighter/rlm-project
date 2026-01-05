@@ -1,6 +1,8 @@
 //! RLM orchestration logic
 
-use crate::commands::{extract_commands, extract_final, CommandExecutor, ExecutionResult, LlmQueryCallback};
+use crate::commands::{
+    extract_commands, extract_final, CommandExecutor, ExecutionResult, LlmQueryCallback,
+};
 use crate::pool::LlmPool;
 use crate::provider::{LlmRequest, ProviderError};
 use crate::RlmConfig;
@@ -113,10 +115,8 @@ impl RlmOrchestrator {
             // Use block_in_place to allow blocking within the async runtime
             let result = tokio::task::block_in_place(|| {
                 handle.block_on(async {
-                    let request = LlmRequest::new(
-                        "You are a helpful assistant. Answer concisely.",
-                        &prompt,
-                    );
+                    let request =
+                        LlmRequest::new("You are a helpful assistant. Answer concisely.", &prompt);
                     pool.complete(&request, true).await
                 })
             });
@@ -225,10 +225,14 @@ impl RlmOrchestrator {
             let response = self.pool.complete(&request, false).await?;
 
             // Track token usage
-            let iter_tokens = response.usage.as_ref().map(|u| IterationTokens {
-                prompt_tokens: u.prompt_tokens,
-                completion_tokens: u.completion_tokens,
-            }).unwrap_or_default();
+            let iter_tokens = response
+                .usage
+                .as_ref()
+                .map(|u| IterationTokens {
+                    prompt_tokens: u.prompt_tokens,
+                    completion_tokens: u.completion_tokens,
+                })
+                .unwrap_or_default();
             total_prompt_tokens += iter_tokens.prompt_tokens;
             total_completion_tokens += iter_tokens.completion_tokens;
 
@@ -331,7 +335,10 @@ impl RlmOrchestrator {
             history,
             total_sub_calls: total_sub_calls.load(Ordering::Relaxed),
             success: false,
-            error: Some(format!("Max iterations ({}) exceeded", self.config.max_iterations)),
+            error: Some(format!(
+                "Max iterations ({}) exceeded",
+                self.config.max_iterations
+            )),
             total_prompt_tokens,
             total_completion_tokens,
             context_chars,
@@ -439,7 +446,9 @@ Use ${{var}} or $var in strings to reference stored variables.
                     prompt.push_str(&format!("(Made {} sub-LM calls)\n", record.sub_calls));
                 }
             }
-            prompt.push_str("\nContinue analysis. Use {{\"op\": \"final\", \"answer\": \"...\"}} when done.\n");
+            prompt.push_str(
+                "\nContinue analysis. Use {{\"op\": \"final\", \"answer\": \"...\"}} when done.\n",
+            );
         }
 
         prompt

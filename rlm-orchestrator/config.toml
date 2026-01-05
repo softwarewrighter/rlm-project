@@ -17,6 +17,15 @@ model = "deepseek-chat"
 role = "root"
 weight = 1
 
+# LiteLLM Proxy for root LLM (alternative - for usage tracking via LiteLLM dashboard)
+# Requires LITELLM_API_KEY or LITELLM_MASTER_KEY env var
+# [[providers]]
+# provider_type = "litellm"
+# base_url = "http://localhost:4000"
+# model = "deepseek-chat"  # or any model configured in LiteLLM
+# role = "root"
+# weight = 1
+
 # Local Ollama for root LLM (uncomment for testing without API key)
 # [[providers]]
 # provider_type = "ollama"
@@ -25,11 +34,11 @@ weight = 1
 # role = "root"
 # weight = 1
 
-# Local Ollama for sub-LM calls
+# Local Ollama for sub-LM calls (testing 9B model)
 [[providers]]
 provider_type = "ollama"
 base_url = "http://localhost:11434"
-model = "qwen2.5-coder:14b"
+model = "gemma2:9b"
 role = "sub"
 weight = 1
 

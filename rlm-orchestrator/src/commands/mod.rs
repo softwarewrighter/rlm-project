@@ -27,7 +27,11 @@ pub enum CommandError {
     VariableNotFound(String),
 
     #[error("Invalid slice range: {start}..{end} for length {len}")]
-    InvalidSlice { start: usize, end: usize, len: usize },
+    InvalidSlice {
+        start: usize,
+        end: usize,
+        len: usize,
+    },
 
     #[error("LLM query failed: {0}")]
     LlmError(String),
@@ -187,15 +191,9 @@ pub enum CountTarget {
 #[derive(Debug)]
 pub enum ExecutionResult {
     /// Continue executing more commands
-    Continue {
-        output: String,
-        sub_calls: usize,
-    },
+    Continue { output: String, sub_calls: usize },
     /// Final answer reached
-    Final {
-        answer: String,
-        sub_calls: usize,
-    },
+    Final { answer: String, sub_calls: usize },
 }
 
 /// Callback type for llm_query
@@ -317,7 +315,10 @@ impl CommandExecutor {
     }
 
     /// Execute a sequence of commands
-    pub fn execute_commands(&mut self, commands: &[Command]) -> Result<ExecutionResult, CommandError> {
+    pub fn execute_commands(
+        &mut self,
+        commands: &[Command],
+    ) -> Result<ExecutionResult, CommandError> {
         let mut output = String::new();
         let initial_sub_calls = self.sub_calls;
 
@@ -352,7 +353,9 @@ impl CommandExecutor {
             Command::Slice { start, end, store } => {
                 let len = self.context.len();
                 let start_idx = Self::resolve_index(*start, len).unwrap_or(0);
-                let end_idx = end.map(|e| Self::resolve_index(e, len).unwrap_or(len)).unwrap_or(len);
+                let end_idx = end
+                    .map(|e| Self::resolve_index(e, len).unwrap_or(len))
+                    .unwrap_or(len);
 
                 // Ensure start <= end
                 let (start_idx, end_idx) = if start_idx > end_idx {
@@ -372,8 +375,12 @@ impl CommandExecutor {
             Command::Lines { start, end, store } => {
                 let lines: Vec<&str> = self.context.lines().collect();
                 let len = lines.len();
-                let start_idx = start.map(|s| Self::resolve_index(s, len).unwrap_or(0)).unwrap_or(0);
-                let end_idx = end.map(|e| Self::resolve_index(e, len).unwrap_or(len)).unwrap_or(len);
+                let start_idx = start
+                    .map(|s| Self::resolve_index(s, len).unwrap_or(0))
+                    .unwrap_or(0);
+                let end_idx = end
+                    .map(|e| Self::resolve_index(e, len).unwrap_or(len))
+                    .unwrap_or(len);
 
                 // Ensure start <= end
                 let (start_idx, end_idx) = if start_idx > end_idx {
@@ -435,7 +442,11 @@ impl CommandExecutor {
                 })
             }
 
-            Command::Split { delimiter, on, store } => {
+            Command::Split {
+                delimiter,
+                on,
+                store,
+            } => {
                 let source = self.resolve_source(on)?.to_string();
                 let parts: Vec<&str> = source.split(delimiter.as_str()).collect();
                 let part_count = parts.len();
@@ -501,10 +512,9 @@ impl CommandExecutor {
                     return Err(CommandError::MaxSubCalls(self.max_sub_calls));
                 }
 
-                let callback = self
-                    .llm_callback
-                    .as_ref()
-                    .ok_or_else(|| CommandError::LlmError("No LLM callback configured".to_string()))?;
+                let callback = self.llm_callback.as_ref().ok_or_else(|| {
+                    CommandError::LlmError("No LLM callback configured".to_string())
+                })?;
 
                 let expanded_prompt = self.expand_vars(prompt);
                 let result = callback(&expanded_prompt).map_err(CommandError::LlmError)?;
@@ -538,13 +548,21 @@ impl CommandExecutor {
                 })
             }
 
-            Command::Wasm { module, function, on, store } => {
-                let executor = self.wasm_executor.as_ref()
-                    .ok_or_else(|| CommandError::WasmError(
-                        crate::wasm::WasmError::CompileError("WASM not available".to_string())
-                    ))?;
+            Command::Wasm {
+                module,
+                function,
+                on,
+                store,
+            } => {
+                let executor = self.wasm_executor.as_ref().ok_or_else(|| {
+                    CommandError::WasmError(crate::wasm::WasmError::CompileError(
+                        "WASM not available".to_string(),
+                    ))
+                })?;
 
-                let wasm_bytes = self.wasm_library.get(module)
+                let wasm_bytes = self
+                    .wasm_library
+                    .get(module)
                     .ok_or_else(|| CommandError::WasmModuleNotFound(module.clone()))?;
 
                 let source = self.resolve_source(on)?.to_string();
@@ -557,11 +575,17 @@ impl CommandExecutor {
                 })
             }
 
-            Command::WasmWat { wat, function, on, store } => {
-                let executor = self.wasm_executor.as_ref()
-                    .ok_or_else(|| CommandError::WasmError(
-                        crate::wasm::WasmError::CompileError("WASM not available".to_string())
-                    ))?;
+            Command::WasmWat {
+                wat,
+                function,
+                on,
+                store,
+            } => {
+                let executor = self.wasm_executor.as_ref().ok_or_else(|| {
+                    CommandError::WasmError(crate::wasm::WasmError::CompileError(
+                        "WASM not available".to_string(),
+                    ))
+                })?;
 
                 let wasm_bytes = executor.compile_wat(wat)?;
                 let source = self.resolve_source(on)?.to_string();
@@ -721,7 +745,10 @@ mod tests {
             store: Some("result2".to_string()),
         };
         exec.execute_one(&cmd2).unwrap();
-        assert_eq!(exec.get_variable("result2"), Some(&"Hello, World".to_string()));
+        assert_eq!(
+            exec.get_variable("result2"),
+            Some(&"Hello, World".to_string())
+        );
     }
 
     #[test]
@@ -735,7 +762,10 @@ mod tests {
             store: Some("result".to_string()),
         };
         exec.execute_one(&cmd).unwrap();
-        assert_eq!(exec.get_variable("result"), Some(&"line4\nline5".to_string()));
+        assert_eq!(
+            exec.get_variable("result"),
+            Some(&"line4\nline5".to_string())
+        );
     }
 
     #[test]
@@ -767,7 +797,8 @@ mod tests {
     #[test]
     fn test_variable_expansion() {
         let mut exec = CommandExecutor::new("test".to_string(), 10);
-        exec.variables.insert("name".to_string(), "World".to_string());
+        exec.variables
+            .insert("name".to_string(), "World".to_string());
         let expanded = exec.expand_vars("Hello, ${name}!");
         assert_eq!(expanded, "Hello, World!");
     }

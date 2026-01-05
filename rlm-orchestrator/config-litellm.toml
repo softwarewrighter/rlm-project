@@ -1,0 +1,32 @@
+# RLM Orchestrator Configuration - LiteLLM Proxy
+#
+# Use this config to route through LiteLLM for usage tracking.
+# Requires LITELLM_API_KEY or LITELLM_MASTER_KEY env var.
+#
+# Usage:
+#   export LITELLM_API_KEY=sk-...
+#   ./target/release/rlm-server config-litellm.toml
+
+max_iterations = 20
+max_sub_calls = 50
+output_limit = 10000
+
+# Smart bypass: skip RLM for small contexts
+bypass_enabled = true
+bypass_threshold = 4000
+
+# LiteLLM Proxy for root LLM (usage tracked via LiteLLM dashboard)
+[[providers]]
+provider_type = "litellm"
+base_url = "http://localhost:4000"
+model = "deepseek-chat"
+role = "root"
+weight = 1
+
+# Local Ollama for sub-LM calls (free, no tracking needed)
+[[providers]]
+provider_type = "ollama"
+base_url = "http://localhost:11434"
+model = "gemma2:9b"
+role = "sub"
+weight = 1

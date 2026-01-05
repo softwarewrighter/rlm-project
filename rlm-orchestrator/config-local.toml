@@ -1,0 +1,34 @@
+# RLM Orchestrator Configuration - Local Only (No Cloud)
+#
+# Uses LiteLLM to route to LAN Ollama servers with load balancing.
+# All usage tracked via LiteLLM dashboard.
+#
+# Available servers: manager, big72, curiosity, hive
+# LiteLLM handles failover if a server is unavailable.
+#
+# Usage:
+#   ./scripts/run-server-local.sh
+
+max_iterations = 20
+max_sub_calls = 50
+output_limit = 10000
+
+# Smart bypass: skip RLM for small contexts
+bypass_enabled = true
+bypass_threshold = 4000
+
+# Root LLM via LiteLLM - load balanced across LAN (qwen2.5-coder:14b)
+[[providers]]
+provider_type = "litellm"
+base_url = "http://localhost:4000"
+model = "local-root"
+role = "root"
+weight = 1
+
+# Sub LLM via LiteLLM - load balanced across LAN (gemma2:9b, mistral:7b)
+[[providers]]
+provider_type = "litellm"
+base_url = "http://localhost:4000"
+model = "local-sub"
+role = "sub"
+weight = 1

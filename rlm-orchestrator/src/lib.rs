@@ -6,16 +6,16 @@
 //! - Structured command execution (pure Rust, no Python dependency)
 //! - REST API for external integration
 
-pub mod provider;
-pub mod pool;
+pub mod api;
 pub mod commands;
 pub mod orchestrator;
-pub mod api;
+pub mod pool;
+pub mod provider;
 pub mod wasm;
 
 pub use orchestrator::RlmOrchestrator;
-pub use provider::{LlmProvider, LlmRequest, LlmResponse};
 pub use pool::LlmPool;
+pub use provider::{LlmProvider, LlmRequest, LlmResponse};
 
 /// Configuration for the RLM system
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -46,11 +46,21 @@ pub struct RlmConfig {
     pub providers: Vec<ProviderConfig>,
 }
 
-fn default_max_iterations() -> usize { 20 }
-fn default_max_sub_calls() -> usize { 50 }
-fn default_output_limit() -> usize { 10000 }
-fn default_bypass_enabled() -> bool { true }
-fn default_bypass_threshold() -> usize { 4000 }
+fn default_max_iterations() -> usize {
+    20
+}
+fn default_max_sub_calls() -> usize {
+    50
+}
+fn default_output_limit() -> usize {
+    10000
+}
+fn default_bypass_enabled() -> bool {
+    true
+}
+fn default_bypass_threshold() -> usize {
+    4000
+}
 
 /// Configuration for a single LLM provider
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -76,5 +86,9 @@ pub struct ProviderConfig {
     pub role: String,
 }
 
-fn default_weight() -> u32 { 1 }
-fn default_role() -> String { "both".to_string() }
+fn default_weight() -> u32 {
+    1
+}
+fn default_role() -> String {
+    "both".to_string()
+}

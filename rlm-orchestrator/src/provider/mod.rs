@@ -1,10 +1,12 @@
 //! LLM Provider abstraction and implementations
 
-mod ollama;
 mod deepseek;
+mod litellm;
+mod ollama;
 
-pub use ollama::OllamaProvider;
 pub use deepseek::DeepSeekProvider;
+pub use litellm::LiteLLMProvider;
+pub use ollama::OllamaProvider;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

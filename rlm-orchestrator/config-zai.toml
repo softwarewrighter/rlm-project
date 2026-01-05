@@ -1,0 +1,37 @@
+# RLM Orchestrator Configuration - Z.ai GLM-4.7
+#
+# Uses Z.ai GLM-4.7 as root LLM (quota-based, not per-token)
+# Local models for sub-calls via LiteLLM
+#
+# GLM-4.7 features:
+# - 200K context window
+# - 128K output capacity
+# - MoE architecture with "Vibe Coding" capabilities
+# - Quota-based pricing (daily limits, not per-token)
+#
+# Usage:
+#   ./scripts/run-server-zai.sh
+
+max_iterations = 20
+max_sub_calls = 50
+output_limit = 10000
+
+# Smart bypass: skip RLM for small contexts
+bypass_enabled = true
+bypass_threshold = 4000
+
+# Z.ai GLM-4.7 for root LLM (quota-based, effectively free)
+[[providers]]
+provider_type = "litellm"
+base_url = "http://localhost:4000"
+model = "glm-4.7"
+role = "root"
+weight = 1
+
+# Local models for sub-calls via LiteLLM (free, tracked)
+[[providers]]
+provider_type = "litellm"
+base_url = "http://localhost:4000"
+model = "local-sub"
+role = "sub"
+weight = 1
