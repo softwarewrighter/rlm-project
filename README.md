@@ -1,136 +1,163 @@
-# RLM - Recursive Language Models Implementation
+# RLM - Recursive Language Models
 
 A practical implementation of Recursive Language Models based on the paper ["Recursive Language Models"](https://arxiv.org/html/2512.24601v1) by Zhang, Kraska, and Khattab (MIT CSAIL).
 
-## Overview
+## What is RLM?
 
-RLM is an inference strategy that allows LLMs to process arbitrarily long contexts by:
-1. Treating prompts as external variables in a REPL environment
-2. Letting the LLM write code to examine, filter, and chunk the context
-3. Providing recursive sub-LM calls for semantic analysis
-4. Aggregating results to produce final answers
+RLM is an inference strategy that allows LLMs to process **arbitrarily long contexts** by:
 
-This approach handles inputs **2 orders of magnitude beyond model context windows** while maintaining comparable or lower costs.
+1. Having the LLM output structured commands to examine context
+2. Executing those commands and returning results
+3. Iterating until the LLM reaches a final answer
+4. Using sub-LM calls for semantic analysis of chunks
 
-## Contents
+This handles inputs **2 orders of magnitude beyond model context windows**.
 
-```
-rlm-project/
-├── README.md                      # This file
-├── DISCUSSION.md                  # Full conversation transcript
-├── docs/
-│   ├── rlm-eli5.md               # ELI5 explanation with analogies
-│   ├── rlm-orchestrator-architecture.md  # Full Rust architecture
-│   └── optimizing.md             # Parallelism & dogfooding guide
-├── src/
-│   ├── rlm.py                    # Working Python implementation
-│   └── rlm-wrapper.sh            # Shell wrapper for multiple CLIs
-└── config/
-    └── example.toml              # Example configuration
-```
-
-## Quick Start
-
-### Prerequisites
-
-```bash
-# Python dependencies
-pip install httpx rich typer pydantic --break-system-packages
-
-# Ensure Ollama is running
-ollama serve
-ollama pull qwen2.5-coder:32b  # or your preferred model
-```
-
-### Basic Usage
-
-```bash
-# Simple query with local Ollama
-python src/rlm.py \
-  --query "Find all function definitions" \
-  --context-file ./your_codebase.py
-
-# With DeepSeek API
-export DEEPSEEK_API_KEY="your-key"
-python src/rlm.py \
-  --query "Summarize this document" \
-  --context-file large_doc.txt \
-  --provider deepseek
-
-# Using the shell wrapper
-./src/rlm-wrapper.sh \
-  --query "Find security issues" \
-  --context ./src \
-  --cli ollama
-```
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OLLAMA_HOST` | Ollama server hostname | `localhost` |
-| `OLLAMA_PORT` | Ollama server port | `11434` |
-| `OLLAMA_MODEL` | Default model | `qwen2.5-coder:32b` |
-| `DEEPSEEK_API_KEY` | DeepSeek API key | - |
-| `ANTHROPIC_API_KEY` | Claude API key | - |
-
-## Implementation Options
-
-| Option | Best For | Setup Time |
-|--------|----------|------------|
-| **Python + Ollama** | Learning, quick experiments | 10 minutes |
-| **Shell Wrapper** | Integration with existing CLIs | 5 minutes |
-| **Rust Orchestrator** | Production, high performance | 2-4 weeks |
-| **MCP Server** | Claude Code integration | 1-2 days |
-
-See `docs/rlm-eli5.md` for detailed pros/cons of each approach.
-
-## Architecture Highlights
-
-### Parallel Sub-LM Dispatch
-Process multiple context chunks simultaneously across distributed GPU servers.
-
-### Speculative Execution
-Predict and prefetch likely-needed data while the root LLM is thinking.
-
-### Semantic Caching
-Cache not just exact matches but semantically similar queries using embeddings.
-
-### Dogfooding
-The tool can analyze and improve its own codebase through iterative cycles.
-
-See `docs/optimizing.md` for complete optimization strategies.
-
-## Hardware Recommendations
-
-For optimal performance with the Rust implementation:
-
-| Component | Recommendation |
-|-----------|----------------|
-| CPU | Dual Xeon (48-72 threads) |
-| RAM | 256GB+ DDR4/DDR5 |
-| GPU | Multiple servers with M40/RTX/P100 |
-| Storage | NVMe for context caching |
+> **New to RLM?** Start with [docs/beginners/](docs/beginners/) for gentle introductions.
 
 ## Project Status
 
-- ✅ Python implementation (working)
-- ✅ Shell wrapper (working)
-- 📋 Rust orchestrator (architecture documented)
-- 📋 MCP server (design documented)
-- 📋 Emacs integration (elisp documented)
+| Component | Status | Description |
+|-----------|--------|-------------|
+| **Rust Orchestrator** | ✅ Working | Pure Rust, structured JSON commands |
+| **Visualizer** | ✅ Working | Interactive HTML at `/visualize` |
+| **Python Implementation** | ✅ Working | Reference implementation |
+| **Multi-Provider** | ✅ Working | DeepSeek, Ollama (local/remote) |
+
+## Quick Start
+
+### Option 1: Rust Server (Recommended)
+
+```bash
+cd rlm-orchestrator
+
+# Configure providers in config.toml
+# Set API key if using DeepSeek
+export DEEPSEEK_API_KEY="your-key"
+
+# Run the server
+cargo run --bin rlm-server
+
+# Open visualizer
+open http://localhost:8080/visualize
+
+# Or use the API
+curl -X POST http://localhost:8080/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "How many errors?", "context": "Line 1: OK\nLine 2: ERROR\nLine 3: OK"}'
+```
+
+### Option 2: Python CLI
+
+```bash
+# Install dependencies
+pip install httpx rich typer pydantic
+
+# Run with Ollama
+python src/rlm.py \
+  --query "Find all function definitions" \
+  --context-file ./code.py
+
+# Run with DeepSeek
+export DEEPSEEK_API_KEY="your-key"
+python src/rlm.py \
+  --query "Summarize this" \
+  --context-file doc.txt \
+  --provider deepseek
+```
+
+## Documentation
+
+### For Beginners
+- [docs/beginners/what-is-rlm.md](docs/beginners/what-is-rlm.md) - What RLM is and why it matters
+- [docs/beginners/how-it-works.md](docs/beginners/how-it-works.md) - Step-by-step walkthrough
+- [docs/beginners/getting-started.md](docs/beginners/getting-started.md) - Your first RLM query
+
+### Technical Documentation
+- [docs/architecture.md](docs/architecture.md) - Rust orchestrator design
+- [docs/commands.md](docs/commands.md) - Available JSON commands
+- [docs/visualizer.md](docs/visualizer.md) - Using the web visualizer
+- [docs/optimizing.md](docs/optimizing.md) - Performance optimization
+
+### Reference
+- [docs/api.md](docs/api.md) - REST API reference
+- [docs/config.md](docs/config.md) - Configuration options
+
+## Architecture
+
+```
+┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
+│   Client    │────▶│  RLM Server     │────▶│  Root LLM   │
+│  /visualize │     │  (Rust/Axum)    │     │  (DeepSeek) │
+└─────────────┘     └────────┬────────┘     └─────────────┘
+                             │
+                    ┌────────▼────────┐
+                    │ Command Executor │
+                    │  slice, find,   │
+                    │  regex, count,  │
+                    │  llm_query...   │
+                    └────────┬────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+        ┌──────────┐  ┌──────────┐  ┌──────────┐
+        │ Ollama   │  │ Ollama   │  │ Ollama   │
+        │ (local)  │  │ (big72)  │  │ (other)  │
+        └──────────┘  └──────────┘  └──────────┘
+              Sub-LM Pool (for llm_query)
+```
+
+## Available Commands
+
+The LLM outputs JSON commands that the executor runs:
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `slice` | Get character range | `{"op": "slice", "start": 0, "end": 1000}` |
+| `lines` | Get line range | `{"op": "lines", "start": 0, "end": 50}` |
+| `find` | Find text occurrences | `{"op": "find", "text": "ERROR"}` |
+| `regex` | Regex search | `{"op": "regex", "pattern": "def \\w+"}` |
+| `count` | Count lines/chars/matches | `{"op": "count", "what": "matches"}` |
+| `llm_query` | Sub-LM semantic call | `{"op": "llm_query", "prompt": "Summarize: ${chunk}"}` |
+| `final` | Return answer | `{"op": "final", "answer": "Found 3 errors"}` |
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/query` | POST | Simple query → answer |
+| `/debug` | POST | Full iteration history |
+| `/visualize` | GET | Interactive HTML visualizer |
+
+## Configuration
+
+Edit `rlm-orchestrator/config.toml`:
+
+```toml
+max_iterations = 20
+max_sub_calls = 50
+
+# Root LLM (smart, for orchestration)
+[[providers]]
+provider_type = "deepseek"  # or "ollama"
+model = "deepseek-chat"
+role = "root"
+
+# Sub LLM (fast, for llm_query)
+[[providers]]
+provider_type = "ollama"
+base_url = "http://localhost:11434"
+model = "qwen2.5-coder:14b"
+role = "sub"
+```
+
+## License
+
+MIT License
 
 ## References
 
 - [Recursive Language Models Paper](https://arxiv.org/html/2512.24601v1)
 - [Ollama](https://ollama.ai)
 - [DeepSeek API](https://platform.deepseek.com)
-- [Claude Code](https://claude.ai/code)
-
-## License
-
-MIT License - See individual files for details.
-
-## Contributing
-
-This project uses dogfooding - the RLM tool helps improve itself! See `docs/optimizing.md` for the dogfooding methodology.
