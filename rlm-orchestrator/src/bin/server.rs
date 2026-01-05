@@ -1,64 +1,106 @@
 //! RLM Server binary
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rlm::api::{create_router, ApiState};
 use rlm::orchestrator::RlmOrchestrator;
 use rlm::pool::{LlmPool, LoadBalanceStrategy, ProviderRole};
-use rlm::provider::OllamaProvider;
-use rlm::{ProviderConfig, RlmConfig};
+use rlm::provider::{DeepSeekProvider, OllamaProvider};
+use rlm::RlmConfig;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{info, Level};
+use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
+        .with_max_level(Level::DEBUG)
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
     info!("Starting RLM Server v{}", env!("CARGO_PKG_VERSION"));
 
-    // TODO: Load config from file
-    let config = RlmConfig {
-        max_iterations: 20,
-        max_sub_calls: 50,
-        output_limit: 10000,
-        providers: vec![ProviderConfig {
-            provider_type: "ollama".to_string(),
-            base_url: "http://localhost:11434".to_string(),
-            model: "qwen2.5-coder:14b".to_string(),
-            api_key: None,
-            weight: 1,
-            role: "both".to_string(),
-        }],
-    };
+    // Load config from file
+    let config_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "config.toml".to_string());
+
+    let config_contents = std::fs::read_to_string(&config_path)
+        .with_context(|| format!("Failed to read config file: {}", config_path))?;
+
+    let config: RlmConfig = toml::from_str(&config_contents)
+        .with_context(|| format!("Failed to parse config file: {}", config_path))?;
+
+    info!(
+        config_path = config_path,
+        providers = config.providers.len(),
+        "Loaded configuration"
+    );
+
+    // Get DeepSeek API key from environment
+    let deepseek_key = std::env::var("DEEPSEEK_API_KEY").ok();
 
     // Create the pool
     let mut pool = LlmPool::new(LoadBalanceStrategy::RoundRobin);
+    let mut provider_count = 0;
 
     for provider_config in &config.providers {
+        let role = ProviderRole::from(provider_config.role.as_str());
+
         match provider_config.provider_type.as_str() {
             "ollama" => {
                 let provider = OllamaProvider::new(
                     &provider_config.base_url,
                     &provider_config.model,
                 );
+                info!(
+                    provider = "ollama",
+                    model = provider_config.model,
+                    base_url = provider_config.base_url,
+                    role = ?role,
+                    "Added Ollama provider"
+                );
                 pool.add_provider(
                     Arc::new(provider),
                     provider_config.weight,
-                    ProviderRole::from(provider_config.role.as_str()),
+                    role,
                 );
+                provider_count += 1;
+            }
+            "deepseek" => {
+                let api_key = provider_config.api_key.clone()
+                    .or_else(|| deepseek_key.clone());
+
+                if let Some(key) = api_key {
+                    let provider = DeepSeekProvider::with_model(&key, &provider_config.model);
+                    info!(
+                        provider = "deepseek",
+                        model = provider_config.model,
+                        role = ?role,
+                        "Added DeepSeek provider"
+                    );
+                    pool.add_provider(
+                        Arc::new(provider),
+                        provider_config.weight,
+                        role,
+                    );
+                    provider_count += 1;
+                } else {
+                    warn!("DeepSeek provider configured but no API key found (set DEEPSEEK_API_KEY)");
+                }
             }
             _ => {
-                tracing::warn!(
+                warn!(
                     provider = provider_config.provider_type,
                     "Unknown provider type, skipping"
                 );
             }
         }
+    }
+
+    if provider_count == 0 {
+        anyhow::bail!("No providers configured! Check your config.toml and environment variables.");
     }
 
     let pool = Arc::new(pool);

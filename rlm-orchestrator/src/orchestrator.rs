@@ -1,9 +1,10 @@
 //! RLM orchestration logic
 
+use crate::commands::{extract_commands, extract_final, CommandExecutor, ExecutionResult, LlmQueryCallback};
 use crate::pool::LlmPool;
-use crate::provider::{LlmRequest, LlmResponse, ProviderError};
-use crate::repl::{extract_code, extract_final, PythonRepl, ReplError};
+use crate::provider::{LlmRequest, ProviderError};
 use crate::RlmConfig;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -14,8 +15,8 @@ pub enum OrchestratorError {
     #[error("Provider error: {0}")]
     Provider(#[from] ProviderError),
 
-    #[error("REPL error: {0}")]
-    Repl(#[from] ReplError),
+    #[error("Command error: {0}")]
+    Command(#[from] crate::commands::CommandError),
 
     #[error("Max iterations ({0}) exceeded")]
     MaxIterations(usize),
@@ -23,8 +24,8 @@ pub enum OrchestratorError {
     #[error("Max sub-calls ({0}) exceeded")]
     MaxSubCalls(usize),
 
-    #[error("No code block found in response")]
-    NoCodeBlock,
+    #[error("No commands found in response")]
+    NoCommands,
 }
 
 /// Record of a single RLM iteration
@@ -32,13 +33,13 @@ pub enum OrchestratorError {
 pub struct IterationRecord {
     /// Step number (1-indexed)
     pub step: usize,
-    /// Code that was executed
-    pub code: String,
+    /// Commands that were executed (JSON)
+    pub commands: String,
     /// Output from execution
     pub output: String,
     /// Error if any
     pub error: Option<String>,
-    /// Number of sub-LM calls made
+    /// Number of sub-LM calls made in this iteration
     pub sub_calls: usize,
 }
 
@@ -71,20 +72,71 @@ impl RlmOrchestrator {
         Self { config, pool }
     }
 
+    /// Create the llm_query callback for sub-LM calls
+    fn create_llm_query_callback(&self, total_sub_calls: Arc<AtomicUsize>) -> LlmQueryCallback {
+        let pool = Arc::clone(&self.pool);
+        let max_sub_calls = self.config.max_sub_calls;
+
+        Arc::new(move |prompt: &str| {
+            // Check if we've exceeded max sub-calls
+            let current = total_sub_calls.load(Ordering::Relaxed);
+            if current >= max_sub_calls {
+                return Err(format!("Max sub-calls ({}) exceeded", max_sub_calls));
+            }
+
+            // Get the current tokio runtime handle
+            let handle = tokio::runtime::Handle::try_current()
+                .map_err(|e| format!("No tokio runtime available: {}", e))?;
+
+            let pool = Arc::clone(&pool);
+            let prompt = prompt.to_string();
+
+            // Use block_in_place to allow blocking within the async runtime
+            let result = tokio::task::block_in_place(|| {
+                handle.block_on(async {
+                    let request = LlmRequest::new(
+                        "You are a helpful assistant. Answer concisely.",
+                        &prompt,
+                    );
+                    pool.complete(&request, true).await
+                })
+            });
+
+            match result {
+                Ok(response) => {
+                    total_sub_calls.fetch_add(1, Ordering::Relaxed);
+                    Ok(response.content)
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        })
+    }
+
     /// Process a query over the given context
     pub async fn process(
         &self,
         query: &str,
         context: &str,
     ) -> Result<RlmResult, OrchestratorError> {
-        let mut repl = PythonRepl::new();
         let mut history = Vec::new();
-        let mut total_sub_calls = 0;
+        let total_sub_calls = Arc::new(AtomicUsize::new(0));
 
         let system_prompt = self.build_system_prompt(context.len());
 
+        // Create the llm_query callback
+        let llm_query_cb = self.create_llm_query_callback(Arc::clone(&total_sub_calls));
+
+        // Create command executor (persists across iterations)
+        let mut executor = CommandExecutor::new(context.to_string(), self.config.max_sub_calls)
+            .with_llm_callback(llm_query_cb);
+
         for iteration in 0..self.config.max_iterations {
             info!(iteration = iteration + 1, "Starting RLM iteration");
+
+            // Check if we've exceeded max sub-calls
+            if total_sub_calls.load(Ordering::Relaxed) >= self.config.max_sub_calls {
+                return Err(OrchestratorError::MaxSubCalls(self.config.max_sub_calls));
+            }
 
             // Build the prompt with history
             let prompt = self.build_prompt(query, context, &history);
@@ -95,59 +147,73 @@ impl RlmOrchestrator {
 
             debug!(content_len = response.content.len(), "Got LLM response");
 
-            // Check for FINAL answer first (only if no code block)
-            let code = extract_code(&response.content);
+            // Try to extract JSON commands first
+            let commands_json = extract_commands(&response.content);
 
-            if code.is_none() {
+            if let Some(json) = commands_json {
+                // Execute the commands
+                match executor.execute_json(&json) {
+                    Ok(ExecutionResult::Final { answer, sub_calls }) => {
+                        history.push(IterationRecord {
+                            step: iteration + 1,
+                            commands: json,
+                            output: format!("FINAL: {}", &answer),
+                            error: None,
+                            sub_calls,
+                        });
+
+                        return Ok(RlmResult {
+                            answer,
+                            iterations: iteration + 1,
+                            history,
+                            total_sub_calls: total_sub_calls.load(Ordering::Relaxed),
+                            success: true,
+                            error: None,
+                        });
+                    }
+                    Ok(ExecutionResult::Continue { output, sub_calls }) => {
+                        let truncated_output = self.truncate_output(&output);
+                        history.push(IterationRecord {
+                            step: iteration + 1,
+                            commands: json,
+                            output: truncated_output,
+                            error: None,
+                            sub_calls,
+                        });
+                    }
+                    Err(e) => {
+                        history.push(IterationRecord {
+                            step: iteration + 1,
+                            commands: json,
+                            output: String::new(),
+                            error: Some(e.to_string()),
+                            sub_calls: 0,
+                        });
+                        debug!("Command execution had error: {}", e);
+                    }
+                }
+            } else {
+                // No JSON commands - check for FINAL in plain text (fallback)
                 if let Some(final_answer) = extract_final(&response.content) {
-                    // Handle FINAL_VAR - look up the variable
-                    let answer = if final_answer.starts_with("__FINAL_VAR__") {
-                        let var_name = &final_answer[13..];
-                        repl.get_variable(var_name).unwrap_or_else(|| {
-                            format!("Variable '{}' not found", var_name)
-                        })
-                    } else {
-                        final_answer
-                    };
-
                     return Ok(RlmResult {
-                        answer,
+                        answer: final_answer,
                         iterations: iteration + 1,
                         history,
-                        total_sub_calls,
+                        total_sub_calls: total_sub_calls.load(Ordering::Relaxed),
                         success: true,
                         error: None,
                     });
                 }
-            }
 
-            // Extract and execute code
-            let code = match code {
-                Some(c) => c,
-                None => {
-                    // No code and no FINAL - this is an error
-                    warn!("No code block found in response");
-                    return Err(OrchestratorError::NoCodeBlock);
-                }
-            };
-
-            // Execute the code
-            // TODO: Inject llm_query function for sub-LM calls
-            let (output, error) = match repl.execute(&code, context) {
-                Ok(output) => (self.truncate_output(&output), None),
-                Err(e) => (String::new(), Some(e.to_string())),
-            };
-
-            history.push(IterationRecord {
-                step: iteration + 1,
-                code,
-                output: output.clone(),
-                error: error.clone(),
-                sub_calls: 0, // TODO: Track sub-calls
-            });
-
-            if error.is_some() {
-                debug!("Code execution had error, continuing");
+                // No commands and no FINAL - log and continue
+                warn!("No commands found in response, continuing");
+                history.push(IterationRecord {
+                    step: iteration + 1,
+                    commands: String::new(),
+                    output: String::new(),
+                    error: Some("No JSON commands found in response".to_string()),
+                    sub_calls: 0,
+                });
             }
         }
 
@@ -157,58 +223,99 @@ impl RlmOrchestrator {
 
     fn build_system_prompt(&self, context_len: usize) -> String {
         format!(
-            r#"You are an RLM (Recursive Language Model) agent tasked with answering queries over large contexts.
+            r#"You are an RLM (Recursive Language Model) agent that answers queries about large contexts.
 
-Your context is a text with {context_len} total characters.
+The context has {context_len} characters. You interact with it using JSON commands.
 
-The REPL environment provides:
-1. `context` - the full input (may be huge, use programmatic access)
-2. `llm_query(prompt)` - recursive sub-LM call for semantic analysis
-3. Standard Python: re, json, collections, itertools, etc.
+## Available Commands
 
-WORKFLOW:
-1. Explore: Probe the context structure (first/last chars, line count, patterns)
-2. Process: Write code to filter, extract, or transform relevant data
-3. Recurse: Use llm_query() for semantic analysis of chunks
-4. Conclude: When ready, output FINAL(your answer) or FINAL_VAR(variable_name)
+Context operations:
+- {{"op": "slice", "start": 0, "end": 1000}} - Get characters [start:end]
+- {{"op": "lines", "start": 0, "end": 100}} - Get lines [start:end]
+- {{"op": "len"}} - Get context length
+- {{"op": "count", "what": "lines"}} - Count lines/chars/words
 
-RULES:
-- Always wrap code in ```python or ```repl blocks
-- Use print() for debugging output
-- Variables persist between iterations
-- Only call FINAL when you have the complete answer
+Search operations:
+- {{"op": "regex", "pattern": "class \\w+"}} - Find regex matches
+- {{"op": "find", "text": "error"}} - Find text occurrences
 
-Example iteration:
-```python
-# Explore structure
-print(f"Context length: {{len(context)}} chars")
-print(f"First 200 chars: {{context[:200]}}")
+Variables:
+- {{"op": "set", "name": "x", "value": "..."}} - Set variable
+- {{"op": "get", "name": "x"}} - Get variable value
+- {{"op": "print", "var": "x"}} - Print variable
+
+Sub-LM calls:
+- {{"op": "llm_query", "prompt": "Summarize: ${{chunk}}", "store": "summary"}}
+
+Finishing:
+- {{"op": "final", "answer": "The result is..."}}
+- {{"op": "final_var", "name": "result"}}
+
+## Variable References
+Use ${{var}} or $var in strings to reference stored variables.
+
+## Workflow
+1. Explore: Get length, first/last lines to understand structure
+2. Search: Use regex/find to locate relevant content
+3. Extract: Slice or get specific lines
+4. Analyze: Use llm_query for semantic analysis of chunks
+5. Finish: Output final answer
+
+## Example
+
+```json
+{{"op": "len", "store": "total_len"}}
+{{"op": "lines", "start": 0, "end": 10, "store": "header"}}
+{{"op": "regex", "pattern": "class \\w+", "store": "classes"}}
+{{"op": "count", "what": "matches", "store": "class_count"}}
+{{"op": "final", "answer": "Found ${{class_count}} classes"}}
 ```
 
-When done:
-```python
-answer = "The result is..."
-```
-FINAL_VAR(answer)"#,
+## Important Notes
+- Variables store strings only. Use `count` with `what: "matches"` after `regex` to count results.
+- The `regex` command stores matched text (one per line). Use `count` with `what: "lines"` on that variable.
+- Always use `store` to save results you need later.
+- Wrap commands in ```json blocks. Execute multiple commands per iteration."#,
             context_len = context_len
         )
     }
 
     fn build_prompt(&self, query: &str, context: &str, history: &[IterationRecord]) -> String {
-        let mut prompt = format!("QUERY: {}\n\nCONTEXT:\n{}\n\n", query, context);
+        // Only include first/last of context if it's large
+        let context_preview = if context.len() > 2000 {
+            format!(
+                "[First 500 chars]\n{}\n\n[Last 500 chars]\n{}",
+                &context[..500.min(context.len())],
+                &context[context.len().saturating_sub(500)..]
+            )
+        } else {
+            context.to_string()
+        };
+
+        let mut prompt = format!(
+            "QUERY: {}\n\nCONTEXT PREVIEW ({} total chars):\n{}\n\n",
+            query,
+            context.len(),
+            context_preview
+        );
 
         if !history.is_empty() {
             prompt.push_str("EXECUTION HISTORY:\n");
             for record in history {
                 prompt.push_str(&format!("\n--- Step {} ---\n", record.step));
-                prompt.push_str(&format!("Code:\n```python\n{}\n```\n", record.code));
+                if !record.commands.is_empty() {
+                    prompt.push_str(&format!("Commands:\n```json\n{}\n```\n", record.commands));
+                }
                 if let Some(error) = &record.error {
                     prompt.push_str(&format!("Error: {}\n", error));
-                } else {
+                } else if !record.output.is_empty() {
                     prompt.push_str(&format!("Output:\n{}\n", record.output));
                 }
+                if record.sub_calls > 0 {
+                    prompt.push_str(&format!("(Made {} sub-LM calls)\n", record.sub_calls));
+                }
             }
-            prompt.push_str("\nContinue from where you left off. Remember to use FINAL() when you have the answer.\n");
+            prompt.push_str("\nContinue analysis. Use {{\"op\": \"final\", \"answer\": \"...\"}} when done.\n");
         }
 
         prompt

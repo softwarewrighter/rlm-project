@@ -7,7 +7,6 @@ license = "MIT"
 
 [lib]
 name = "rlm"
-crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "rlm-server"
@@ -33,8 +32,8 @@ axum = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
-# Python integration
-pyo3 = { version = "0.27", features = ["auto-initialize"] }
+# Regex for command execution
+regex = "1"
 
 # Logging/tracing
 tracing = "0.1"

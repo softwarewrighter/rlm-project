@@ -3,12 +3,12 @@
 //! This crate provides:
 //! - Multiple LLM provider backends (Ollama, DeepSeek, OpenAI-compatible)
 //! - Connection pooling with load balancing across distributed GPU servers
-//! - Python REPL integration via PyO3 for code execution
+//! - Structured command execution (pure Rust, no Python dependency)
 //! - REST API for external integration
 
 pub mod provider;
 pub mod pool;
-pub mod repl;
+pub mod commands;
 pub mod orchestrator;
 pub mod api;
 
