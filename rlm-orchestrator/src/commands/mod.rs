@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
+use crate::wasm::{WasmConfig, WasmExecutor, WasmLibrary};
+
 /// Errors from command execution
 #[derive(Error, Debug)]
 pub enum CommandError {
@@ -32,6 +34,12 @@ pub enum CommandError {
 
     #[error("Max sub-calls exceeded: {0}")]
     MaxSubCalls(usize),
+
+    #[error("WASM error: {0}")]
+    WasmError(#[from] crate::wasm::WasmError),
+
+    #[error("WASM module not found: {0}")]
+    WasmModuleNotFound(String),
 }
 
 /// A single command that can be executed
@@ -127,6 +135,40 @@ pub enum Command {
 
     /// Final from variable: {"op": "final_var", "name": "result"}
     FinalVar { name: String },
+
+    /// Execute pre-compiled WASM module: {"op": "wasm", "module": "line_counter"}
+    Wasm {
+        /// Name of pre-compiled module from WasmLibrary
+        module: String,
+        /// Function to call (default: "analyze")
+        #[serde(default = "default_wasm_function")]
+        function: String,
+        /// Variable to use as input (default: context)
+        #[serde(default)]
+        on: Option<String>,
+        /// Store result in variable
+        #[serde(default)]
+        store: Option<String>,
+    },
+
+    /// Compile and execute WAT code: {"op": "wasm_wat", "wat": "(module ...)"}
+    WasmWat {
+        /// WebAssembly Text format code
+        wat: String,
+        /// Function to call (default: "analyze")
+        #[serde(default = "default_wasm_function")]
+        function: String,
+        /// Variable to use as input (default: context)
+        #[serde(default)]
+        on: Option<String>,
+        /// Store result in variable
+        #[serde(default)]
+        store: Option<String>,
+    },
+}
+
+fn default_wasm_function() -> String {
+    "analyze".to_string()
 }
 
 /// What to count
@@ -171,11 +213,18 @@ pub struct CommandExecutor {
     sub_calls: usize,
     /// Max sub-calls allowed
     max_sub_calls: usize,
+    /// WASM executor for dynamic code
+    wasm_executor: Option<WasmExecutor>,
+    /// Library of pre-compiled WASM modules
+    wasm_library: WasmLibrary,
 }
 
 impl CommandExecutor {
     /// Create a new executor
     pub fn new(context: String, max_sub_calls: usize) -> Self {
+        // Initialize WASM executor (may fail on some platforms)
+        let wasm_executor = WasmExecutor::new(WasmConfig::default()).ok();
+
         Self {
             variables: HashMap::new(),
             context,
@@ -183,6 +232,8 @@ impl CommandExecutor {
             llm_callback: None,
             sub_calls: 0,
             max_sub_calls,
+            wasm_executor,
+            wasm_library: WasmLibrary::new(),
         }
     }
 
@@ -448,6 +499,42 @@ impl CommandExecutor {
                     .unwrap_or_else(|| format!("<undefined: {}>", name));
                 Ok(ExecutionResult::Final {
                     answer,
+                    sub_calls: 0,
+                })
+            }
+
+            Command::Wasm { module, function, on, store } => {
+                let executor = self.wasm_executor.as_ref()
+                    .ok_or_else(|| CommandError::WasmError(
+                        crate::wasm::WasmError::CompileError("WASM not available".to_string())
+                    ))?;
+
+                let wasm_bytes = self.wasm_library.get(module)
+                    .ok_or_else(|| CommandError::WasmModuleNotFound(module.clone()))?;
+
+                let source = self.resolve_source(on)?.to_string();
+                let result = executor.execute(wasm_bytes, function, &source)?;
+
+                self.store_result(store, result.clone());
+                Ok(ExecutionResult::Continue {
+                    output: format!("WASM {}.{}: {}", module, function, result),
+                    sub_calls: 0,
+                })
+            }
+
+            Command::WasmWat { wat, function, on, store } => {
+                let executor = self.wasm_executor.as_ref()
+                    .ok_or_else(|| CommandError::WasmError(
+                        crate::wasm::WasmError::CompileError("WASM not available".to_string())
+                    ))?;
+
+                let wasm_bytes = executor.compile_wat(wat)?;
+                let source = self.resolve_source(on)?.to_string();
+                let result = executor.execute(&wasm_bytes, function, &source)?;
+
+                self.store_result(store, result.clone());
+                Ok(ExecutionResult::Continue {
+                    output: format!("WASM (inline).{}: {}", function, result),
                     sub_calls: 0,
                 })
             }

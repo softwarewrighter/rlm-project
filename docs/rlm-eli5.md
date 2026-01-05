@@ -1,12 +1,12 @@
 # Recursive Language Models (RLM) - Explain Like I'm 5
 
-## The Cookie Jar Problem 🍪
+## The Cookie Jar Problem
 
 Imagine you have a **really, really big cookie jar** - so big you can't see all the cookies at once. You want to find all the chocolate chip cookies.
 
 **Normal way (regular LLM):** Try to dump ALL the cookies on the table at once. But your table is too small! Cookies fall off, you lose track, and you miss some chocolate chips.
 
-**Smart way (RLM):** 
+**Smart way (RLM):**
 1. Look at a handful of cookies at a time
 2. Ask your friend to check each handful: "Any chocolate chips here?"
 3. Keep track of what your friend finds
@@ -18,7 +18,7 @@ That's RLM! Instead of forcing everything into the AI's brain at once (where it 
 
 ## The Three Magic Powers of RLM
 
-### 1. 📦 The Context Box
+### 1. The Context Box
 Instead of eating all the text, the AI puts it in a box and looks at it piece by piece.
 
 ```
@@ -31,355 +31,251 @@ Instead of eating all the text, the AI puts it in a box and looks at it piece by
 └─────────────────────────────────────┘
 ```
 
-### 2. 💻 The Code Superpower
-The AI can write Python code to search, filter, and organize the text - like having a robot assistant!
+### 2. The Command Toolkit
+The AI issues commands to search, slice, and analyze the context:
 
-```python
-# AI writes this code itself!
-for doc in documents:
-    if "chocolate" in doc:
-        interesting_docs.append(doc)
+```json
+{"op": "find", "text": "ERROR", "store": "errors"}
+{"op": "count", "what": "matches", "on": "errors"}
+{"op": "final", "answer": "Found 3 errors"}
 ```
 
-### 3. 🤖 The Helper AI Phone
-The main AI can call helper AIs to analyze each piece. Like having friends who can each read one chapter of a huge book!
+### 3. The Helper AI Phone
+The main AI can call helper AIs to analyze each piece:
 
 ```
-Main AI: "Hey helper, what's in chapter 5?"
+Main AI: "Hey helper, what's in this chunk?"
 Helper AI: "It talks about dragons and a magic sword!"
-Main AI: "Thanks! *writes that down* Now checking chapter 6..."
+Main AI: "Thanks! *writes that down* Now checking next chunk..."
 ```
+
+---
+
+## How Our Implementation Works
+
+### Current: Structured Commands (v0.1)
+
+The AI issues JSON commands that the orchestrator executes:
+
+```
+┌─────────────┐
+│   Query +   │
+│   Context   │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐     ┌─────────────┐
+│  Root LLM   │────►│   Command   │
+│  (thinks)   │◄────│   Executor  │
+└─────────────┘     └─────────────┘
+       │                   │
+       │  (iterate)        ▼
+       │            ┌─────────────┐
+       │            │  Sub-LLM    │
+       │            │  (helpers)  │
+       │            └─────────────┘
+       ▼
+┌─────────────┐
+│   Answer    │
+└─────────────┘
+```
+
+**Available commands:**
+- `slice` / `lines` - Extract portions of text
+- `find` / `regex` - Search for patterns
+- `count` - Get statistics
+- `llm_query` - Ask a helper AI
+- `final` - Return the answer
+
+**Limitations:**
+- Fixed command set (no loops, conditionals)
+- LLM must use multiple iterations for complex logic
+- No arbitrary computation
+
+### Roadmap: WASM Dynamic Code (v0.2)
+
+The AI will generate WebAssembly modules for complex analysis:
+
+```
+┌─────────────┐
+│  Root LLM   │
+│  generates  │
+│    WASM     │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────────────────────────────┐
+│         WASM Sandbox                │
+│                                     │
+│  • Loops and conditionals           │
+│  • Custom analysis functions        │
+│  • Memory-safe execution            │
+│  • No filesystem/network access     │
+│                                     │
+└─────────────────────────────────────┘
+       │
+       ▼
+┌─────────────┐
+│   Results   │
+└─────────────┘
+```
+
+**Why WASM?**
+- **Safe**: Sandboxed execution, no escape to host system
+- **Fast**: Near-native performance
+- **Portable**: Runs anywhere without Python/Node
+- **Composable**: AI can write real programs, not just commands
 
 ---
 
 ## Real Example: Finding Needles in Haystacks
 
-**Task:** Find who won the beauty pageant in a 10-million-word document collection.
+**Task:** Count ERROR lines in a 10,000 line log file.
 
 ### Without RLM (Regular AI):
 ```
-AI: *tries to read 10 million words*
-AI: *brain melts* 
-AI: "Uhh... I think maybe... Susan? No wait... I forgot..."
+AI: *tries to read 10,000 lines*
+AI: *context window exceeded*
+AI: "I can only see the last 2000 lines..."
 ```
 
-### With RLM:
+### With RLM (Current Implementation):
 ```
-Step 1: AI writes code to list all documents
-        "Okay, I have 1000 documents totaling 10M words"
+Iteration 1: {"op": "find", "text": "ERROR", "store": "errors"}
+             → Found 47 occurrences
 
-Step 2: AI searches for keywords
-        documents = grep("beauty pageant", all_docs)
-        "Found 5 documents mentioning beauty pageant!"
+Iteration 2: {"op": "count", "what": "matches", "on": "errors"}
+             → Counted 47 lines
 
-Step 3: AI asks helper to check each one
-        for doc in documents:
-            answer = helper_ai("Who won the pageant?", doc)
-            results.append(answer)
-        
-Step 4: AI combines results
-        "Based on 3 matching answers: Maria Dalmacio won!"
+Iteration 3: {"op": "final", "answer": "There are 47 ERROR lines"}
+```
+
+### With RLM + WASM (Future):
+```
+AI generates WASM module:
+
+fn analyze(context: &str) -> String {
+    let errors: Vec<&str> = context
+        .lines()
+        .filter(|l| l.contains("ERROR"))
+        .collect();
+
+    let by_type = errors
+        .iter()
+        .map(|l| extract_error_type(l))
+        .fold(HashMap::new(), |mut m, t| {
+            *m.entry(t).or_insert(0) += 1;
+            m
+        });
+
+    format!("Found {} errors: {:?}", errors.len(), by_type)
+}
+
+→ "Found 47 errors: {timeout: 23, connection: 15, auth: 9}"
 ```
 
 ---
 
-## Mike's Implementation Options
-
-Here are the ways you could build RLM with your setup:
-
-### Option A: Custom Rust Orchestrator 🦀
-
-**What it is:** A Rust program that coordinates everything - loads documents, runs a Python REPL, and calls your LLMs.
+## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                 RUST RLM ORCHESTRATOR                    │
-│                                                          │
-│  ┌──────────┐    ┌──────────┐    ┌──────────────────┐  │
-│  │ Context  │    │  Python  │    │    LLM Pool      │  │
-│  │  Store   │◄──►│   REPL   │◄──►│                  │  │
-│  │(HashMap) │    │  (PyO3)  │    │ Ollama (M40s)    │  │
-│  └──────────┘    └──────────┘    │ Ollama (RTX)     │  │
-│                                   │ Ollama (P100s)   │  │
-│                                   │ DeepSeek API     │  │
-│                                   │ Claude API       │  │
-│                                   └──────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+┌─────────────┐     ┌─────────────────┐     ┌─────────────┐
+│   Client    │────▶│  RLM Server     │────▶│  Root LLM   │
+│  /visualize │     │  (Rust/Axum)    │     │  (DeepSeek) │
+└─────────────┘     └────────┬────────┘     └─────────────┘
+                             │
+                    ┌────────▼────────┐
+                    │ Command Executor │
+                    │  + WASM Runtime  │  ◄── Future
+                    └────────┬────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+        ┌──────────┐  ┌──────────┐  ┌──────────┐
+        │ Ollama   │  │ Ollama   │  │ DeepSeek │
+        │ (local)  │  │ (remote) │  │  (API)   │
+        └──────────┘  └──────────┘  └──────────┘
+              Sub-LM Pool (for llm_query)
 ```
-
-| Pros | Cons |
-|------|------|
-| ✅ Full control over everything | ❌ Most development work |
-| ✅ Optimal for your GPU cluster | ❌ Need to maintain it yourself |
-| ✅ Can load-balance across servers | ❌ ~2-4 weeks to build properly |
-| ✅ Native performance | ❌ Python REPL integration adds complexity |
-| ✅ Your preferred language! | |
-
-**Best for:** Production use, processing huge documents regularly, when you need to squeeze every bit of performance from your hardware.
-
----
-
-### Option B: OpenCode + DeepSeek API 🔷
-
-**What it is:** Use Z.ai's opencode CLI with DeepSeek as the backend, wrapped with RLM capabilities.
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    OPENCODE + WRAPPER                    │
-│                                                          │
-│   User Query                                             │
-│       │                                                  │
-│       ▼                                                  │
-│   ┌─────────────────┐                                   │
-│   │  rlm-wrapper.sh │  ◄── Injects RLM system prompt    │
-│   └────────┬────────┘                                   │
-│            │                                             │
-│            ▼                                             │
-│   ┌─────────────────┐    ┌──────────────────┐          │
-│   │    opencode     │───►│   DeepSeek API   │          │
-│   │  (code executor)│    │  (deepseek-chat) │          │
-│   └─────────────────┘    └──────────────────┘          │
-│            │                                             │
-│            ▼                                             │
-│   ┌─────────────────┐                                   │
-│   │  Python REPL    │  ◄── llm_query() calls back to   │
-│   │  + llm_query()  │      DeepSeek or local Ollama    │
-│   └─────────────────┘                                   │
-└─────────────────────────────────────────────────────────┘
-```
-
-| Pros | Cons |
-|------|------|
-| ✅ Fast to set up (~1 day) | ❌ DeepSeek API costs money |
-| ✅ DeepSeek is very capable | ❌ Less control than custom solution |
-| ✅ OpenCode handles code execution | ❌ Depends on external API availability |
-| ✅ Can fall back to local Ollama | ❌ OpenCode still maturing |
-| ✅ GLM-4 support too | |
-
-**Best for:** Quick experiments, when you want good results fast, hybrid cloud/local setup.
-
----
-
-### Option C: Pure Ollama + Python Script 🦙
-
-**What it is:** A standalone Python script that implements RLM using only your local Ollama servers.
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                  PYTHON RLM SCRIPT                       │
-│                                                          │
-│   ┌─────────────────────────────────────────────────┐   │
-│   │                  rlm.py                          │   │
-│   │                                                  │   │
-│   │  context_store = {"context": big_document}      │   │
-│   │                                                  │   │
-│   │  while not done:                                 │   │
-│   │      code = ask_root_llm("what next?")          │   │
-│   │      output = exec(code)  # runs in REPL        │   │
-│   │      if "FINAL" in output:                       │   │
-│   │          done = True                             │   │
-│   └─────────────────────────────────────────────────┘   │
-│                          │                               │
-│                          ▼                               │
-│   ┌─────────────────────────────────────────────────┐   │
-│   │              YOUR OLLAMA SERVERS                 │   │
-│   │                                                  │   │
-│   │  Server 1 (M40 24GB)     Server 2 (RTX)         │   │
-│   │  └─ qwen2.5-coder:32b    └─ llama3.3:70b        │   │
-│   │                                                  │   │
-│   │  Server 3 (P100s)                                │   │
-│   │  └─ deepseek-coder:33b                           │   │
-│   └─────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
-```
-
-| Pros | Cons |
-|------|------|
-| ✅ Completely free (your hardware) | ❌ Slower than cloud APIs |
-| ✅ Works offline | ❌ Limited by your GPU VRAM |
-| ✅ Simple to understand & modify | ❌ No fancy load balancing built-in |
-| ✅ Great for learning/experimenting | ❌ Python, not Rust 😉 |
-| ✅ $0.45/kWh + solar = very cheap | |
-
-**Best for:** Privacy-sensitive work, learning how RLM works, when internet is unreliable, cost optimization.
-
----
-
-### Option D: Claude Code CLI + MCP Server 🔌
-
-**What it is:** Extend Claude Code with custom MCP tools that provide RLM capabilities.
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                CLAUDE CODE + MCP RLM                     │
-│                                                          │
-│   ┌─────────────────┐                                   │
-│   │   Claude Code   │                                   │
-│   │   CLI / Web     │                                   │
-│   └────────┬────────┘                                   │
-│            │ MCP Protocol                                │
-│            ▼                                             │
-│   ┌─────────────────────────────────────────────────┐   │
-│   │            MCP RLM Server                        │   │
-│   │                                                  │   │
-│   │  Tools:                                          │   │
-│   │  • load_context(name, content)                  │   │
-│   │  • peek_context(name, start, end)               │   │
-│   │  • context_info(name)                           │   │
-│   │  • llm_subquery(prompt, provider, model)        │   │
-│   │  • execute_code(code)                           │   │
-│   └─────────────────────────────────────────────────┘   │
-│                          │                               │
-│            ┌─────────────┴─────────────┐                │
-│            ▼                           ▼                │
-│   ┌─────────────────┐       ┌─────────────────┐        │
-│   │  Ollama Servers │       │   Claude API    │        │
-│   │  (sub-queries)  │       │  (sub-queries)  │        │
-│   └─────────────────┘       └─────────────────┘        │
-└─────────────────────────────────────────────────────────┘
-```
-
-| Pros | Cons |
-|------|------|
-| ✅ Integrates with existing Claude workflow | ❌ Depends on Claude Code availability |
-| ✅ MCP is extensible standard | ❌ Two AI layers (Claude + sub-LLM) |
-| ✅ Can use Claude's strong reasoning | ❌ Costs money (Claude API) |
-| ✅ Easy to add more tools later | ❌ MCP server needs to stay running |
-| ✅ Hybrid local/cloud naturally | |
-
-**Best for:** When you're already using Claude Code, want best-of-both-worlds, professional work.
-
----
-
-### Option E: Hybrid Rust + Emacs Integration 🚀
-
-**What it is:** Rust daemon with elisp bindings for Emacs integration.
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                EMACS + RUST RLM DAEMON                   │
-│                                                          │
-│   ┌─────────────────────────────────────────────────┐   │
-│   │                    EMACS                         │   │
-│   │                                                  │   │
-│   │  (rlm-query "Find all TODO items"               │   │
-│   │             (buffer-string))                     │   │
-│   │                                                  │   │
-│   │  ;; Communicates via JSON-RPC or socket         │   │
-│   └─────────────────────────────────────────────────┘   │
-│                          │                               │
-│                          ▼                               │
-│   ┌─────────────────────────────────────────────────┐   │
-│   │              RUST RLM DAEMON                     │   │
-│   │                                                  │   │
-│   │  • Runs as background service                   │   │
-│   │  • Manages context across sessions              │   │
-│   │  • Load balances across GPU servers             │   │
-│   │  • Caches frequent queries                      │   │
-│   └─────────────────────────────────────────────────┘   │
-│                          │                               │
-│            ┌─────────────┴─────────────┐                │
-│            ▼                           ▼                │
-│      Local Ollama              Cloud APIs               │
-│      (your GPUs)           (fallback/overflow)          │
-└─────────────────────────────────────────────────────────┘
-```
-
-| Pros | Cons |
-|------|------|
-| ✅ Native Emacs integration | ❌ Most complex to build |
-| ✅ Persistent daemon = fast startup | ❌ Need elisp + Rust expertise |
-| ✅ Perfect for your workflow | ❌ 4-6 weeks development |
-| ✅ Can integrate with org-mode, magit | ❌ Niche (just for you!) |
-| ✅ Full Rust performance | |
-
-**Best for:** Ultimate integration with your Emacs workflow, long-term investment.
-
----
-
-## Quick Comparison Chart
-
-| Option | Setup Time | Cost | Performance | Control | Your Match |
-|--------|------------|------|-------------|---------|------------|
-| A. Rust Custom | 2-4 weeks | $0* | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-| B. OpenCode+DeepSeek | 1 day | $$ | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ |
-| C. Python+Ollama | 2-3 days | $0* | ⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
-| D. Claude+MCP | 1-2 days | $$$ | ⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐ |
-| E. Emacs+Rust | 4-6 weeks | $0* | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
-
-*$0 = just electricity for your servers
 
 ---
 
 ## The Secret Sauce: Why RLM Works
 
-### Traditional LLM: "Context Rot" 🤢
+### Traditional LLM: "Context Rot"
 ```
 Input size:    [============================] 10M tokens
-Model window:  [======]                        272K tokens
-Result:        🤯 "I... forgot... what was the question?"
+Model window:  [======]                        200K tokens
+Result:        "I... forgot... what was the question?"
 ```
 
-### RLM: "Divide and Conquer" 💪
+### RLM: "Divide and Conquer"
 ```
 Input size:    [============================] 10M tokens
                   ↓ chunk ↓ chunk ↓ chunk
 Sub-queries:   [==] → answer1
-               [==] → answer2  
+               [==] → answer2
                [==] → answer3
                   ↓ combine
-Final:         🎯 Accurate answer from all pieces!
+Final:         Accurate answer from all pieces!
 ```
 
 The paper shows RLM achieves:
-- **91.33%** accuracy on BrowseComp+ (vs 0% for base model that couldn't fit context!)
+- **91%** accuracy on tasks where base models score **0%** (context too large)
 - **58%** F1 on OOLONG-Pairs (vs 0.04% for GPT-5 base)
 - Handles **10M+ tokens** effectively
 
 ---
 
-## Getting Started: Recommended Path
+## Getting Started
 
-Based on your setup (Arch Linux, distributed GPUs, Rust preference, Emacs user):
+### Quick Start (5 minutes)
+```bash
+cd rlm-orchestrator
+export DEEPSEEK_API_KEY="your-key"
+cargo run --bin rlm-server
 
-### Week 1: Quick Win
-Start with **Option C (Python + Ollama)** to understand how RLM works.
+# Open visualizer
+open http://localhost:8080/visualize
+```
 
-### Week 2-3: Production Path
-Build **Option A (Rust Orchestrator)** with your learnings.
-
-### Week 4+: Integration
-Add **Option E (Emacs bindings)** for daily workflow integration.
-
-### Parallel Track
-Set up **Option D (MCP Server)** for when you're using Claude Code anyway.
+### Try a Query
+```bash
+curl -X POST http://localhost:8080/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "How many ERROR lines?",
+    "context": "OK\nERROR timeout\nOK\nERROR connection\nOK"
+  }'
+```
 
 ---
 
-## One More Analogy: The Library Research Assistant 📚
+## Measuring Success
 
-**You:** "Find everything about quantum computing in this library."
+We know RLM is working when:
 
-**Regular AI (tries to read entire library):**
-*head explodes* 📚💥🤯
-
-**RLM AI:**
-1. "Let me check the card catalog first..." *(probes structure)*
-2. "Physics section, rows 12-15 look relevant..." *(filters)*
-3. "Hey assistant, summarize book 12A" *(sub-query)*
-4. "Hey assistant, summarize book 12B" *(sub-query)*
-5. "Hey assistant, summarize book 12C" *(sub-query)*
-6. "Combining all summaries... here's your answer!" *(aggregate)*
-
-**Result:** Accurate, comprehensive, and didn't need to read every cookbook in the library! 🎉
+| Metric | Target | How to Measure |
+|--------|--------|----------------|
+| **Accuracy** | >80% on NIAH | Test with known-answer datasets |
+| **Scale** | 100K+ tokens | Process contexts larger than model window |
+| **Efficiency** | <10 iterations avg | Track iterations per query |
+| **Speed** | <30s per query | Benchmark response times |
 
 ---
 
 ## TL;DR
 
-1. **RLM = Let AI peek at big data in pieces + call helper AIs**
-2. **Your best options:** Rust orchestrator (production) or Python+Ollama (learning)
-3. **Why it works:** Avoids "context rot" by dividing and conquering
-4. **Key insight:** The prompt is a variable, not input - the AI manipulates it with code
+1. **RLM = AI + tools to explore large contexts piece by piece**
+2. **Current:** Structured JSON commands (safe, simple)
+3. **Future:** WASM code generation (powerful, still safe)
+4. **Why it works:** Avoids "context rot" by dividing and conquering
+5. **Key insight:** The context is a database the AI queries, not input it memorizes
 
-Now go build something cool! 🚀
+---
+
+## References
+
+- [Recursive Language Models Paper](https://arxiv.org/html/2512.24601v1) - MIT CSAIL
+- [Project README](../README.md) - Quick start guide
+- [Architecture Docs](architecture.md) - Technical details

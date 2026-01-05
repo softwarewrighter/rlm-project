@@ -27,11 +27,15 @@ RLM solves this by giving the AI **tools to explore** instead of forcing everyth
 └─────────────────────────────────────────┘
 ```
 
-The AI can:
-1. **Slice** - Look at specific portions of the text
-2. **Search** - Find text patterns or regex matches
-3. **Count** - Get statistics about the content
-4. **Query sub-LLMs** - Ask helper AIs to analyze chunks
+### Current Implementation (v0.1)
+The AI issues structured JSON commands:
+- **Slice/Lines** - Look at specific portions of the text
+- **Find/Regex** - Search for text patterns
+- **Count** - Get statistics about the content
+- **LLM Query** - Ask helper AIs to analyze chunks
+
+### Roadmap (v0.2)
+The AI will generate **WebAssembly (WASM)** modules for complex analysis - enabling loops, conditionals, and custom logic while remaining sandboxed and safe.
 
 ## A Simple Analogy
 

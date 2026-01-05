@@ -247,6 +247,12 @@ Variables:
 Sub-LM calls:
 - {{"op": "llm_query", "prompt": "Summarize: ${{chunk}}", "store": "summary"}}
 
+WASM (dynamic code execution):
+- {{"op": "wasm", "module": "line_counter"}} - Run pre-compiled WASM module
+- {{"op": "wasm_wat", "wat": "(module ...)"}} - Compile and run WAT code
+
+Available WASM modules: line_counter (counts lines in context)
+
 Finishing:
 - {{"op": "final", "answer": "The result is..."}}
 - {{"op": "final_var", "name": "result"}}

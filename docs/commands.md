@@ -188,6 +188,58 @@ Iteration 3: lines 0-10 on context → see header
 Iteration 4: final → return answer
 ```
 
+### wasm
+
+Execute a pre-compiled WASM module from the library.
+
+```json
+{
+  "op": "wasm",
+  "module": "line_counter",
+  "function": "analyze",
+  "on": "context",
+  "store": "line_count"
+}
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `module` | string | required | Name of pre-compiled module |
+| `function` | string | "analyze" | Function to call |
+| `on` | string | "context" | Variable to pass as input |
+| `store` | string | null | Variable to store result |
+
+**Available modules:**
+- `line_counter` - Counts lines in text
+
+### wasm_wat
+
+Compile and execute WebAssembly Text format code.
+
+```json
+{
+  "op": "wasm_wat",
+  "wat": "(module ...)",
+  "function": "analyze",
+  "store": "result"
+}
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `wat` | string | required | WAT source code |
+| `function` | string | "analyze" | Function to call |
+| `on` | string | "context" | Variable to pass as input |
+| `store` | string | null | Variable to store result |
+
+**WASM Interface Requirements:**
+Modules must export:
+- `memory` - Linear memory
+- `alloc(size: i32) -> i32` - Allocate memory for input
+- `<function>(ptr: i32, len: i32) -> i32` - Analysis function
+- `get_result_ptr() -> i32` - Get result string pointer
+- `get_result_len() -> i32` - Get result string length
+
 ## Limits
 
 Configured in `config.toml`:
@@ -195,3 +247,8 @@ Configured in `config.toml`:
 - `max_iterations` - Maximum command iterations (default: 20)
 - `max_sub_calls` - Maximum llm_query calls (default: 50)
 - `output_limit` - Maximum output characters per command (default: 10000)
+
+### WASM Limits
+
+- `fuel_limit` - Maximum WASM instructions (default: 1,000,000)
+- `memory_limit` - Maximum WASM memory (default: 64MB)

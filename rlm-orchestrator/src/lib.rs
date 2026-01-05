@@ -11,6 +11,7 @@ pub mod pool;
 pub mod commands;
 pub mod orchestrator;
 pub mod api;
+pub mod wasm;
 
 pub use orchestrator::RlmOrchestrator;
 pub use provider::{LlmProvider, LlmRequest, LlmResponse};

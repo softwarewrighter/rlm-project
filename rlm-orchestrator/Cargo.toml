@@ -50,5 +50,9 @@ parking_lot = "0.12"
 dashmap = "6"
 uuid = { version = "1", features = ["v4"] }
 
+# WASM runtime for dynamic code execution
+wasmtime = "27"
+wat = "1"  # For parsing WebAssembly Text format
+
 [dev-dependencies]
 tokio-test = "0.4"
