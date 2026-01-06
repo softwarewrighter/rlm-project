@@ -2,6 +2,8 @@
 
 A practical implementation of Recursive Language Models based on the paper ["Recursive Language Models"](https://arxiv.org/html/2512.24601v1) by Zhang, Kraska, and Khattab (MIT CSAIL).
 
+[https://www.youtube.com/watch?v=5DhaTPuyhys](explainer video)
+
 ## What is RLM?
 
 RLM is an inference strategy that allows LLMs to process **arbitrarily long contexts** by:
