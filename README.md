@@ -2,7 +2,7 @@
 
 A practical implementation of Recursive Language Models based on the paper ["Recursive Language Models"](https://arxiv.org/html/2512.24601v1) by Zhang, Kraska, and Khattab (MIT CSAIL).
 
-[https://www.youtube.com/watch?v=5DhaTPuyhys](explainer video)
+- [explainer video](https://www.youtube.com/watch?v=5DhaTPuyhys)
 
 ## What is RLM?
 
