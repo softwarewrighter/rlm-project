@@ -70,6 +70,8 @@ python src/rlm.py --query "..." --context-file ./file.txt
 
 ## Documentation
 
+> **[View the Wiki](https://github.com/softwarewrighter/rlm-project/wiki)** for comprehensive documentation with architecture diagrams, usage examples, and API reference.
+
 ### For Beginners
 - [docs/beginners/what-is-rlm.md](docs/beginners/what-is-rlm.md) - What RLM is and why it matters
 - [docs/beginners/how-it-works.md](docs/beginners/how-it-works.md) - Step-by-step walkthrough
