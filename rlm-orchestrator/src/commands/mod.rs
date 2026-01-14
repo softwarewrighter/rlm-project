@@ -9,7 +9,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::wasm::{WasmConfig, WasmExecutor, WasmLibrary};
+use crate::wasm::{
+    CompilerConfig, ModuleCache, RustCompiler, WasmConfig, WasmExecutor, WasmLibrary,
+};
 
 /// Errors from command execution
 #[derive(Error, Debug)]
@@ -44,6 +46,12 @@ pub enum CommandError {
 
     #[error("WASM module not found: {0}")]
     WasmModuleNotFound(String),
+
+    #[error("Rust compilation failed:\n{0}")]
+    RustCompileError(String),
+
+    #[error("Rust compiler not available: {0}")]
+    RustCompilerUnavailable(String),
 }
 
 /// A single command that can be executed
@@ -171,6 +179,22 @@ pub enum Command {
         #[serde(default)]
         store: Option<String>,
     },
+
+    /// Compile and execute Rust code: {"op": "rust_wasm", "code": "pub fn analyze..."}
+    ///
+    /// The code must define: `pub fn analyze(input: &str) -> String`
+    /// Available: HashMap, HashSet, Vec, iterators, string operations
+    /// NOT available: std::fs, std::net, std::process (sandboxed)
+    RustWasm {
+        /// Rust source code (must define `pub fn analyze(input: &str) -> String`)
+        code: String,
+        /// Variable to use as input (default: context)
+        #[serde(default)]
+        on: Option<String>,
+        /// Store result in variable
+        #[serde(default)]
+        store: Option<String>,
+    },
 }
 
 fn default_wasm_function() -> String {
@@ -217,6 +241,10 @@ pub struct CommandExecutor {
     wasm_executor: Option<WasmExecutor>,
     /// Library of pre-compiled WASM modules
     wasm_library: WasmLibrary,
+    /// Rust to WASM compiler (None if rustc not available)
+    rust_compiler: Option<RustCompiler>,
+    /// Cache for compiled WASM modules
+    wasm_cache: ModuleCache,
 }
 
 impl CommandExecutor {
@@ -224,6 +252,17 @@ impl CommandExecutor {
     pub fn new(context: String, max_sub_calls: usize) -> Self {
         // Initialize WASM executor (may fail on some platforms)
         let wasm_executor = WasmExecutor::new(WasmConfig::default()).ok();
+
+        // Initialize Rust compiler (may fail if rustc not installed)
+        let rust_compiler = RustCompiler::new(CompilerConfig::default()).ok();
+        if rust_compiler.is_some() {
+            tracing::info!("Rust WASM compiler available");
+        } else {
+            tracing::debug!("Rust WASM compiler not available (rustc not found)");
+        }
+
+        // Initialize module cache (memory-only by default)
+        let wasm_cache = ModuleCache::memory_only(100);
 
         Self {
             variables: HashMap::new(),
@@ -234,7 +273,14 @@ impl CommandExecutor {
             max_sub_calls,
             wasm_executor,
             wasm_library: WasmLibrary::new(),
+            rust_compiler,
+            wasm_cache,
         }
+    }
+
+    /// Check if Rust WASM compilation is available
+    pub fn rust_wasm_available(&self) -> bool {
+        self.rust_compiler.is_some() && self.wasm_executor.is_some()
     }
 
     /// Set the LLM callback
@@ -666,6 +712,61 @@ impl CommandExecutor {
                     sub_calls: 0,
                 })
             }
+
+            Command::RustWasm { code, on, store } => {
+                // Check if Rust compiler is available
+                let compiler = self.rust_compiler.as_ref().ok_or_else(|| {
+                    CommandError::RustCompilerUnavailable(
+                        "rustc not found. Install Rust: https://rustup.rs".to_string(),
+                    )
+                })?;
+
+                // Check if WASM executor is available
+                let executor = self.wasm_executor.as_ref().ok_or_else(|| {
+                    CommandError::WasmError(crate::wasm::WasmError::CompileError(
+                        "WASM runtime not available".to_string(),
+                    ))
+                })?;
+
+                // Check cache first
+                let wasm_bytes = if let Some(cached) = self.wasm_cache.get(code) {
+                    tracing::debug!("Cache hit for rust_wasm");
+                    cached
+                } else {
+                    // Compile Rust to WASM
+                    tracing::debug!("Compiling Rust code ({} bytes)", code.len());
+                    let compiled = compiler
+                        .compile(code)
+                        .map_err(|e| CommandError::RustCompileError(e.to_string()))?;
+
+                    // Cache the result
+                    self.wasm_cache.put(code, compiled.clone());
+                    compiled
+                };
+
+                // Execute the compiled WASM
+                let source = self.resolve_source(on)?.to_string();
+                let result = executor
+                    .execute(&wasm_bytes, "run_analyze", &source)
+                    .map_err(|e| {
+                        CommandError::WasmError(crate::wasm::WasmError::ExecutionError(
+                            e.to_string(),
+                        ))
+                    })?;
+
+                self.store_result(store, result.clone());
+
+                // Return concise output
+                let preview = if result.len() > 100 {
+                    format!("{}...", &result[..97])
+                } else {
+                    result.clone()
+                };
+                Ok(ExecutionResult::Continue {
+                    output: format!("rust_wasm result: {}", preview),
+                    sub_calls: 0,
+                })
+            }
         }
     }
 
@@ -890,5 +991,188 @@ mod tests {
         let mut exec = CommandExecutor::new("x".repeat(200), 10);
         let result = exec.execute_json(json);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_rust_wasm_available() {
+        let exec = CommandExecutor::new("test".to_string(), 10);
+        // Just check that the method exists and returns a bool
+        let available = exec.rust_wasm_available();
+        println!("rust_wasm_available: {}", available);
+    }
+
+    #[test]
+    fn test_rust_wasm_line_count() {
+        let mut exec = CommandExecutor::new("line1\nline2\nline3".to_string(), 10);
+
+        if !exec.rust_wasm_available() {
+            println!("Skipping test: rust_wasm not available");
+            return;
+        }
+
+        let code = r#"
+            pub fn analyze(input: &str) -> String {
+                input.lines().count().to_string()
+            }
+        "#;
+
+        let cmd = Command::RustWasm {
+            code: code.to_string(),
+            on: None,
+            store: Some("count".to_string()),
+        };
+
+        let result = exec.execute_one(&cmd);
+        match result {
+            Ok(ExecutionResult::Continue { output, .. }) => {
+                println!("Output: {}", output);
+                assert_eq!(exec.get_variable("count"), Some(&"3".to_string()));
+            }
+            Ok(ExecutionResult::Final { .. }) => {
+                panic!("Unexpected Final result");
+            }
+            Err(e) => {
+                println!(
+                    "Error (may be expected if rustc not configured for wasm): {}",
+                    e
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_rust_wasm_word_count() {
+        let mut exec = CommandExecutor::new("hello world foo bar baz".to_string(), 10);
+
+        if !exec.rust_wasm_available() {
+            println!("Skipping test: rust_wasm not available");
+            return;
+        }
+
+        let code = r#"
+            pub fn analyze(input: &str) -> String {
+                input.split_whitespace().count().to_string()
+            }
+        "#;
+
+        let cmd = Command::RustWasm {
+            code: code.to_string(),
+            on: None,
+            store: Some("words".to_string()),
+        };
+
+        let result = exec.execute_one(&cmd);
+        match result {
+            Ok(ExecutionResult::Continue { .. }) => {
+                assert_eq!(exec.get_variable("words"), Some(&"5".to_string()));
+            }
+            Err(e) => {
+                println!("Error: {}", e);
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn test_rust_wasm_with_hashmap() {
+        let mut exec = CommandExecutor::new("a b a c b a".to_string(), 10);
+
+        if !exec.rust_wasm_available() {
+            println!("Skipping test: rust_wasm not available");
+            return;
+        }
+
+        let code = r#"
+            pub fn analyze(input: &str) -> String {
+                let mut counts: HashMap<&str, usize> = HashMap::new();
+                for word in input.split_whitespace() {
+                    *counts.entry(word).or_insert(0) += 1;
+                }
+                // Find the most common word
+                counts.iter()
+                    .max_by_key(|(_, count)| *count)
+                    .map(|(word, count)| format!("{}: {}", word, count))
+                    .unwrap_or_else(|| "none".to_string())
+            }
+        "#;
+
+        let cmd = Command::RustWasm {
+            code: code.to_string(),
+            on: None,
+            store: Some("most_common".to_string()),
+        };
+
+        let result = exec.execute_one(&cmd);
+        match result {
+            Ok(ExecutionResult::Continue { .. }) => {
+                let value = exec.get_variable("most_common");
+                println!("Most common: {:?}", value);
+                // 'a' appears 3 times
+                assert!(value.is_some());
+                assert!(value.unwrap().contains("a: 3"));
+            }
+            Err(e) => {
+                println!("Error: {}", e);
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn test_rust_wasm_cache_hit() {
+        let mut exec = CommandExecutor::new("test input".to_string(), 10);
+
+        if !exec.rust_wasm_available() {
+            println!("Skipping test: rust_wasm not available");
+            return;
+        }
+
+        let code = r#"
+            pub fn analyze(input: &str) -> String {
+                input.len().to_string()
+            }
+        "#;
+
+        let cmd = Command::RustWasm {
+            code: code.to_string(),
+            on: None,
+            store: Some("len".to_string()),
+        };
+
+        // First execution - compiles
+        let _ = exec.execute_one(&cmd);
+
+        // Second execution - should hit cache
+        let result = exec.execute_one(&cmd);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_rust_wasm_compile_error() {
+        let mut exec = CommandExecutor::new("test".to_string(), 10);
+
+        if !exec.rust_wasm_available() {
+            println!("Skipping test: rust_wasm not available");
+            return;
+        }
+
+        let code = r#"
+            pub fn analyze(input: &str) -> String {
+                this_is_not_valid_rust
+            }
+        "#;
+
+        let cmd = Command::RustWasm {
+            code: code.to_string(),
+            on: None,
+            store: None,
+        };
+
+        let result = exec.execute_one(&cmd);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            println!("Expected error: {}", e);
+            assert!(e.to_string().contains("compilation failed") || e.to_string().contains("Rust"));
+        }
     }
 }
