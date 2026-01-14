@@ -8,6 +8,7 @@
 //!   rlm large-log.txt "How many ERROR lines?" --model llama3.2:3b
 
 use anyhow::{Context, Result};
+use colored::Colorize;
 use rlm::orchestrator::RlmOrchestrator;
 use rlm::pool::{LlmPool, LoadBalanceStrategy, ProviderRole};
 use rlm::provider::OllamaProvider;
@@ -18,29 +19,19 @@ use std::sync::Arc;
 const DEFAULT_MODEL: &str = "llama3.2:3b";
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
-// ANSI color codes
-const RESET: &str = "\x1b[0m";
-const BOLD: &str = "\x1b[1m";
-const DIM: &str = "\x1b[2m";
-const GREEN: &str = "\x1b[32m";
-const YELLOW: &str = "\x1b[33m";
-const BLUE: &str = "\x1b[34m";
-const MAGENTA: &str = "\x1b[35m";
-const CYAN: &str = "\x1b[36m";
-
 fn print_usage() {
     eprintln!(
         r#"
-{BOLD}RLM CLI{RESET} - Query large files with small LLMs using Recursive Language Models
+{} - Query large files with small LLMs using Recursive Language Models
 
-{BOLD}USAGE:{RESET}
+{}
     rlm <FILE> <QUERY> [OPTIONS]
 
-{BOLD}ARGS:{RESET}
+{}
     <FILE>     Path to the file to analyze
     <QUERY>    Question to ask about the file
 
-{BOLD}OPTIONS:{RESET}
+{}
     -m, --model <MODEL>         Ollama model to use (default: llama3.2:3b)
     -u, --ollama-url <URL>      Ollama server URL (default: http://localhost:11434)
     -n, --max-iterations <N>    Maximum RLM iterations (default: 20)
@@ -49,16 +40,22 @@ fn print_usage() {
     --dry-run                   Show what would be done without executing
     -h, --help                  Print this help message
 
-{BOLD}EXAMPLES:{RESET}
+{}
     rlm document.txt "What is the main topic?"
     rlm logs.txt "Count the ERROR lines" -m phi3:3.8b
     rlm war-and-peace.txt "Find the hidden passphrase" -vv
 
-{BOLD}HOW IT WORKS:{RESET}
+{}
     RLM enables small LLMs to analyze documents much larger than their
     context window by iteratively exploring the content using commands
     like 'find', 'slice', 'lines', and 'count' instead of reading everything.
-"#
+"#,
+        "RLM CLI".bold(),
+        "USAGE:".bold(),
+        "ARGS:".bold(),
+        "OPTIONS:".bold(),
+        "EXAMPLES:".bold(),
+        "HOW IT WORKS:".bold(),
     );
 }
 
@@ -141,73 +138,96 @@ fn parse_args() -> Result<CliArgs> {
 
 fn print_header(args: &CliArgs, file_size: usize, line_count: usize) {
     eprintln!();
-    eprintln!("{BLUE}╭──────────────────────────────────────────────────────────────╮{RESET}");
-    eprintln!("{BLUE}│{RESET}  {BOLD}RLM CLI{RESET} - Recursive Language Model Query                   {BLUE}│{RESET}");
-    eprintln!("{BLUE}├──────────────────────────────────────────────────────────────┤{RESET}");
     eprintln!(
-        "{BLUE}│{RESET}  {DIM}File:{RESET}   {}",
+        "{}",
+        "╭──────────────────────────────────────────────────────────────╮".blue()
+    );
+    eprintln!(
+        "{}  {}                   {}",
+        "│".blue(),
+        "RLM CLI - Recursive Language Model Query".bold(),
+        "│".blue()
+    );
+    eprintln!(
+        "{}",
+        "├──────────────────────────────────────────────────────────────┤".blue()
+    );
+    eprintln!(
+        "{}  {}   {}",
+        "│".blue(),
+        "File:".dimmed(),
         args.file.display()
     );
     eprintln!(
-        "{BLUE}│{RESET}  {DIM}Size:{RESET}   {} chars ({} lines, ~{} tokens)",
+        "{}  {}   {} chars ({} lines, ~{} tokens)",
+        "│".blue(),
+        "Size:".dimmed(),
         file_size,
         line_count,
         file_size / 4
     );
-    eprintln!("{BLUE}│{RESET}  {DIM}Model:{RESET}  {}", args.model);
+    eprintln!("{}  {}  {}", "│".blue(), "Model:".dimmed(), args.model);
     eprintln!(
-        "{BLUE}│{RESET}  {DIM}Query:{RESET}  {}",
+        "{}  {}  {}",
+        "│".blue(),
+        "Query:".dimmed(),
         if args.query.len() > 50 {
             format!("{}...", &args.query[..47])
         } else {
             args.query.clone()
         }
     );
-    eprintln!("{BLUE}╰──────────────────────────────────────────────────────────────╯{RESET}");
+    eprintln!(
+        "{}",
+        "╰──────────────────────────────────────────────────────────────╯".blue()
+    );
     eprintln!();
 }
 
 fn print_iteration(step: usize, llm_response: &str, commands: &str, output: &str, verbose: u8) {
-    eprintln!("{CYAN}┌─ Iteration {step} ─────────────────────────────────────────────────{RESET}");
+    eprintln!(
+        "{}",
+        format!("┌─ Iteration {step} ─────────────────────────────────────────────────").cyan()
+    );
 
     // At -vv level, show the full LLM response
     if verbose >= 2 && !llm_response.is_empty() {
-        eprintln!("{CYAN}│{RESET}");
-        eprintln!("{CYAN}│{RESET} {BLUE}▼ LLM Response:{RESET}");
+        eprintln!("{}", "│".cyan());
+        eprintln!("{} {}", "│".cyan(), "▼ LLM Response:".blue());
         // Show LLM response with green color, truncated if very long
         let response_preview = if llm_response.len() > 500 {
             format!(
-                "{}...\n{DIM}({} chars total){RESET}",
+                "{}...\n{}",
                 &llm_response[..497],
-                llm_response.len()
+                format!("({} chars total)", llm_response.len()).dimmed()
             )
         } else {
             llm_response.to_string()
         };
         for line in response_preview.lines() {
-            eprintln!("{CYAN}│{RESET}   {GREEN}{line}{RESET}");
+            eprintln!("{}   {}", "│".cyan(), line.green());
         }
-        eprintln!("{CYAN}│{RESET}");
+        eprintln!("{}", "│".cyan());
     }
 
     // Show the JSON command(s)
     if !commands.is_empty() && commands != "(direct)" {
-        eprintln!("{CYAN}│{RESET} {YELLOW}▶ Command(s):{RESET}");
+        eprintln!("{} {}", "│".cyan(), "▶ Command(s):".yellow());
         // Pretty print the JSON
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(commands) {
             if let Ok(pretty) = serde_json::to_string_pretty(&json) {
                 for line in pretty.lines() {
-                    eprintln!("{CYAN}│{RESET}   {YELLOW}{line}{RESET}");
+                    eprintln!("{}   {}", "│".cyan(), line.yellow());
                 }
             } else {
-                eprintln!("{CYAN}│{RESET}   {YELLOW}{commands}{RESET}");
+                eprintln!("{}   {}", "│".cyan(), commands.yellow());
             }
         } else {
             // Not valid JSON, show raw
-            eprintln!("{CYAN}│{RESET}   {YELLOW}{commands}{RESET}");
+            eprintln!("{}   {}", "│".cyan(), commands.yellow());
         }
     } else if !commands.is_empty() {
-        eprintln!("{CYAN}│{RESET} {YELLOW}▶ Command:{RESET} {commands}");
+        eprintln!("{} {} {}", "│".cyan(), "▶ Command:".yellow(), commands);
     }
 
     // Show output (truncated) with cyan color
@@ -215,26 +235,31 @@ fn print_iteration(step: usize, llm_response: &str, commands: &str, output: &str
         if verbose >= 2 || output.len() < 100 {
             let output_preview = if output.len() > 300 {
                 format!(
-                    "{}...\n{DIM}({} chars total){RESET}",
+                    "{}...\n{}",
                     &output[..297],
-                    output.len()
+                    format!("({} chars total)", output.len()).dimmed()
                 )
             } else {
                 output.to_string()
             };
-            eprintln!("{CYAN}│{RESET} {MAGENTA}◀ Output:{RESET}");
+            eprintln!("{} {}", "│".cyan(), "◀ Output:".magenta());
             for line in output_preview.lines() {
-                eprintln!("{CYAN}│{RESET}   {CYAN}{line}{RESET}");
+                eprintln!("{}   {}", "│".cyan(), line.cyan());
             }
         } else {
             eprintln!(
-                "{CYAN}│{RESET} {MAGENTA}◀ Output:{RESET} {DIM}{} chars{RESET}",
-                output.len()
+                "{} {} {}",
+                "│".cyan(),
+                "◀ Output:".magenta(),
+                format!("{} chars", output.len()).dimmed()
             );
         }
     }
 
-    eprintln!("{CYAN}└────────────────────────────────────────────────────────────────{RESET}");
+    eprintln!(
+        "{}",
+        "└────────────────────────────────────────────────────────────────".cyan()
+    );
 }
 
 fn print_results(
@@ -246,14 +271,38 @@ fn print_results(
     context_chars: usize,
 ) {
     eprintln!();
-    eprintln!("{GREEN}╭──────────────────────────────────────────────────────────────╮{RESET}");
-    eprintln!("{GREEN}│{RESET}  {BOLD}Results{RESET}                                                     {GREEN}│{RESET}");
-    eprintln!("{GREEN}├──────────────────────────────────────────────────────────────┤{RESET}");
-    eprintln!("{GREEN}│{RESET}  {DIM}Iterations:{RESET}     {iterations}");
-    eprintln!("{GREEN}│{RESET}  {DIM}Sub-LM calls:{RESET}   {sub_calls}");
     eprintln!(
-        "{GREEN}│{RESET}  {DIM}Tokens used:{RESET}    {} prompt + {} completion",
-        prompt_tokens, completion_tokens
+        "{}",
+        "╭──────────────────────────────────────────────────────────────╮".green()
+    );
+    eprintln!(
+        "{}  {}                                                     {}",
+        "│".green(),
+        "Results".bold(),
+        "│".green()
+    );
+    eprintln!(
+        "{}",
+        "├──────────────────────────────────────────────────────────────┤".green()
+    );
+    eprintln!(
+        "{}  {}     {}",
+        "│".green(),
+        "Iterations:".dimmed(),
+        iterations
+    );
+    eprintln!(
+        "{}  {}   {}",
+        "│".green(),
+        "Sub-LM calls:".dimmed(),
+        sub_calls
+    );
+    eprintln!(
+        "{}  {}    {} prompt + {} completion",
+        "│".green(),
+        "Tokens used:".dimmed(),
+        prompt_tokens,
+        completion_tokens
     );
 
     // Calculate token savings
@@ -262,16 +311,27 @@ fn print_results(
     if baseline_tokens > actual_tokens {
         let savings = ((baseline_tokens - actual_tokens) as f64 / baseline_tokens as f64) * 100.0;
         eprintln!(
-            "{GREEN}│{RESET}  {DIM}Token savings:{RESET}  {BOLD}{:.0}%{RESET} vs direct approach",
-            savings
+            "{}  {}  {} vs direct approach",
+            "│".green(),
+            "Token savings:".dimmed(),
+            format!("{:.0}%", savings).bold()
         );
     }
-    eprintln!("{GREEN}╰──────────────────────────────────────────────────────────────╯{RESET}");
+    eprintln!(
+        "{}",
+        "╰──────────────────────────────────────────────────────────────╯".green()
+    );
     eprintln!();
-    eprintln!("{BOLD}Answer:{RESET}");
-    eprintln!("{GREEN}════════════════════════════════════════════════════════════════{RESET}");
+    eprintln!("{}", "Answer:".bold());
+    eprintln!(
+        "{}",
+        "════════════════════════════════════════════════════════════════".green()
+    );
     println!("{answer}");
-    eprintln!("{GREEN}════════════════════════════════════════════════════════════════{RESET}");
+    eprintln!(
+        "{}",
+        "════════════════════════════════════════════════════════════════".green()
+    );
 }
 
 #[tokio::main]
@@ -289,9 +349,9 @@ async fn main() -> Result<()> {
 
     // Dry run - just show what would happen
     if args.dry_run {
-        eprintln!("{YELLOW}DRY RUN MODE - No LLM calls will be made{RESET}");
+        eprintln!("{}", "DRY RUN MODE - No LLM calls will be made".yellow());
         eprintln!();
-        eprintln!("{DIM}Would perform the following:{RESET}");
+        eprintln!("{}", "Would perform the following:".dimmed());
         eprintln!("  1. Connect to Ollama at {}", args.ollama_url);
         eprintln!("  2. Load model: {}", args.model);
         eprintln!(
@@ -301,14 +361,14 @@ async fn main() -> Result<()> {
         eprintln!("  4. Execute up to {} iterations", args.max_iterations);
         eprintln!("  5. Return answer");
         eprintln!();
-        eprintln!("{DIM}Available RLM commands:{RESET}");
-        eprintln!("  - {YELLOW}find{RESET}      Search for text");
-        eprintln!("  - {YELLOW}regex{RESET}     Pattern matching");
-        eprintln!("  - {GREEN}slice{RESET}     Extract character range");
-        eprintln!("  - {GREEN}lines{RESET}     Extract line range");
-        eprintln!("  - {MAGENTA}count{RESET}     Count lines/chars/matches");
-        eprintln!("  - {CYAN}llm_query{RESET} Delegate to sub-LLM");
-        eprintln!("  - {BOLD}final{RESET}     Return answer");
+        eprintln!("{}", "Available RLM commands:".dimmed());
+        eprintln!("  - {}      Search for text", "find".yellow());
+        eprintln!("  - {}     Pattern matching", "regex".yellow());
+        eprintln!("  - {}     Extract character range", "slice".green());
+        eprintln!("  - {}     Extract line range", "lines".green());
+        eprintln!("  - {}     Count lines/chars/matches", "count".magenta());
+        eprintln!("  - {} Delegate to sub-LLM", "llm_query".cyan());
+        eprintln!("  - {}     Return answer", "final".bold());
         return Ok(());
     }
 
@@ -339,7 +399,7 @@ async fn main() -> Result<()> {
     let orchestrator = RlmOrchestrator::new(config, pool);
 
     if args.verbose > 0 {
-        eprintln!("{DIM}Starting RLM processing...{RESET}");
+        eprintln!("{}", "Starting RLM processing...".dimmed());
         eprintln!();
     }
 
@@ -371,7 +431,7 @@ async fn main() -> Result<()> {
             );
         }
         Err(e) => {
-            eprintln!("{BOLD}\x1b[31mError:{RESET} {}", e);
+            eprintln!("{} {}", "Error:".red().bold(), e);
             std::process::exit(1);
         }
     }
