@@ -399,44 +399,96 @@ impl CommandExecutor {
 
             Command::Regex { pattern, on, store } => {
                 let source = self.resolve_source(on)?.to_string();
-                // Case-insensitive regex by default
+                // Case-insensitive regex by default - find matching LINES with line numbers
                 let re = regex::RegexBuilder::new(pattern)
                     .case_insensitive(true)
                     .build()?;
-                let matches: Vec<&str> = re.find_iter(&source).map(|m| m.as_str()).collect();
-                let match_count = matches.len();
-                let result = matches.join("\n");
-                self.store_result(store, result);
-                Ok(ExecutionResult::Continue {
-                    output: format!("Found {} matches", match_count),
-                    sub_calls: 0,
-                })
-            }
 
-            Command::Find { text, on, store } => {
-                let source = self.resolve_source(on)?;
-                // Case-insensitive search - return matching lines with line numbers
-                let text_lower = text.to_lowercase();
                 let mut matching_lines: Vec<String> = Vec::new();
-
                 for (line_num, line) in source.lines().enumerate() {
-                    if line.to_lowercase().contains(&text_lower) {
+                    if re.is_match(line) {
                         matching_lines.push(format!("L{}: {}", line_num + 1, line));
                     }
                 }
 
                 let count = matching_lines.len();
                 let result = matching_lines.join("\n");
-                let output = format!(
-                    "Found {} lines containing '{}'{}",
-                    count,
-                    text,
-                    if count > 0 && count <= 5 {
-                        format!(":\n{}", result)
+
+                // Always show preview (first 5 matches, truncated if needed)
+                let preview = if count > 0 {
+                    let preview_lines: Vec<&str> =
+                        matching_lines.iter().take(5).map(|s| s.as_str()).collect();
+                    let preview_text = preview_lines.join("\n");
+                    let truncated = if count > 5 {
+                        format!("\n... and {} more", count - 5)
                     } else {
                         String::new()
+                    };
+                    format!(":\n{}{}", preview_text, truncated)
+                } else {
+                    String::new()
+                };
+
+                let output = format!("Found {} lines matching '{}'{}", count, pattern, preview);
+                self.store_result(store, result);
+                Ok(ExecutionResult::Continue {
+                    output,
+                    sub_calls: 0,
+                })
+            }
+
+            Command::Find { text, on, store } => {
+                let source = self.resolve_source(on)?;
+                // Fuzzy search: split into words and find lines containing ANY word
+                // This makes searches like "Prince Andrei secret vault" find lines
+                // containing "vault" or "secret" even if the exact phrase doesn't match
+                let words: Vec<String> = text
+                    .split_whitespace()
+                    .filter(|w| w.len() >= 3) // Only words with 3+ chars
+                    .map(|w| w.to_lowercase())
+                    .collect();
+
+                let mut matching_lines: Vec<(usize, String, usize)> = Vec::new(); // (line_num, line, word_count)
+
+                for (line_num, line) in source.lines().enumerate() {
+                    let line_lower = line.to_lowercase();
+                    let word_matches = words.iter().filter(|w| line_lower.contains(*w)).count();
+                    if word_matches > 0 {
+                        matching_lines.push((line_num + 1, line.to_string(), word_matches));
                     }
-                );
+                }
+
+                // Sort by number of matching words (descending) to show most relevant first
+                matching_lines.sort_by(|a, b| b.2.cmp(&a.2));
+
+                let count = matching_lines.len();
+                let formatted: Vec<String> = matching_lines
+                    .iter()
+                    .map(|(num, line, _)| format!("L{}: {}", num, line))
+                    .collect();
+                let result = formatted.join("\n");
+
+                // Always show preview (first 5 matches, truncated if needed)
+                let preview = if count > 0 {
+                    let preview_lines: Vec<&str> =
+                        formatted.iter().take(5).map(|s| s.as_str()).collect();
+                    let preview_text = preview_lines.join("\n");
+                    let truncated = if count > 5 {
+                        format!("\n... and {} more", count - 5)
+                    } else {
+                        String::new()
+                    };
+                    format!(":\n{}{}", preview_text, truncated)
+                } else {
+                    String::new()
+                };
+
+                let search_desc = if words.len() > 1 {
+                    format!("any of [{}]", words.join(", "))
+                } else {
+                    format!("'{}'", text)
+                };
+                let output = format!("Found {} lines matching {}{}", count, search_desc, preview);
                 self.store_result(store, result);
                 Ok(ExecutionResult::Continue {
                     output,
@@ -807,7 +859,7 @@ mod tests {
         };
         let result = exec.execute_one(&cmd).unwrap();
         if let ExecutionResult::Continue { output, .. } = result {
-            assert!(output.contains("2 matches"));
+            assert!(output.contains("2 lines matching"));
         }
     }
 

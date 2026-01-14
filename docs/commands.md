@@ -79,7 +79,13 @@ L42: ERROR: Connection failed
 L157: error handling complete
 ```
 
-**Note:** Search is case-insensitive. Searching for "error" matches "ERROR", "Error", etc.
+**Fuzzy Search:** When searching with multiple words, `find` uses OR-based fuzzy matching:
+- Words are split and each word (3+ chars) is searched independently
+- Lines containing ANY search word are returned
+- Results are ranked by number of matching words (most relevant first)
+- Example: `"Prince Andrei secret vault"` finds lines containing "prince", "andrei", "secret", or "vault"
+
+**Note:** Search is case-insensitive. A preview of the first 5 matches is always shown in the command output.
 
 ### regex
 
@@ -98,11 +104,15 @@ Search using a regular expression pattern (case-insensitive by default).
 |-----------|------|---------|-------------|
 | `pattern` | string | required | Regex pattern (case-insensitive) |
 | `on` | string | "context" | Source variable name |
-| `store` | string | null | Variable to store matches |
+| `store` | string | null | Variable to store matching lines |
 
-**Output:** Newline-separated matched text.
+**Output:** Matching lines with line numbers (same format as `find`):
+```
+L42: def calculate_total(items):
+L157: def process_order(order):
+```
 
-**Note:** Regex matching is case-insensitive by default.
+**Note:** Regex matching is case-insensitive by default. Both `find` and `regex` show a preview of the first 5 matches in the command output.
 
 ### count
 

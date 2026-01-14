@@ -4,9 +4,9 @@
 Output demo/war-and-peace-demo.gif
 Output demo/war-and-peace-demo.mp4
 
-Set FontSize 12
-Set Width 1400
-Set Height 900
+Set FontSize 18
+Set Width 1600
+Set Height 1000
 Set Theme "Dracula"
 Set Padding 20
 Set TypingSpeed 40ms
@@ -33,7 +33,7 @@ Sleep 500ms
 
 Type "./target/release/rlm ../demo/war-and-peace-needle.txt 'What is the password to Prince Andrei secret vault?' -v -m qwen3:14b -u http://big72.local:11434"
 Enter
-Sleep 90s
+Sleep 45s
 
 Enter
 Type "# Found it! RLM searched 3.2MB using just a few targeted queries."

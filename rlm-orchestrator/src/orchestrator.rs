@@ -399,14 +399,24 @@ Finishing:
 ## Variable References
 Use ${{var}} or $var in strings to reference stored variables.
 
-## Workflow (SEARCH FIRST!)
-1. SEARCH: Use find/regex to locate relevant content - this is your primary tool!
+## Workflow (MANDATORY: SEARCH FIRST!)
+
+CRITICAL RULE: You MUST search the context BEFORE concluding anything doesn't exist.
+Never assume - always verify with find/regex commands first!
+
+1. SEARCH: Use find/regex with SIMPLE keywords (1-2 words). Start broad, then narrow.
+   - If searching for "Prince Andrei's secret vault" → try just "secret vault" or "password"
+   - If first search returns 0 matches, TRY DIFFERENT KEYWORDS
+   - Use the most distinctive word from the query (e.g., "vault", "password", "secret")
+
 2. Extract: Use lines/slice to get content around matches
 3. Analyze: If needed, use llm_query to analyze EXTRACTED content (pass it via ${{var}})
 4. Finish: Use final with your answer
 
-IMPORTANT: Always search/extract content BEFORE using llm_query.
-The sub-LLM in llm_query cannot see the original document - you must pass extracted text to it.
+IMPORTANT:
+- Always search/extract content BEFORE using llm_query.
+- The sub-LLM in llm_query cannot see the original document - you must pass extracted text to it.
+- NEVER give up after one failed search - try at least 2-3 different search terms!
 
 ## Example: Finding specific content
 
