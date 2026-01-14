@@ -1,0 +1,25 @@
+# Demo Config: Using a capable model that follows RLM protocol
+# qwen2.5:7b-instruct is small but smart enough for RLM
+
+max_iterations = 20
+max_sub_calls = 50
+output_limit = 10000
+
+# Disable bypass to always show RLM in action
+bypass_enabled = false
+bypass_threshold = 0
+
+# Use qwen2.5:7b-instruct - good balance of speed and capability
+[[providers]]
+provider_type = "ollama"
+base_url = "http://localhost:11434"
+model = "qwen2.5:7b-instruct"
+role = "root"
+weight = 1
+
+[[providers]]
+provider_type = "ollama"
+base_url = "http://localhost:11434"
+model = "qwen2.5:7b-instruct"
+role = "sub"
+weight = 1

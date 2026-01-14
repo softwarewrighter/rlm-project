@@ -25,3 +25,18 @@ Cargo.lock
 
 # Logs
 *.log
+
+# Demo outputs (VHS recordings, large test files)
+demo/*.gif
+demo/*.mp4
+demo/*.webm
+demo/war-and-peace*.txt
+*.gif
+*.mp4
+*.webm
+
+# Large text files
+war-and-peace*.txt
+
+# Distribution zips
+*.zip

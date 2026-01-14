@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RLM Demo - Animated GIF Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #0d1117;
+            color: #c9d1d9;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        h1 {
+            color: #58a6ff;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #8b949e;
+            margin-bottom: 20px;
+        }
+        .gif-container {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 10px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            display: block;
+        }
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            background: #238636;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #2ea043;
+        }
+        .info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            max-width: 800px;
+        }
+        .info h3 {
+            color: #58a6ff;
+            margin-bottom: 10px;
+        }
+        .info ul {
+            margin-left: 20px;
+            color: #8b949e;
+        }
+        .info li {
+            margin: 5px 0;
+        }
+        .success { color: #3fb950; }
+        .fail { color: #f85149; }
+    </style>
+</head>
+<body>
+    <h1>RLM Demo</h1>
+    <p class="subtitle">Recursive Language Models - Query Large Files with Small LLMs</p>
+
+    <div class="gif-container">
+        <img src="../demo/rlm-demo.gif" alt="RLM Demo Animation" id="demoGif">
+    </div>
+
+    <div class="controls">
+        <button onclick="replayGif()">Replay</button>
+        <button onclick="window.open('../demo/rlm-demo.mp4')">Open MP4</button>
+    </div>
+
+    <div class="info">
+        <h3>What This Demo Shows</h3>
+        <ul>
+            <li>A 15KB document with a secret code hidden at line 235</li>
+            <li class="fail"><strong>TEST 1:</strong> Direct query with truncated context → FAILS to find the code</li>
+            <li class="success"><strong>TEST 2:</strong> RLM query using iterative search → FINDS the code!</li>
+        </ul>
+    </div>
+
+    <div class="info">
+        <h3>The Problem (TEST 1)</h3>
+        <p>Imagine you have a 500-page book but can only read 50 pages at a time. If someone asks "what's on page 235?" - you're stuck. You can only see pages 1-50.</p>
+        <p style="margin-top: 10px;">That's what happens with small LLMs. The demo doc is 15KB (~3700 tokens), but we only send 4KB. The secret code is at line 235 - in the middle - so the LLM never sees it. <span class="fail"><strong>It fails.</strong></span></p>
+    </div>
+
+    <div class="info">
+        <h3>The Solution (TEST 2)</h3>
+        <p>Instead of making the LLM read the whole book, give it a <strong>search tool</strong>.</p>
+        <p style="margin-top: 10px;">RLM tells the LLM: "Here are commands you can use: <code>find</code>, <code>slice</code>, <code>lines</code>, etc."</p>
+        <p style="margin-top: 10px;">The LLM thinks: "They want a secret code... let me search for it."</p>
+        <pre style="background: #0d1117; padding: 10px; border-radius: 6px; margin-top: 10px; color: #7ee787;">{"command": "find", "pattern": "secret"}</pre>
+        <p style="margin-top: 10px;">RLM searches the file and returns just the matching lines. The LLM sees the answer and responds. <span class="success"><strong>It works!</strong></span></p>
+    </div>
+
+    <div class="info">
+        <h3>Token Savings</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+            <tr style="border-bottom: 1px solid #30363d;">
+                <th style="text-align: left; padding: 8px; color: #8b949e;">Approach</th>
+                <th style="text-align: left; padding: 8px; color: #8b949e;">Tokens</th>
+                <th style="text-align: left; padding: 8px; color: #8b949e;">Result</th>
+            </tr>
+            <tr style="border-bottom: 1px solid #30363d;">
+                <td style="padding: 8px;">Direct (truncated)</td>
+                <td style="padding: 8px;">~1000</td>
+                <td style="padding: 8px;" class="fail">❌ FAILS</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #30363d;">
+                <td style="padding: 8px;">Direct (full doc)</td>
+                <td style="padding: 8px;">~3700</td>
+                <td style="padding: 8px; color: #8b949e;">Maybe works, expensive</td>
+            </tr>
+            <tr>
+                <td style="padding: 8px;">RLM</td>
+                <td style="padding: 8px;">~370</td>
+                <td style="padding: 8px;" class="success">✅ WORKS</td>
+            </tr>
+        </table>
+        <p style="margin-top: 15px;"><strong style="color: #58a6ff;">90% token reduction!</strong> The LLM never reads the whole document - it uses Ctrl+F instead of reading every page.</p>
+    </div>
+
+    <script>
+        function replayGif() {
+            const img = document.getElementById('demoGif');
+            const src = img.src;
+            img.src = '';
+            setTimeout(() => { img.src = src + '?' + Date.now(); }, 50);
+        }
+    </script>
+</body>
+</html>

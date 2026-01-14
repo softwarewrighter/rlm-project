@@ -102,6 +102,7 @@ pub struct DebugResponse {
 #[derive(Debug, Serialize)]
 pub struct IterationRecordJson {
     pub step: usize,
+    pub llm_response: String,
     pub commands: String,
     pub output: String,
     pub error: Option<String>,
@@ -114,6 +115,7 @@ impl From<&IterationRecord> for IterationRecordJson {
     fn from(r: &IterationRecord) -> Self {
         Self {
             step: r.step,
+            llm_response: r.llm_response.clone(),
             commands: r.commands.clone(),
             output: r.output.clone(),
             error: r.error.clone(),

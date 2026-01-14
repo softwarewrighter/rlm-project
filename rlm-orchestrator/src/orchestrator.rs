@@ -44,7 +44,9 @@ pub struct IterationTokens {
 pub struct IterationRecord {
     /// Step number (1-indexed)
     pub step: usize,
-    /// Commands that were executed (JSON)
+    /// Raw LLM response (full text before parsing)
+    pub llm_response: String,
+    /// Commands that were executed (JSON extracted from response)
     pub commands: String,
     /// Output from execution
     pub output: String,
@@ -160,10 +162,11 @@ impl RlmOrchestrator {
             .unwrap_or((0, 0));
 
         Ok(RlmResult {
-            answer: response.content,
+            answer: response.content.clone(),
             iterations: 1,
             history: vec![IterationRecord {
                 step: 1,
+                llm_response: response.content,
                 commands: "(direct)".to_string(),
                 output: "Bypassed RLM - small context".to_string(),
                 error: None,
@@ -241,12 +244,16 @@ impl RlmOrchestrator {
             // Try to extract JSON commands first
             let commands_json = extract_commands(&response.content);
 
+            // Store LLM response for history
+            let llm_response = response.content.clone();
+
             if let Some(json) = commands_json {
                 // Execute the commands
                 match executor.execute_json(&json) {
                     Ok(ExecutionResult::Final { answer, sub_calls }) => {
                         history.push(IterationRecord {
                             step: iteration + 1,
+                            llm_response,
                             commands: json,
                             output: format!("FINAL: {}", &answer),
                             error: None,
@@ -271,6 +278,7 @@ impl RlmOrchestrator {
                         let truncated_output = self.truncate_output(&output);
                         history.push(IterationRecord {
                             step: iteration + 1,
+                            llm_response,
                             commands: json,
                             output: truncated_output,
                             error: None,
@@ -281,6 +289,7 @@ impl RlmOrchestrator {
                     Err(e) => {
                         history.push(IterationRecord {
                             step: iteration + 1,
+                            llm_response,
                             commands: json,
                             output: String::new(),
                             error: Some(e.to_string()),
@@ -295,6 +304,7 @@ impl RlmOrchestrator {
                 if let Some(final_answer) = extract_final(&response.content) {
                     history.push(IterationRecord {
                         step: iteration + 1,
+                        llm_response,
                         commands: String::new(),
                         output: format!("FINAL: {}", &final_answer),
                         error: None,
@@ -319,6 +329,7 @@ impl RlmOrchestrator {
                 warn!("No commands found in response, continuing");
                 history.push(IterationRecord {
                     step: iteration + 1,
+                    llm_response: response.content.clone(),
                     commands: String::new(),
                     output: String::new(),
                     error: Some("No JSON commands found in response".to_string()),

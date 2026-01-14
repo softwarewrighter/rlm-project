@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RLM Flow Diagrams</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #0d1117;
+            color: #c9d1d9;
+        }
+        h1, h2, h3 {
+            color: #58a6ff;
+        }
+        .diagram-container {
+            background: #161b22;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            border: 1px solid #30363d;
+        }
+        .mermaid {
+            text-align: center;
+        }
+        .description {
+            color: #8b949e;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        code {
+            background: #21262d;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 10px 20px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            cursor: pointer;
+            color: #c9d1d9;
+        }
+        .tab.active {
+            background: #238636;
+            border-color: #238636;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1>RLM (Recursive Language Model) Flow Diagrams</h1>
+
+    <p>These diagrams show how RLM enables small LLMs to process documents far beyond their context window by iteratively exploring content using structured commands.</p>
+
+    <div class="tabs">
+        <div class="tab active" onclick="showTab('overview')">Overview</div>
+        <div class="tab" onclick="showTab('cli')">CLI Flow</div>
+        <div class="tab" onclick="showTab('web')">Web Flow</div>
+        <div class="tab" onclick="showTab('commands')">Command Execution</div>
+    </div>
+
+    <!-- Overview Tab -->
+    <div id="overview" class="tab-content active">
+        <h2>High-Level Architecture</h2>
+        <div class="diagram-container">
+            <div class="mermaid">
+flowchart TB
+    subgraph User["User Interface"]
+        CLI[CLI Tool<br/>rlm file.txt query]
+        WEB[Web Visualizer<br/>localhost:8080/visualize]
+    end
+
+    subgraph RLM["RLM Orchestrator"]
+        ORCH[Orchestrator Loop]
+        CMD[Command Executor]
+        POOL[LLM Pool]
+    end
+
+    subgraph Providers["LLM Providers"]
+        OLLAMA[Ollama<br/>phi3:3.8b]
+        DEEPSEEK[DeepSeek API]
+        OTHER[Other Providers...]
+    end
+
+    subgraph Context["Document Context"]
+        FILE[Large Document<br/>War & Peace 3.3MB]
+    end
+
+    CLI --> ORCH
+    WEB --> ORCH
+    ORCH --> POOL
+    POOL --> OLLAMA
+    POOL --> DEEPSEEK
+    POOL --> OTHER
+    ORCH --> CMD
+    CMD --> FILE
+    CMD --> ORCH
+
+    style RLM fill:#238636,stroke:#2ea043
+    style User fill:#1f6feb,stroke:#388bfd
+    style Providers fill:#8957e5,stroke:#a371f7
+            </div>
+            <p class="description">RLM sits between the user interface and the LLM, intercepting queries and enabling iterative document exploration.</p>
+        </div>
+
+        <h2>The Core Problem RLM Solves</h2>
+        <div class="diagram-container">
+            <div class="mermaid">
+flowchart LR
+    subgraph Before["Without RLM"]
+        DOC1[3.3MB Document] --> LLM1[Small LLM<br/>4K context]
+        LLM1 --> FAIL[FAILS<br/>Context exceeded]
+    end
+
+    subgraph After["With RLM"]
+        DOC2[3.3MB Document] --> RLM2[RLM Orchestrator]
+        RLM2 --> |"find 'secret'"| SEARCH[Search Result]
+        SEARCH --> |"slice 1000-2000"| CHUNK[Small Chunk]
+        CHUNK --> LLM2[Small LLM<br/>4K context]
+        LLM2 --> SUCCESS[SUCCESS<br/>Found answer!]
+    end
+
+    style FAIL fill:#da3633,stroke:#f85149
+    style SUCCESS fill:#238636,stroke:#2ea043
+            </div>
+            <p class="description">Instead of overwhelming the LLM with the entire document, RLM lets the LLM request specific pieces through structured commands.</p>
+        </div>
+    </div>
+
+    <!-- CLI Tab -->
+    <div id="cli" class="tab-content">
+        <h2>CLI Demo Flow</h2>
+        <div class="diagram-container">
+            <div class="mermaid">
+sequenceDiagram
+    participant U as User
+    participant CLI as rlm CLI
+    participant O as Orchestrator
+    participant L as LLM (phi3)
+    participant F as File System
+
+    U->>CLI: rlm war-and-peace.txt "Find the passphrase"
+    CLI->>F: Read file (3.3MB)
+    F-->>CLI: Document content
+    CLI->>O: process(query, context)
+
+    Note over O: Iteration 1
+    O->>L: System prompt + available commands
+    L-->>O: {"op": "find", "text": "passphrase"}
+    O->>O: Execute find command
+    Note over O: Found at position 1,650,000
+
+    Note over O: Iteration 2
+    O->>L: Previous result + commands
+    L-->>O: {"op": "slice", "start": 1649900, "end": 1650100}
+    O->>O: Extract 200 chars around match
+
+    Note over O: Iteration 3
+    O->>L: Sliced content showing the passphrase
+    L-->>O: {"op": "final", "answer": "NEPTUNE-FALCON-7749"}
+
+    O-->>CLI: RlmResult with answer
+    CLI-->>U: Display answer + stats
+            </div>
+            <p class="description">The CLI reads the file, sends it to the orchestrator, which iteratively queries the LLM until an answer is found.</p>
+        </div>
+
+        <h3>CLI Command Structure</h3>
+        <div class="diagram-container">
+            <div class="mermaid">
+flowchart LR
+    subgraph Input
+        FILE[--file]
+        QUERY[--query]
+        MODEL[--model]
+        VERBOSE[--verbose]
+    end
+
+    subgraph Processing
+        READ[Read File]
+        CONFIG[Configure Pool]
+        PROCESS[RLM Process]
+    end
+
+    subgraph Output
+        ANSWER[Answer]
+        STATS[Statistics]
+        HISTORY[Iteration History]
+    end
+
+    FILE --> READ
+    QUERY --> PROCESS
+    MODEL --> CONFIG
+    VERBOSE --> HISTORY
+    READ --> PROCESS
+    CONFIG --> PROCESS
+    PROCESS --> ANSWER
+    PROCESS --> STATS
+    PROCESS --> HISTORY
+            </div>
+        </div>
+    </div>
+
+    <!-- Web Tab -->
+    <div id="web" class="tab-content">
+        <h2>Web Visualizer Flow</h2>
+        <div class="diagram-container">
+            <div class="mermaid">
+sequenceDiagram
+    participant B as Browser
+    participant S as RLM Server
+    participant O as Orchestrator
+    participant L as LLM
+
+    B->>S: GET /visualize
+    S-->>B: HTML page with form
+
+    B->>S: POST /debug {query, context}
+    S->>O: process(query, context)
+
+    loop RLM Iterations
+        O->>L: Send prompt with commands
+        L-->>O: JSON command response
+        O->>O: Execute command
+        Note over O: Store in history
+    end
+
+    O-->>S: RlmResult with full history
+    S-->>B: JSON response
+
+    Note over B: Render timeline visualization
+    Note over B: Show iteration details
+    Note over B: Display final answer
+            </div>
+            <p class="description">The web visualizer provides an interactive view of each iteration, showing commands and results in a timeline.</p>
+        </div>
+
+        <h3>API Endpoints</h3>
+        <div class="diagram-container">
+            <div class="mermaid">
+flowchart TB
+    subgraph Endpoints
+        HEALTH["/health<br/>GET - Server status"]
+        QUERY["/query<br/>POST - Simple query"]
+        DEBUG["/debug<br/>POST - Full history"]
+        VIZ["/visualize<br/>GET - Web UI"]
+    end
+
+    subgraph Response
+        R1["{'status': 'healthy'}"]
+        R2["{'answer': '...'}"]
+        R3["{'answer': '...', 'iterations': [...]}"]
+        R4["HTML page"]
+    end
+
+    HEALTH --> R1
+    QUERY --> R2
+    DEBUG --> R3
+    VIZ --> R4
+            </div>
+        </div>
+    </div>
+
+    <!-- Commands Tab -->
+    <div id="commands" class="tab-content">
+        <h2>Available RLM Commands</h2>
+        <div class="diagram-container">
+            <div class="mermaid">
+flowchart TB
+    subgraph Search["Search Commands"]
+        FIND["find<br/>Find text occurrences"]
+        REGEX["regex<br/>Pattern matching"]
+    end
+
+    subgraph Extract["Extraction Commands"]
+        SLICE["slice<br/>Character range"]
+        LINES["lines<br/>Line range"]
+    end
+
+    subgraph Analyze["Analysis Commands"]
+        COUNT["count<br/>Count lines/chars/matches"]
+        LEN["len<br/>Get length"]
+        SPLIT["split<br/>Split by delimiter"]
+    end
+
+    subgraph Delegate["Delegation Commands"]
+        LLMQ["llm_query<br/>Ask sub-LLM"]
+    end
+
+    subgraph Terminal["Terminal Commands"]
+        FINAL["final<br/>Return answer"]
+    end
+
+    style Search fill:#1f6feb
+    style Extract fill:#238636
+    style Analyze fill:#8957e5
+    style Delegate fill:#da3633
+    style Terminal fill:#f0883e
+            </div>
+        </div>
+
+        <h3>Command Execution Flow</h3>
+        <div class="diagram-container">
+            <div class="mermaid">
+sequenceDiagram
+    participant L as LLM
+    participant E as Command Executor
+    participant C as Context Store
+    participant V as Variable Store
+
+    L->>E: {"op": "find", "text": "ERROR", "store": "errors"}
+    E->>C: Search for "ERROR"
+    C-->>E: Positions: [100, 500, 1200]
+    E->>V: Store as "errors"
+    E-->>L: "Found 3 occurrences at positions 100, 500, 1200"
+
+    L->>E: {"op": "lines", "start": 10, "end": 20, "on": "errors"}
+    E->>V: Get "errors" variable
+    V-->>E: [100, 500, 1200]
+    E->>C: Extract lines 10-20 from error regions
+    C-->>E: Line content
+    E-->>L: "Lines 10-20: ..."
+
+    L->>E: {"op": "final", "answer": "3 ERROR lines found"}
+    E-->>L: DONE - Return answer
+            </div>
+            <p class="description">Commands can store results in variables for chaining operations together.</p>
+        </div>
+    </div>
+
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            themeVariables: {
+                primaryColor: '#238636',
+                primaryTextColor: '#c9d1d9',
+                primaryBorderColor: '#30363d',
+                lineColor: '#8b949e',
+                secondaryColor: '#21262d',
+                tertiaryColor: '#161b22'
+            }
+        });
+
+        function showTab(tabId) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(el => {
+                el.classList.remove('active');
+            });
+            document.querySelectorAll('.tab').forEach(el => {
+                el.classList.remove('active');
+            });
+
+            // Show selected tab
+            document.getElementById(tabId).classList.add('active');
+            event.target.classList.add('active');
+        }
+    </script>
+</body>
+</html>

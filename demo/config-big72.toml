@@ -1,0 +1,24 @@
+# Demo Config: Using big72 server with qwen3:14b
+# This model follows the RLM protocol reliably
+
+max_iterations = 20
+max_sub_calls = 50
+output_limit = 10000
+
+bypass_enabled = false
+bypass_threshold = 0
+
+# qwen3:14b on big72 - works well with RLM protocol
+[[providers]]
+provider_type = "ollama"
+base_url = "http://big72.local:11434"
+model = "qwen3:14b"
+role = "root"
+weight = 1
+
+[[providers]]
+provider_type = "ollama"
+base_url = "http://big72.local:11434"
+model = "qwen3:14b"
+role = "sub"
+weight = 1

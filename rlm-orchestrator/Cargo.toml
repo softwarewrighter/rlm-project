@@ -20,6 +20,10 @@ path = "src/bin/test_runner.rs"
 name = "multi-source-experiment"
 path = "src/bin/multi_source_experiment.rs"
 
+[[bin]]
+name = "rlm"
+path = "src/bin/rlm.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }

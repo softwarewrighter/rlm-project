@@ -1,0 +1,28 @@
+# Demo Config: Small Context LLM (phi3 with 4K context)
+# This demonstrates RLM enabling a small model to handle documents
+# that would otherwise exceed its context window.
+
+max_iterations = 20
+max_sub_calls = 50
+output_limit = 10000
+
+# IMPORTANT: Disable bypass so RLM is always used (for demo purposes)
+bypass_enabled = false
+bypass_threshold = 0
+
+# Use phi3:3.8b as root - it has only 4K context window
+# The demo document is ~10K chars, so direct query would fail
+[[providers]]
+provider_type = "ollama"
+base_url = "http://localhost:11434"
+model = "phi3:3.8b"
+role = "root"
+weight = 1
+
+# Use the same small model for sub-queries to keep demo consistent
+[[providers]]
+provider_type = "ollama"
+base_url = "http://localhost:11434"
+model = "phi3:3.8b"
+role = "sub"
+weight = 1
