@@ -56,28 +56,34 @@ Extract a line range from the context or a variable.
 
 ### find
 
-Find all occurrences of a text string.
+Find all lines containing a text string (case-insensitive).
 
 ```json
 {
   "op": "find",
-  "text": "ERROR",
+  "text": "error",
   "on": "context",
-  "store": "error_positions"
+  "store": "error_lines"
 }
 ```
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `text` | string | required | Text to search for |
+| `text` | string | required | Text to search for (case-insensitive) |
 | `on` | string | "context" | Source variable name |
-| `store` | string | null | Variable to store positions |
+| `store` | string | null | Variable to store matching lines |
 
-**Output:** Newline-separated character positions of matches.
+**Output:** Matching lines with line numbers, e.g.:
+```
+L42: ERROR: Connection failed
+L157: error handling complete
+```
+
+**Note:** Search is case-insensitive. Searching for "error" matches "ERROR", "Error", etc.
 
 ### regex
 
-Search using a regular expression pattern.
+Search using a regular expression pattern (case-insensitive by default).
 
 ```json
 {
@@ -90,11 +96,13 @@ Search using a regular expression pattern.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `pattern` | string | required | Regex pattern |
+| `pattern` | string | required | Regex pattern (case-insensitive) |
 | `on` | string | "context" | Source variable name |
 | `store` | string | null | Variable to store matches |
 
 **Output:** Newline-separated matched text.
+
+**Note:** Regex matching is case-insensitive by default.
 
 ### count
 

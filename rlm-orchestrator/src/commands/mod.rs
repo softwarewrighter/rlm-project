@@ -399,7 +399,10 @@ impl CommandExecutor {
 
             Command::Regex { pattern, on, store } => {
                 let source = self.resolve_source(on)?.to_string();
-                let re = Regex::new(pattern)?;
+                // Case-insensitive regex by default
+                let re = regex::RegexBuilder::new(pattern)
+                    .case_insensitive(true)
+                    .build()?;
                 let matches: Vec<&str> = re.find_iter(&source).map(|m| m.as_str()).collect();
                 let match_count = matches.len();
                 let result = matches.join("\n");
@@ -412,17 +415,31 @@ impl CommandExecutor {
 
             Command::Find { text, on, store } => {
                 let source = self.resolve_source(on)?;
-                let positions: Vec<usize> = source.match_indices(text).map(|(i, _)| i).collect();
-                let count = positions.len();
-                // Store one position per line (consistent with regex, works with count matches)
-                let result = positions
-                    .iter()
-                    .map(|p| p.to_string())
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                // Case-insensitive search - return matching lines with line numbers
+                let text_lower = text.to_lowercase();
+                let mut matching_lines: Vec<String> = Vec::new();
+
+                for (line_num, line) in source.lines().enumerate() {
+                    if line.to_lowercase().contains(&text_lower) {
+                        matching_lines.push(format!("L{}: {}", line_num + 1, line));
+                    }
+                }
+
+                let count = matching_lines.len();
+                let result = matching_lines.join("\n");
+                let output = format!(
+                    "Found {} lines containing '{}'{}",
+                    count,
+                    text,
+                    if count > 0 && count <= 5 {
+                        format!(":\n{}", result)
+                    } else {
+                        String::new()
+                    }
+                );
                 self.store_result(store, result);
                 Ok(ExecutionResult::Continue {
-                    output: format!("Found {} occurrences", count),
+                    output,
                     sub_calls: 0,
                 })
             }

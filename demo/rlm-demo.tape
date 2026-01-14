@@ -1,12 +1,12 @@
 # VHS Tape - RLM Demo: Failure vs Success
 # Run with: vhs demo/rlm-demo.tape
 
-Output demo/rlm-demo.gif
-Output demo/rlm-demo.mp4
+Output demo/rlm-demo-vv.gif
+Output demo/rlm-demo-vv.mp4
 
-Set FontSize 13
-Set Width 1200
-Set Height 900
+Set FontSize 12
+Set Width 1400
+Set Height 1000
 Set Theme "Dracula"
 Set Padding 20
 Set TypingSpeed 50ms
@@ -66,9 +66,9 @@ Type "cd rlm-orchestrator"
 Enter
 Sleep 500ms
 
-Type "./target/debug/rlm ../demo/context_too_big.txt 'Find the secret launch code' -v -m qwen3:14b -u http://big72.local:11434"
+Type "./target/release/rlm ../demo/context_too_big.txt 'Find the secret launch code' -vv -m qwen3:14b -u http://big72.local:11434"
 Enter
-Sleep 50s
+Sleep 60s
 
 Enter
 Type "# SUCCESS! RLM used 'find' to search - found the code!"

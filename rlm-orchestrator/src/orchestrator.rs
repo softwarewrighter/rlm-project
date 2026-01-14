@@ -380,8 +380,11 @@ Variables:
 - {{"op": "get", "name": "x"}} - Get variable value
 - {{"op": "print", "var": "x"}} - Print variable
 
-Sub-LM calls:
-- {{"op": "llm_query", "prompt": "Summarize: ${{chunk}}", "store": "summary"}}
+Sub-LM calls (for semantic analysis of EXTRACTED content):
+- {{"op": "llm_query", "prompt": "Analyze this: ${{extracted_text}}", "store": "analysis"}}
+  IMPORTANT: The sub-LLM has NO access to the original context!
+  You MUST first extract relevant content using find/regex/lines/slice,
+  then include that content in the prompt using variable references like ${{var}}.
 
 WASM (dynamic code execution):
 - {{"op": "wasm", "module": "line_counter"}} - Run pre-compiled WASM module
@@ -396,22 +399,34 @@ Finishing:
 ## Variable References
 Use ${{var}} or $var in strings to reference stored variables.
 
-## Workflow
-1. Explore: Get length, first/last lines to understand structure
-2. Search: Use regex/find to locate relevant content
-3. Extract: Slice or get specific lines
-4. Analyze: Use llm_query for semantic analysis of chunks
-5. Finish: Output final answer
+## Workflow (SEARCH FIRST!)
+1. SEARCH: Use find/regex to locate relevant content - this is your primary tool!
+2. Extract: Use lines/slice to get content around matches
+3. Analyze: If needed, use llm_query to analyze EXTRACTED content (pass it via ${{var}})
+4. Finish: Use final with your answer
 
-## Example
+IMPORTANT: Always search/extract content BEFORE using llm_query.
+The sub-LLM in llm_query cannot see the original document - you must pass extracted text to it.
+
+## Example: Finding specific content
 
 ```json
-{{"op": "len", "store": "total_len"}}
-{{"op": "lines", "start": 0, "end": 10, "store": "header"}}
-{{"op": "regex", "pattern": "class \\w+", "store": "classes"}}
-{{"op": "count", "what": "matches", "store": "class_count"}}
-{{"op": "final", "answer": "Found ${{class_count}} classes"}}
+{{"op": "find", "text": "secret", "store": "matches"}}
 ```
+Then examine results and extract context:
+```json
+{{"op": "lines", "start": 230, "end": 240, "store": "context"}}
+{{"op": "final", "answer": "Found: ${{context}}"}}
+```
+
+## Example: Using llm_query correctly
+
+```json
+{{"op": "find", "text": "error", "store": "error_lines"}}
+{{"op": "llm_query", "prompt": "Categorize these errors: ${{error_lines}}", "store": "analysis"}}
+{{"op": "final_var", "name": "analysis"}}
+```
+Note: The extracted ${{error_lines}} is passed TO the sub-LLM in the prompt.
 
 ## Important Notes
 - Variables store strings only. Use `count` with `what: "matches"` after `regex` to count results.
