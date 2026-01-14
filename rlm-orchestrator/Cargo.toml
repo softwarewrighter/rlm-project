@@ -72,5 +72,9 @@ uuid = { version = "1", features = ["v4"] }
 wasmtime = "27"
 wat = "1"  # For parsing WebAssembly Text format
 
+# For Rust->WASM compilation
+tempfile = "3"
+lru = "0.12"
+
 [dev-dependencies]
 tokio-test = "0.4"
