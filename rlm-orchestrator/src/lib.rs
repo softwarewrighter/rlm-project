@@ -13,7 +13,7 @@ pub mod pool;
 pub mod provider;
 pub mod wasm;
 
-pub use orchestrator::RlmOrchestrator;
+pub use orchestrator::{ProgressCallback, ProgressEvent, RlmOrchestrator};
 pub use pool::LlmPool;
 pub use provider::{LlmProvider, LlmRequest, LlmResponse};
 

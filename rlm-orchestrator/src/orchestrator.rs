@@ -12,6 +12,45 @@ use std::time::Instant;
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
+/// Progress events emitted during RLM processing for real-time feedback
+#[derive(Debug, Clone)]
+pub enum ProgressEvent {
+    /// Starting a new iteration
+    IterationStart { step: usize },
+    /// LLM call starting
+    LlmCallStart { step: usize },
+    /// LLM call completed
+    LlmCallComplete {
+        step: usize,
+        duration_ms: u64,
+        response_preview: String,
+    },
+    /// Commands extracted and about to execute
+    CommandsExtracted { step: usize, commands: String },
+    /// WASM compilation starting
+    WasmCompileStart { step: usize },
+    /// WASM compilation complete
+    WasmCompileComplete { step: usize, duration_ms: u64 },
+    /// Command execution complete
+    CommandComplete {
+        step: usize,
+        output_preview: String,
+        exec_ms: u64,
+    },
+    /// Iteration finished
+    IterationComplete {
+        step: usize,
+        record: IterationRecord,
+    },
+    /// Final answer found
+    FinalAnswer { answer: String },
+    /// Processing complete
+    Complete { iterations: usize, success: bool },
+}
+
+/// Callback type for progress events
+pub type ProgressCallback = Box<dyn Fn(ProgressEvent) + Send + Sync>;
+
 /// Errors from RLM orchestration
 #[derive(Error, Debug)]
 pub enum OrchestratorError {
@@ -207,12 +246,29 @@ impl RlmOrchestrator {
         })
     }
 
-    /// Process a query over the given context
+    /// Process a query over the given context (no progress callbacks)
     pub async fn process(
         &self,
         query: &str,
         context: &str,
     ) -> Result<RlmResult, OrchestratorError> {
+        self.process_with_progress(query, context, None).await
+    }
+
+    /// Process a query with optional progress callbacks for real-time feedback
+    pub async fn process_with_progress(
+        &self,
+        query: &str,
+        context: &str,
+        progress: Option<ProgressCallback>,
+    ) -> Result<RlmResult, OrchestratorError> {
+        // Helper to emit progress events
+        let emit = |event: ProgressEvent| {
+            if let Some(ref cb) = progress {
+                cb(event);
+            }
+        };
+
         // Check if we should bypass RLM for small contexts
         if self.should_bypass(context.len()) {
             return self.process_direct(query, context).await;
@@ -238,10 +294,16 @@ impl RlmOrchestrator {
         .with_llm_callback(llm_query_cb);
 
         for iteration in 0..self.config.max_iterations {
-            info!(iteration = iteration + 1, "Starting RLM iteration");
+            let step = iteration + 1;
+            info!(iteration = step, "Starting RLM iteration");
+            emit(ProgressEvent::IterationStart { step });
 
             // Check if we've exceeded max sub-calls
             if total_sub_calls.load(Ordering::Relaxed) >= self.config.max_sub_calls {
+                emit(ProgressEvent::Complete {
+                    iterations: step,
+                    success: false,
+                });
                 return Err(OrchestratorError::MaxSubCalls(self.config.max_sub_calls));
             }
 
@@ -249,10 +311,26 @@ impl RlmOrchestrator {
             let prompt = self.build_prompt(query, context, &history);
 
             // Call the root LLM (with timing)
+            emit(ProgressEvent::LlmCallStart { step });
             let llm_start = Instant::now();
             let request = LlmRequest::new(&system_prompt, &prompt);
             let response = self.pool.complete(&request, false).await?;
             let llm_ms = llm_start.elapsed().as_millis() as u64;
+
+            // Emit LLM complete with preview
+            let response_preview = if response.content.len() > 100 {
+                format!(
+                    "{}...",
+                    &response.content[..100.min(response.content.len())]
+                )
+            } else {
+                response.content.clone()
+            };
+            emit(ProgressEvent::LlmCallComplete {
+                step,
+                duration_ms: llm_ms,
+                response_preview,
+            });
 
             // Track token usage
             let iter_tokens = response
@@ -275,11 +353,29 @@ impl RlmOrchestrator {
             let llm_response = response.content.clone();
 
             if let Some(json) = commands_json {
+                emit(ProgressEvent::CommandsExtracted {
+                    step,
+                    commands: json.clone(),
+                });
+
+                // Check if this might involve WASM compilation
+                if json.contains("rust_wasm") {
+                    emit(ProgressEvent::WasmCompileStart { step });
+                }
+
                 // Execute the commands (with timing)
                 let exec_start = Instant::now();
                 let exec_result = executor.execute_json(&json);
                 let exec_ms = exec_start.elapsed().as_millis() as u64;
                 let compile_ms = executor.last_compile_time_ms();
+
+                // Emit compile complete if there was compilation
+                if compile_ms > 0 {
+                    emit(ProgressEvent::WasmCompileComplete {
+                        step,
+                        duration_ms: compile_ms,
+                    });
+                }
 
                 let timing = IterationTiming {
                     llm_ms,
@@ -289,8 +385,8 @@ impl RlmOrchestrator {
 
                 match exec_result {
                     Ok(ExecutionResult::Final { answer, sub_calls }) => {
-                        history.push(IterationRecord {
-                            step: iteration + 1,
+                        let record = IterationRecord {
+                            step,
                             llm_response,
                             commands: json,
                             output: format!("FINAL: {}", &answer),
@@ -298,11 +394,28 @@ impl RlmOrchestrator {
                             sub_calls,
                             tokens: iter_tokens,
                             timing,
+                        };
+                        emit(ProgressEvent::CommandComplete {
+                            step,
+                            output_preview: format!("FINAL: {}", &answer),
+                            exec_ms,
                         });
+                        emit(ProgressEvent::IterationComplete {
+                            step,
+                            record: record.clone(),
+                        });
+                        emit(ProgressEvent::FinalAnswer {
+                            answer: answer.clone(),
+                        });
+                        emit(ProgressEvent::Complete {
+                            iterations: step,
+                            success: true,
+                        });
+                        history.push(record);
 
                         return Ok(RlmResult {
                             answer,
-                            iterations: iteration + 1,
+                            iterations: step,
                             history,
                             total_sub_calls: total_sub_calls.load(Ordering::Relaxed),
                             success: true,
@@ -315,8 +428,18 @@ impl RlmOrchestrator {
                     }
                     Ok(ExecutionResult::Continue { output, sub_calls }) => {
                         let truncated_output = self.truncate_output(&output);
-                        history.push(IterationRecord {
-                            step: iteration + 1,
+                        let output_preview = if output.len() > 100 {
+                            format!("{}...", &output[..100.min(output.len())])
+                        } else {
+                            output.clone()
+                        };
+                        emit(ProgressEvent::CommandComplete {
+                            step,
+                            output_preview,
+                            exec_ms,
+                        });
+                        let record = IterationRecord {
+                            step,
                             llm_response,
                             commands: json,
                             output: truncated_output,
@@ -324,11 +447,21 @@ impl RlmOrchestrator {
                             sub_calls,
                             tokens: iter_tokens,
                             timing,
+                        };
+                        emit(ProgressEvent::IterationComplete {
+                            step,
+                            record: record.clone(),
                         });
+                        history.push(record);
                     }
                     Err(e) => {
-                        history.push(IterationRecord {
-                            step: iteration + 1,
+                        emit(ProgressEvent::CommandComplete {
+                            step,
+                            output_preview: format!("ERROR: {}", e),
+                            exec_ms,
+                        });
+                        let record = IterationRecord {
+                            step,
                             llm_response,
                             commands: json,
                             output: String::new(),
@@ -336,7 +469,12 @@ impl RlmOrchestrator {
                             sub_calls: 0,
                             tokens: iter_tokens,
                             timing,
+                        };
+                        emit(ProgressEvent::IterationComplete {
+                            step,
+                            record: record.clone(),
                         });
+                        history.push(record);
                         debug!("Command execution had error: {}", e);
                     }
                 }
@@ -349,8 +487,8 @@ impl RlmOrchestrator {
                 };
 
                 if let Some(final_answer) = extract_final(&response.content) {
-                    history.push(IterationRecord {
-                        step: iteration + 1,
+                    let record = IterationRecord {
+                        step,
                         llm_response,
                         commands: String::new(),
                         output: format!("FINAL: {}", &final_answer),
@@ -358,10 +496,22 @@ impl RlmOrchestrator {
                         sub_calls: 0,
                         tokens: iter_tokens,
                         timing,
+                    };
+                    emit(ProgressEvent::FinalAnswer {
+                        answer: final_answer.clone(),
                     });
+                    emit(ProgressEvent::IterationComplete {
+                        step,
+                        record: record.clone(),
+                    });
+                    emit(ProgressEvent::Complete {
+                        iterations: step,
+                        success: true,
+                    });
+                    history.push(record);
                     return Ok(RlmResult {
                         answer: final_answer,
-                        iterations: iteration + 1,
+                        iterations: step,
                         history,
                         total_sub_calls: total_sub_calls.load(Ordering::Relaxed),
                         success: true,
@@ -375,8 +525,8 @@ impl RlmOrchestrator {
 
                 // No commands and no FINAL - log and continue
                 warn!("No commands found in response, continuing");
-                history.push(IterationRecord {
-                    step: iteration + 1,
+                let record = IterationRecord {
+                    step,
                     llm_response: response.content.clone(),
                     commands: String::new(),
                     output: String::new(),
@@ -384,11 +534,20 @@ impl RlmOrchestrator {
                     sub_calls: 0,
                     tokens: iter_tokens,
                     timing,
+                };
+                emit(ProgressEvent::IterationComplete {
+                    step,
+                    record: record.clone(),
                 });
+                history.push(record);
             }
         }
 
         // Max iterations reached - still return token info
+        emit(ProgressEvent::Complete {
+            iterations: self.config.max_iterations,
+            success: false,
+        });
         Ok(RlmResult {
             answer: String::new(),
             iterations: self.config.max_iterations,

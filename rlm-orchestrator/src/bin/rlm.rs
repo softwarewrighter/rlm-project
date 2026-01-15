@@ -12,7 +12,7 @@ use colored::Colorize;
 use rlm::orchestrator::RlmOrchestrator;
 use rlm::pool::{LlmPool, LoadBalanceStrategy, ProviderRole};
 use rlm::provider::{LiteLLMProvider, OllamaProvider};
-use rlm::{ProviderConfig, RlmConfig};
+use rlm::{ProgressCallback, ProgressEvent, ProviderConfig, RlmConfig};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,6 +31,123 @@ fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
         end -= 1;
     }
     &s[..end]
+}
+
+/// Create a progress callback for real-time output based on verbosity level
+fn create_progress_callback(verbose: u8) -> ProgressCallback {
+    Box::new(move |event: ProgressEvent| {
+        let mut stderr = std::io::stderr();
+        match event {
+            ProgressEvent::IterationStart { step } => {
+                // Always show iteration start (minimal output)
+                eprintln!("{}", format!("┌─ Iteration {} ", step).cyan());
+                let _ = stderr.flush();
+            }
+            ProgressEvent::LlmCallStart { step: _ } => {
+                if verbose >= 1 {
+                    eprint!("{}", "│ ⏳ Calling LLM...".dimmed());
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::LlmCallComplete {
+                step: _,
+                duration_ms,
+                response_preview,
+            } => {
+                if verbose >= 1 {
+                    // Clear the "Calling LLM..." line and show result
+                    eprint!("\r{}", " ".repeat(30)); // Clear line
+                    eprintln!(
+                        "\r{} {}",
+                        "│".cyan(),
+                        format!("⏱  LLM: {}ms", duration_ms).dimmed()
+                    );
+                    if verbose >= 2 {
+                        eprintln!("{} {}", "│".cyan(), "▼ Response preview:".blue());
+                        let preview = truncate_to_char_boundary(&response_preview, 200);
+                        for line in preview.lines().take(3) {
+                            eprintln!("{}   {}", "│".cyan(), line.green());
+                        }
+                    }
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::CommandsExtracted { step: _, commands } => {
+                if verbose >= 2 {
+                    eprintln!("{} {}", "│".cyan(), "▶ Commands:".yellow());
+                    let preview = truncate_to_char_boundary(&commands, 150);
+                    eprintln!("{}   {}", "│".cyan(), preview.yellow());
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::WasmCompileStart { step: _ } => {
+                if verbose >= 1 {
+                    eprint!("{} {}", "│".cyan(), "🔧 Compiling WASM...".dimmed());
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::WasmCompileComplete {
+                step: _,
+                duration_ms,
+            } => {
+                if verbose >= 1 {
+                    eprintln!(" {}", format!("done ({}ms)", duration_ms).green());
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::CommandComplete {
+                step: _,
+                output_preview,
+                exec_ms,
+            } => {
+                if verbose >= 1 {
+                    eprintln!(
+                        "{} {} {}",
+                        "│".cyan(),
+                        "◀ Exec:".magenta(),
+                        format!("{}ms", exec_ms).dimmed()
+                    );
+                    if verbose >= 2 && !output_preview.is_empty() {
+                        let preview = truncate_to_char_boundary(&output_preview, 150);
+                        eprintln!("{}   {}", "│".cyan(), preview.cyan());
+                    }
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::IterationComplete { step: _, record: _ } => {
+                eprintln!("{}", "└────────────────────────────────────────".cyan());
+                let _ = stderr.flush();
+            }
+            ProgressEvent::FinalAnswer { answer } => {
+                if verbose >= 1 {
+                    let preview = truncate_to_char_boundary(&answer, 100);
+                    eprintln!("{} {}", "✓ Final:".green().bold(), preview);
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::Complete {
+                iterations,
+                success,
+            } => {
+                if success {
+                    eprintln!(
+                        "{}",
+                        format!("Completed in {} iteration(s)", iterations)
+                            .green()
+                            .dimmed()
+                    );
+                } else {
+                    eprintln!(
+                        "{}",
+                        format!("Stopped after {} iteration(s)", iterations)
+                            .yellow()
+                            .dimmed()
+                    );
+                }
+                let _ = stderr.flush();
+            }
+        }
+    })
 }
 
 fn print_usage() {
@@ -257,113 +374,6 @@ fn print_header(args: &CliArgs, file_size: usize, line_count: usize) {
     eprintln!();
 }
 
-/// Data for printing an iteration's results
-struct IterationDisplay<'a> {
-    step: usize,
-    llm_response: &'a str,
-    commands: &'a str,
-    output: &'a str,
-    verbose: u8,
-    llm_ms: u64,
-    exec_ms: u64,
-    compile_ms: u64,
-}
-
-fn print_iteration(iter: &IterationDisplay) {
-    // Build timing string
-    let timing_str = if iter.compile_ms > 0 {
-        format!(
-            "LLM: {}ms | Exec: {}ms (compile: {}ms)",
-            iter.llm_ms, iter.exec_ms, iter.compile_ms
-        )
-    } else {
-        format!("LLM: {}ms | Exec: {}ms", iter.llm_ms, iter.exec_ms)
-    };
-
-    eprintln!(
-        "{}",
-        format!(
-            "┌─ Iteration {} ─────────────────────────────────────────────────",
-            iter.step
-        )
-        .cyan()
-    );
-    eprintln!("{} {}", "│".cyan(), format!("⏱  {}", timing_str).dimmed());
-
-    // At -vv level, show the full LLM response
-    if iter.verbose >= 2 && !iter.llm_response.is_empty() {
-        eprintln!("{}", "│".cyan());
-        eprintln!("{} {}", "│".cyan(), "▼ LLM Response:".blue());
-        // Show LLM response with green color, truncated if very long
-        let response_preview = if iter.llm_response.len() > 500 {
-            format!(
-                "{}...\n{}",
-                truncate_to_char_boundary(iter.llm_response, 497),
-                format!("({} chars total)", iter.llm_response.len()).dimmed()
-            )
-        } else {
-            iter.llm_response.to_string()
-        };
-        for line in response_preview.lines() {
-            eprintln!("{}   {}", "│".cyan(), line.green());
-        }
-        eprintln!("{}", "│".cyan());
-    }
-
-    // Show the JSON command(s)
-    if !iter.commands.is_empty() && iter.commands != "(direct)" {
-        eprintln!("{} {}", "│".cyan(), "▶ Command(s):".yellow());
-        // Pretty print the JSON
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(iter.commands) {
-            if let Ok(pretty) = serde_json::to_string_pretty(&json) {
-                for line in pretty.lines() {
-                    eprintln!("{}   {}", "│".cyan(), line.yellow());
-                }
-            } else {
-                eprintln!("{}   {}", "│".cyan(), iter.commands.yellow());
-            }
-        } else {
-            // Not valid JSON, show raw
-            eprintln!("{}   {}", "│".cyan(), iter.commands.yellow());
-        }
-    } else if !iter.commands.is_empty() {
-        eprintln!("{} {} {}", "│".cyan(), "▶ Command:".yellow(), iter.commands);
-    }
-
-    // Show output (truncated) with cyan color
-    if !iter.output.is_empty() {
-        if iter.verbose >= 2 || iter.output.len() < 100 {
-            let output_preview = if iter.output.len() > 300 {
-                format!(
-                    "{}...\n{}",
-                    truncate_to_char_boundary(iter.output, 297),
-                    format!("({} chars total)", iter.output.len()).dimmed()
-                )
-            } else {
-                iter.output.to_string()
-            };
-            eprintln!("{} {}", "│".cyan(), "◀ Output:".magenta());
-            for line in output_preview.lines() {
-                eprintln!("{}   {}", "│".cyan(), line.cyan());
-            }
-        } else {
-            eprintln!(
-                "{} {} {}",
-                "│".cyan(),
-                "◀ Output:".magenta(),
-                format!("{} chars", iter.output.len()).dimmed()
-            );
-        }
-    }
-
-    eprintln!(
-        "{}",
-        "└────────────────────────────────────────────────────────────────".cyan()
-    );
-    // Flush stderr to ensure output is shown immediately
-    let _ = std::io::stderr().flush();
-}
-
 fn print_results(
     answer: &str,
     iterations: usize,
@@ -543,33 +553,21 @@ async fn main() -> Result<()> {
     // Create orchestrator
     let orchestrator = RlmOrchestrator::new(config, pool);
 
-    if args.verbose > 0 {
-        eprintln!("{}", "Starting RLM processing...".dimmed());
-        eprintln!();
-        let _ = std::io::stderr().flush();
-    }
+    eprintln!("{}", "Starting RLM processing...".dimmed());
+    eprintln!();
+    let _ = std::io::stderr().flush();
 
-    // Process query
-    let result = orchestrator.process(&args.query, &context).await;
+    // Create progress callback for real-time output
+    let progress_callback = Some(create_progress_callback(args.verbose));
+
+    // Process query with real-time progress
+    let result = orchestrator
+        .process_with_progress(&args.query, &context, progress_callback)
+        .await;
 
     match result {
         Ok(rlm_result) => {
-            // Show iteration history if verbose
-            if args.verbose > 0 {
-                for record in &rlm_result.history {
-                    print_iteration(&IterationDisplay {
-                        step: record.step,
-                        llm_response: &record.llm_response,
-                        commands: &record.commands,
-                        output: &record.output,
-                        verbose: args.verbose,
-                        llm_ms: record.timing.llm_ms,
-                        exec_ms: record.timing.exec_ms,
-                        compile_ms: record.timing.compile_ms,
-                    });
-                }
-            }
-
+            eprintln!(); // Blank line before results
             print_results(
                 &rlm_result.answer,
                 rlm_result.iterations,
