@@ -10,6 +10,7 @@
 
 pub mod cache;
 pub mod compiler;
+pub mod library;
 #[cfg(test)]
 mod benchmark_tests;
 #[cfg(test)]
@@ -19,6 +20,7 @@ mod security_tests;
 
 pub use cache::{CacheConfig, CacheStats, ModuleCache};
 pub use compiler::{CompileError, CompilerConfig, RustCompiler};
+pub use library::{ToolDescription, WasmToolLibrary};
 
 use std::collections::HashMap;
 use thiserror::Error;

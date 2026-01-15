@@ -12,6 +12,7 @@ use thiserror::Error;
 
 use crate::wasm::{
     CompilerConfig, ModuleCache, RustCompiler, WasmConfig, WasmExecutor, WasmLibrary,
+    WasmToolLibrary,
 };
 
 /// Errors from command execution
@@ -152,10 +153,18 @@ pub enum Command {
     FinalVar { name: String },
 
     /// Execute pre-compiled WASM module: {"op": "wasm", "module": "line_counter"}
+    /// Or pre-built tool: {"op": "wasm", "tool": "count_pattern", "args": "ERROR|<context>"}
     Wasm {
-        /// Name of pre-compiled module from WasmLibrary
-        module: String,
-        /// Function to call (default: "analyze")
+        /// Name of pre-compiled module from WasmLibrary (legacy)
+        #[serde(default)]
+        module: Option<String>,
+        /// Name of pre-built tool from WasmToolLibrary
+        #[serde(default)]
+        tool: Option<String>,
+        /// Arguments to pass to tool (format: "arg1|arg2|..." prepended to input)
+        #[serde(default)]
+        args: Option<String>,
+        /// Function to call (default: "analyze" or "run_analyze" for tools)
         #[serde(default = "default_wasm_function")]
         function: String,
         /// Variable to use as input (default: context)
@@ -240,8 +249,10 @@ pub struct CommandExecutor {
     max_sub_calls: usize,
     /// WASM executor for dynamic code
     wasm_executor: Option<WasmExecutor>,
-    /// Library of pre-compiled WASM modules
+    /// Library of pre-compiled WASM modules (legacy)
     wasm_library: WasmLibrary,
+    /// Library of pre-built WASM tools
+    wasm_tool_library: Option<WasmToolLibrary>,
     /// Rust to WASM compiler (None if rustc not available)
     rust_compiler: Option<RustCompiler>,
     /// Cache for compiled WASM modules
@@ -311,6 +322,19 @@ impl CommandExecutor {
             ModuleCache::memory_only(wasm_config.cache_size)
         };
 
+        // Initialize tool library if WASM is enabled and compiler is available
+        let wasm_tool_library = if wasm_config.enabled && wasm_config.rust_wasm_enabled {
+            // Tool library compilation is slow, make it optional
+            if std::env::var("RLM_PRECOMPILE_TOOLS").is_ok() {
+                tracing::info!("Pre-compiling WASM tool library...");
+                Some(WasmToolLibrary::new())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         Self {
             variables: HashMap::new(),
             context,
@@ -320,6 +344,7 @@ impl CommandExecutor {
             max_sub_calls,
             wasm_executor,
             wasm_library: WasmLibrary::new(),
+            wasm_tool_library,
             rust_compiler,
             wasm_cache,
             last_compile_time_ms: 0,
@@ -718,6 +743,8 @@ impl CommandExecutor {
 
             Command::Wasm {
                 module,
+                tool,
+                args,
                 function,
                 on,
                 store,
@@ -728,17 +755,57 @@ impl CommandExecutor {
                     ))
                 })?;
 
+                // Resolve the source input
+                let source = self.resolve_source(&on)?.to_string();
+
+                // Try tool library first if a tool name is specified
+                if let Some(tool_name) = tool {
+                    // Check if tool library is available
+                    let tool_lib = self.wasm_tool_library.as_ref().ok_or_else(|| {
+                        CommandError::InvalidCommand(
+                            "WASM tool library not available. Set RLM_PRECOMPILE_TOOLS=1".to_string(),
+                        )
+                    })?;
+
+                    let wasm_bytes = tool_lib
+                        .get(&tool_name)
+                        .ok_or_else(|| CommandError::WasmModuleNotFound(tool_name.clone()))?;
+
+                    // Prepend args to source if provided
+                    let input = if let Some(args_str) = args {
+                        format!("{}|{}", args_str, source)
+                    } else {
+                        source
+                    };
+
+                    // Tools use run_analyze function
+                    let func_name = if function == "analyze" { "run_analyze" } else { &function };
+                    let result = executor.execute(&wasm_bytes, func_name, &input)?;
+
+                    self.store_result(&store, result.clone());
+                    return Ok(ExecutionResult::Continue {
+                        output: format!("wasm_tool {}: {}", tool_name, result),
+                        sub_calls: 0,
+                    });
+                }
+
+                // Fall back to legacy module syntax
+                let module_name = module.clone().ok_or_else(|| {
+                    CommandError::InvalidCommand(
+                        "WASM command requires either 'module' or 'tool' parameter".to_string(),
+                    )
+                })?;
+
                 let wasm_bytes = self
                     .wasm_library
-                    .get(module)
-                    .ok_or_else(|| CommandError::WasmModuleNotFound(module.clone()))?;
+                    .get(&module_name)
+                    .ok_or_else(|| CommandError::WasmModuleNotFound(module_name.clone()))?;
 
-                let source = self.resolve_source(on)?.to_string();
-                let result = executor.execute(wasm_bytes, function, &source)?;
+                let result = executor.execute(wasm_bytes, &function, &source)?;
 
-                self.store_result(store, result.clone());
+                self.store_result(&store, result.clone());
                 Ok(ExecutionResult::Continue {
-                    output: format!("WASM {}.{}: {}", module, function, result),
+                    output: format!("WASM {}.{}: {}", module_name, function, result),
                     sub_calls: 0,
                 })
             }

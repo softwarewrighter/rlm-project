@@ -11,13 +11,15 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 use rlm::orchestrator::RlmOrchestrator;
 use rlm::pool::{LlmPool, LoadBalanceStrategy, ProviderRole};
-use rlm::provider::OllamaProvider;
+use rlm::provider::{LiteLLMProvider, OllamaProvider};
 use rlm::{ProviderConfig, RlmConfig};
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 const DEFAULT_MODEL: &str = "llama3.2:3b";
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
+const DEFAULT_LITELLM_URL: &str = "http://localhost:4000";
 
 fn print_usage() {
     eprintln!(
@@ -32,8 +34,11 @@ fn print_usage() {
     <QUERY>    Question to ask about the file
 
 {}
-    -m, --model <MODEL>         Ollama model to use (default: llama3.2:3b)
+    -m, --model <MODEL>         Model to use (default: llama3.2:3b for Ollama)
     -u, --ollama-url <URL>      Ollama server URL (default: http://localhost:11434)
+    --litellm                   Use LiteLLM gateway instead of Ollama
+    --litellm-url <URL>         LiteLLM server URL (default: http://localhost:4000)
+    --litellm-key <KEY>         LiteLLM API key (or set LITELLM_MASTER_KEY env var)
     -n, --max-iterations <N>    Maximum RLM iterations (default: 20)
     -v, --verbose               Show detailed iteration info
     -vv                         Extra verbose (show full LLM commands)
@@ -46,6 +51,7 @@ fn print_usage() {
     rlm document.txt "What is the main topic?"
     rlm logs.txt "Count the ERROR lines" -m phi3:3.8b
     rlm war-and-peace.txt "Find the hidden passphrase" -vv
+    rlm data.log "Analyze errors" --litellm -m deepseek-coder
 
 {}
     RLM enables small LLMs to analyze documents much larger than their
@@ -66,6 +72,9 @@ struct CliArgs {
     query: String,
     model: String,
     ollama_url: String,
+    use_litellm: bool,
+    litellm_url: String,
+    litellm_key: Option<String>,
     max_iterations: usize,
     verbose: u8, // 0=off, 1=verbose, 2=extra verbose
     dry_run: bool,
@@ -90,6 +99,9 @@ fn parse_args() -> Result<CliArgs> {
 
     let mut model = DEFAULT_MODEL.to_string();
     let mut ollama_url = DEFAULT_OLLAMA_URL.to_string();
+    let mut use_litellm = false;
+    let mut litellm_url = DEFAULT_LITELLM_URL.to_string();
+    let mut litellm_key: Option<String> = std::env::var("LITELLM_MASTER_KEY").ok();
     let mut max_iterations = 20;
     let mut verbose: u8 = 0;
     let mut dry_run = false;
@@ -133,6 +145,21 @@ fn parse_args() -> Result<CliArgs> {
             "--no-rust-wasm" => {
                 rust_wasm_enabled = false;
             }
+            "--litellm" => {
+                use_litellm = true;
+            }
+            "--litellm-url" => {
+                i += 1;
+                if i < args.len() {
+                    litellm_url = args[i].clone();
+                }
+            }
+            "--litellm-key" => {
+                i += 1;
+                if i < args.len() {
+                    litellm_key = Some(args[i].clone());
+                }
+            }
             _ => {}
         }
         i += 1;
@@ -143,6 +170,9 @@ fn parse_args() -> Result<CliArgs> {
         query,
         model,
         ollama_url,
+        use_litellm,
+        litellm_url,
+        litellm_key,
         max_iterations,
         verbose,
         dry_run,
@@ -181,7 +211,23 @@ fn print_header(args: &CliArgs, file_size: usize, line_count: usize) {
         line_count,
         file_size / 4
     );
-    eprintln!("{}  {}  {}", "│".blue(), "Model:".dimmed(), args.model);
+    if args.use_litellm {
+        eprintln!(
+            "{}  {}  {} (via LiteLLM @ {})",
+            "│".blue(),
+            "Model:".dimmed(),
+            args.model,
+            args.litellm_url
+        );
+    } else {
+        eprintln!(
+            "{}  {}  {} (Ollama @ {})",
+            "│".blue(),
+            "Model:".dimmed(),
+            args.model,
+            args.ollama_url
+        );
+    }
     eprintln!(
         "{}  {}  {}",
         "│".blue(),
@@ -296,6 +342,8 @@ fn print_iteration(
         "{}",
         "└────────────────────────────────────────────────────────────────".cyan()
     );
+    // Flush stderr to ensure output is shown immediately
+    let _ = std::io::stderr().flush();
 }
 
 fn print_results(
@@ -425,6 +473,16 @@ async fn main() -> Result<()> {
     }
 
     // Create config
+    let (provider_type, base_url, api_key) = if args.use_litellm {
+        (
+            "litellm".to_string(),
+            args.litellm_url.clone(),
+            args.litellm_key.clone(),
+        )
+    } else {
+        ("ollama".to_string(), args.ollama_url.clone(), None)
+    };
+
     let config = RlmConfig {
         max_iterations: args.max_iterations,
         max_sub_calls: 50,
@@ -432,10 +490,10 @@ async fn main() -> Result<()> {
         bypass_enabled: false, // Always use RLM for demo
         bypass_threshold: 0,
         providers: vec![ProviderConfig {
-            provider_type: "ollama".to_string(),
-            base_url: args.ollama_url.clone(),
+            provider_type,
+            base_url: base_url.clone(),
             model: args.model.clone(),
-            api_key: None,
+            api_key: api_key.clone(),
             weight: 1,
             role: "root".to_string(),
         }],
@@ -446,10 +504,22 @@ async fn main() -> Result<()> {
         },
     };
 
-    // Create pool with Ollama provider
+    // Create pool with appropriate provider
     let mut pool = LlmPool::new(LoadBalanceStrategy::RoundRobin);
-    let provider = OllamaProvider::new(&args.ollama_url, &args.model);
-    pool.add_provider(Arc::new(provider), 1, ProviderRole::Both);
+    if args.use_litellm {
+        let api_key = api_key.unwrap_or_else(|| {
+            eprintln!(
+                "{} No LiteLLM API key provided. Set LITELLM_MASTER_KEY or use --litellm-key",
+                "Warning:".yellow()
+            );
+            "".to_string()
+        });
+        let provider = LiteLLMProvider::with_base_url(&base_url, &api_key, &args.model);
+        pool.add_provider(Arc::new(provider), 1, ProviderRole::Both);
+    } else {
+        let provider = OllamaProvider::new(&args.ollama_url, &args.model);
+        pool.add_provider(Arc::new(provider), 1, ProviderRole::Both);
+    }
     let pool = Arc::new(pool);
 
     // Create orchestrator
@@ -458,6 +528,7 @@ async fn main() -> Result<()> {
     if args.verbose > 0 {
         eprintln!("{}", "Starting RLM processing...".dimmed());
         eprintln!();
+        let _ = std::io::stderr().flush();
     }
 
     // Process query
