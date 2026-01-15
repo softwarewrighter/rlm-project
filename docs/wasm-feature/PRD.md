@@ -184,3 +184,100 @@ pub fn analyze(input: &str) -> String {
         .join("\n")
 }
 ```
+
+## Follow-On: Multi-Input WASM (v2)
+
+### Problem
+
+The current `rust_wasm` command takes a single input (`on` field or the full context). However, many real-world analyses benefit from correlating multiple data sources:
+
+- Compare error logs with configuration settings
+- Cross-reference extracted data with lookup tables
+- Combine results from previous iterations
+
+Currently, the LLM must concatenate multiple variables with delimiters, then parse them apart inside the WASM code—error-prone and inefficient.
+
+### Proposed Solution: Named Inputs
+
+Extend `rust_wasm` to accept multiple named inputs that map to function parameters:
+
+```json
+{
+  "op": "rust_wasm",
+  "code": "pub fn analyze(logs: &str, config: &str, errors: &str) -> String { ... }",
+  "inputs": {
+    "logs": "$log_excerpt",
+    "config": "$config_data",
+    "errors": "$error_lines"
+  },
+  "store": "correlation_result"
+}
+```
+
+### How It Works
+
+1. **Signature Parsing**: The compiler extracts parameter names from the function signature
+2. **Input Mapping**: Each parameter name maps to a variable or literal in `inputs`
+3. **Invocation**: WASM module called with arguments in parameter order
+4. **Backward Compatible**: Omitting `inputs` falls back to single-input `on` field behavior
+
+### Use Cases
+
+#### Use Case 1: Log Correlation
+```json
+{
+  "op": "rust_wasm",
+  "code": "pub fn analyze(errors: &str, timestamps: &str) -> String { let error_times: Vec<_> = errors.lines().zip(timestamps.lines()).filter(|(e, _)| e.contains(\"FATAL\")).map(|(_, t)| t).collect(); format!(\"Fatal errors at: {}\", error_times.join(\", \")) }",
+  "inputs": {
+    "errors": "$error_lines",
+    "timestamps": "$timestamp_lines"
+  },
+  "store": "fatal_times"
+}
+```
+
+#### Use Case 2: Config-Aware Analysis
+```json
+{
+  "op": "rust_wasm",
+  "code": "pub fn analyze(data: &str, threshold: &str) -> String { let t: i64 = threshold.trim().parse().unwrap_or(100); let count = data.lines().filter(|l| l.parse::<i64>().map(|n| n > t).unwrap_or(false)).count(); format!(\"{} values exceed threshold {}\", count, t) }",
+  "inputs": {
+    "data": "$numeric_data",
+    "threshold": "$user_threshold"
+  },
+  "store": "exceed_count"
+}
+```
+
+#### Use Case 3: Multi-Document Comparison
+```json
+{
+  "op": "rust_wasm",
+  "code": "pub fn analyze(doc_a: &str, doc_b: &str) -> String { let words_a: std::collections::HashSet<_> = doc_a.split_whitespace().collect(); let words_b: std::collections::HashSet<_> = doc_b.split_whitespace().collect(); let common: Vec<_> = words_a.intersection(&words_b).collect(); format!(\"{} common words\", common.len()) }",
+  "inputs": {
+    "doc_a": "$section_1",
+    "doc_b": "$section_2"
+  },
+  "store": "similarity"
+}
+```
+
+### Implementation Notes
+
+1. **WASM ABI**: Pass multiple string pointers via linear memory
+2. **Parameter Limit**: Recommend max 5 inputs to keep signature manageable
+3. **Type Safety**: All inputs are `&str`; numeric conversion happens in Rust code
+4. **Caching**: Cache key includes input count, not input values
+
+### Success Criteria
+
+- LLM naturally uses multi-input when correlating stored variables
+- 30% reduction in "glue code" iterations for complex analyses
+- No performance regression vs. single-input mode
+
+### Timeline Estimate
+
+- **Phase 1**: Signature parsing and input mapping (~3 days)
+- **Phase 2**: WASM invocation with multiple args (~2 days)
+- **Phase 3**: System prompt updates and examples (~1 day)
+- **Phase 4**: Testing and documentation (~2 days)

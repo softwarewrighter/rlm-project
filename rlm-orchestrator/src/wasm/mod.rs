@@ -10,6 +10,10 @@
 
 pub mod cache;
 pub mod compiler;
+#[cfg(test)]
+mod benchmark_tests;
+#[cfg(test)]
+mod security_tests;
 
 pub use cache::{CacheConfig, CacheStats, ModuleCache};
 pub use compiler::{CompileError, CompilerConfig, RustCompiler};
