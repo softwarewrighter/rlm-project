@@ -238,6 +238,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             --muted: #888;
             --success: #4ade80;
             --error: #f87171;
+            --wasm: #f59e0b;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -275,7 +276,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             margin-bottom: 5px;
             display: block;
         }
-        textarea, input {
+        textarea, input, select {
             width: 100%;
             background: var(--bg);
             border: 1px solid var(--accent);
@@ -286,7 +287,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             font-size: 0.9rem;
             resize: vertical;
         }
-        textarea:focus, input:focus {
+        textarea:focus, input:focus, select:focus {
             outline: none;
             border-color: var(--highlight);
         }
@@ -306,6 +307,29 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         button:hover { opacity: 0.9; }
         button:active { transform: scale(0.98); }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .example-selector {
+            margin-bottom: 15px;
+        }
+        .example-selector select {
+            max-width: 400px;
+        }
+        .example-tags {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+        }
+        .tag {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        .tag.wasm { background: var(--wasm); color: #000; }
+        .tag.basic { background: var(--accent); }
+        .tag.aggregation { background: #7c3aed; }
 
         .results {
             display: grid;
@@ -341,6 +365,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         }
         .step.has-error { border-left-color: var(--error); }
         .step.is-final { border-left-color: var(--success); }
+        .step.has-wasm { border-left-color: var(--wasm); }
         .step-number {
             font-weight: bold;
             color: var(--highlight);
@@ -350,6 +375,18 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             color: var(--muted);
             margin-top: 4px;
         }
+        .step-badges {
+            display: flex;
+            gap: 4px;
+            margin-top: 4px;
+        }
+        .badge {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+        .badge.wasm { background: var(--wasm); color: #000; }
 
         .detail-panel {
             background: var(--card);
@@ -366,6 +403,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             text-transform: uppercase;
             letter-spacing: 1px;
         }
+        .detail-section h3.wasm-title { color: var(--wasm); }
         .code-block {
             background: var(--bg);
             border-radius: 8px;
@@ -379,6 +417,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .code-block.json { color: #7dd3fc; }
         .code-block.output { color: #a5f3fc; }
         .code-block.error { color: var(--error); }
+        .code-block.rust { color: var(--wasm); }
 
         .summary-bar {
             display: flex;
@@ -391,11 +430,13 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             padding: 15px 20px;
             border-radius: 8px;
         }
+        .stat.wasm-stat { border: 2px solid var(--wasm); }
         .stat-value {
             font-size: 1.5rem;
             font-weight: bold;
             color: var(--highlight);
         }
+        .stat-value.wasm { color: var(--wasm); }
         .stat-label {
             font-size: 0.75rem;
             color: var(--muted);
@@ -434,9 +475,28 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         }
         .flow-node.query { background: var(--highlight); }
         .flow-node.final { background: #065f46; }
+        .flow-node.wasm { background: var(--wasm); color: #000; }
         .flow-arrow {
             color: var(--muted);
             font-size: 1.2rem;
+        }
+
+        .wasm-info {
+            background: linear-gradient(135deg, #78350f, #451a03);
+            border-radius: 12px;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border: 1px solid var(--wasm);
+        }
+        .wasm-info h3 {
+            color: var(--wasm);
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        .wasm-info p {
+            color: var(--text);
+            font-size: 0.85rem;
+            line-height: 1.5;
         }
 
         @media (max-width: 900px) {
@@ -450,6 +510,24 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         <h1><span>🔄</span> RLM Visualizer</h1>
 
         <div class="input-section">
+            <div class="example-selector">
+                <label for="exampleSelect">Load Example</label>
+                <select id="exampleSelect" onchange="loadExample()">
+                    <option value="">-- Select an example --</option>
+                    <optgroup label="Basic Commands">
+                        <option value="count_errors">Count ERROR lines</option>
+                        <option value="find_pattern">Find text pattern</option>
+                    </optgroup>
+                    <optgroup label="WASM Use Cases">
+                        <option value="wasm_unique_ips">Unique IP addresses (rust_wasm)</option>
+                        <option value="wasm_error_ranking">Rank errors by frequency (rust_wasm)</option>
+                        <option value="wasm_word_freq">Word frequency analysis (rust_wasm)</option>
+                        <option value="wasm_response_times">Response time percentiles (rust_wasm)</option>
+                    </optgroup>
+                </select>
+                <div class="example-tags" id="exampleTags"></div>
+            </div>
+
             <div class="input-row">
                 <div>
                     <label for="query">Query</label>
@@ -483,6 +561,15 @@ Line 7: ERROR - Invalid input received</textarea>
                     <div class="stat-value" id="statContext">-</div>
                     <div class="stat-label">Context Chars</div>
                 </div>
+                <div class="stat wasm-stat" id="statWasm" style="display: none;">
+                    <div class="stat-value wasm">-</div>
+                    <div class="stat-label">WASM Steps</div>
+                </div>
+            </div>
+
+            <div id="wasmInfo" class="wasm-info hidden">
+                <h3>🔧 WASM Execution Used</h3>
+                <p></p>
             </div>
 
             <div id="flowDiagram" class="flow-diagram"></div>
@@ -510,6 +597,113 @@ Line 7: ERROR - Invalid input received</textarea>
     <script>
         let currentData = null;
 
+        // Example data for the dropdown
+        const examples = {
+            count_errors: {
+                query: "How many ERROR lines are there?",
+                context: `Line 1: INFO - System started
+Line 2: ERROR - Connection failed
+Line 3: INFO - Retrying connection
+Line 4: ERROR - Timeout occurred
+Line 5: WARNING - High memory usage
+Line 6: INFO - Connection established
+Line 7: ERROR - Invalid input received`,
+                tags: ['basic', 'count'],
+                description: 'Simple error counting using basic commands'
+            },
+            find_pattern: {
+                query: "Find all lines containing 'Connection'",
+                context: `Line 1: INFO - System started
+Line 2: ERROR - Connection failed
+Line 3: INFO - Retrying connection
+Line 4: ERROR - Timeout occurred
+Line 5: WARNING - High memory usage
+Line 6: INFO - Connection established
+Line 7: ERROR - Invalid input received`,
+                tags: ['basic', 'search'],
+                description: 'Pattern search using find/regex commands'
+            },
+            wasm_unique_ips: {
+                query: "How many unique IP addresses are in these logs?",
+                context: `2024-01-15 10:23:45 [INFO] Request from 192.168.1.100 - GET /api/users - 200 OK - 45ms
+2024-01-15 10:23:46 [ERROR] AuthenticationFailed from 10.0.0.50 - Invalid token
+2024-01-15 10:23:47 [INFO] Request from 192.168.1.100 - POST /api/data - 201 Created - 123ms
+2024-01-15 10:23:48 [WARN] ConnectionTimeout from 172.16.0.25 - Database slow
+2024-01-15 10:23:49 [INFO] Request from 10.0.0.50 - GET /api/health - 200 OK - 12ms
+2024-01-15 10:23:50 [ERROR] RequestFailed from 192.168.1.100 - Service unavailable
+2024-01-15 10:23:51 [INFO] Request from 172.16.0.25 - GET /api/users - 200 OK - 67ms
+2024-01-15 10:23:52 [ERROR] ValidationError from 10.0.0.75 - Missing required field
+2024-01-15 10:23:53 [INFO] Request from 10.0.0.75 - PUT /api/users/1 - 200 OK - 89ms
+2024-01-15 10:23:54 [ERROR] AuthenticationFailed from 192.168.1.200 - Expired session`,
+                tags: ['wasm', 'aggregation'],
+                description: 'Uses rust_wasm with HashSet to count unique IPs'
+            },
+            wasm_error_ranking: {
+                query: "Rank the error types from most to least frequent",
+                context: `2024-01-15 10:23:46 [AuthenticationFailed] from 10.0.0.50 - Invalid token
+2024-01-15 10:23:48 [ConnectionTimeout] from 172.16.0.25 - Database slow
+2024-01-15 10:23:50 [RequestFailed] from 192.168.1.100 - Service unavailable
+2024-01-15 10:23:52 [ValidationError] from 10.0.0.75 - Missing field
+2024-01-15 10:23:54 [AuthenticationFailed] from 192.168.1.200 - Expired session
+2024-01-15 10:23:56 [ConnectionTimeout] from 172.16.0.30 - Timeout
+2024-01-15 10:23:58 [AuthenticationFailed] from 10.0.0.60 - Bad credentials
+2024-01-15 10:24:00 [RequestFailed] from 192.168.1.105 - 503 error
+2024-01-15 10:24:02 [ConnectionTimeout] from 172.16.0.25 - Pool exhausted
+2024-01-15 10:24:04 [AuthenticationFailed] from 10.0.0.50 - Token revoked
+2024-01-15 10:24:06 [ValidationError] from 192.168.1.100 - Invalid format
+2024-01-15 10:24:08 [RequestFailed] from 10.0.0.75 - Gateway timeout`,
+                tags: ['wasm', 'aggregation', 'ranking'],
+                description: 'Uses rust_wasm with HashMap to count and sort error types'
+            },
+            wasm_word_freq: {
+                query: "What are the top 5 most common words in this text?",
+                context: `The quick brown fox jumps over the lazy dog. The dog was not amused by the fox.
+The fox tried again to jump over the dog but the dog moved away.
+A lazy afternoon with the quick fox and the lazy dog made for an interesting scene.
+The brown fox was quick but the dog was quicker this time.`,
+                tags: ['wasm', 'aggregation', 'text-analysis'],
+                description: 'Uses rust_wasm with HashMap for word frequency analysis'
+            },
+            wasm_response_times: {
+                query: "Calculate the p50, p95, and p99 response time percentiles",
+                context: `GET /api/users - 45ms
+POST /api/data - 123ms
+GET /api/health - 12ms
+GET /api/users - 67ms
+PUT /api/users/1 - 89ms
+GET /api/products - 234ms
+POST /api/orders - 456ms
+GET /api/users - 34ms
+DELETE /api/cache - 23ms
+GET /api/stats - 567ms
+POST /api/upload - 1234ms
+GET /api/download - 89ms
+PUT /api/settings - 45ms
+GET /api/config - 28ms
+POST /api/batch - 789ms`,
+                tags: ['wasm', 'statistics', 'percentiles'],
+                description: 'Uses rust_wasm to parse times and calculate percentiles'
+            }
+        };
+
+        function loadExample() {
+            const select = document.getElementById('exampleSelect');
+            const example = examples[select.value];
+            if (example) {
+                document.getElementById('query').value = example.query;
+                document.getElementById('context').value = example.context;
+
+                // Show tags
+                const tagsHtml = example.tags.map(tag => {
+                    const tagClass = tag === 'wasm' ? 'wasm' : (tag === 'aggregation' || tag === 'ranking' ? 'aggregation' : 'basic');
+                    return `<span class="tag ${tagClass}">${tag}</span>`;
+                }).join('');
+                document.getElementById('exampleTags').innerHTML = tagsHtml + `<span style="color: var(--muted); font-size: 0.75rem; margin-left: 8px;">${example.description}</span>`;
+            } else {
+                document.getElementById('exampleTags').innerHTML = '';
+            }
+        }
+
         async function runQuery() {
             const query = document.getElementById('query').value;
             const context = document.getElementById('context').value;
@@ -536,13 +730,51 @@ Line 7: ERROR - Invalid input received</textarea>
             }
         }
 
+        function hasWasm(commands) {
+            if (!commands) return false;
+            return commands.includes('rust_wasm') || commands.includes('wasm_wat') || commands.includes('"op": "wasm"');
+        }
+
+        function extractRustCode(commands) {
+            if (!commands) return null;
+            const match = commands.match(/"code"\s*:\s*"([^"]+)"/);
+            if (match) {
+                return match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+            }
+            return null;
+        }
+
         function renderResults(data) {
             document.getElementById('resultsSection').classList.remove('hidden');
+
+            // Check for WASM usage across all steps
+            const wasmSteps = data.history.filter(s => hasWasm(s.commands));
+            const usedWasm = wasmSteps.length > 0;
 
             // Stats
             document.getElementById('statIterations').textContent = data.iterations;
             document.getElementById('statSubCalls').textContent = data.total_sub_calls;
             document.getElementById('statContext').textContent = data.context_length.toLocaleString();
+
+            // Update WASM stat
+            const wasmStatEl = document.getElementById('statWasm');
+            if (wasmStatEl) {
+                wasmStatEl.querySelector('.stat-value').textContent = wasmSteps.length;
+                wasmStatEl.style.display = usedWasm ? 'block' : 'none';
+            }
+
+            // Show WASM info box if WASM was used
+            const wasmInfoEl = document.getElementById('wasmInfo');
+            if (wasmInfoEl) {
+                if (usedWasm) {
+                    wasmInfoEl.classList.remove('hidden');
+                    wasmInfoEl.querySelector('p').textContent =
+                        `This query used rust_wasm in ${wasmSteps.length} step(s) to perform custom analysis. ` +
+                        `WASM enables complex operations like aggregation, sorting, and statistical calculations that aren't possible with basic text commands.`;
+                } else {
+                    wasmInfoEl.classList.add('hidden');
+                }
+            }
 
             // Answer
             const answerBox = document.getElementById('answerBox');
@@ -555,7 +787,10 @@ Line 7: ERROR - Invalid input received</textarea>
             data.history.forEach((step, i) => {
                 flow.innerHTML += '<span class="flow-arrow">→</span>';
                 const isFinal = step.output.startsWith('FINAL:');
-                flow.innerHTML += `<div class="flow-node${isFinal ? ' final' : ''}">${step.error ? '⚠️' : ''}Step ${step.step}</div>`;
+                const isWasm = hasWasm(step.commands);
+                let nodeClass = isWasm ? ' wasm' : (isFinal ? ' final' : '');
+                let icon = step.error ? '⚠️' : (isWasm ? '🔧' : '');
+                flow.innerHTML += `<div class="flow-node${nodeClass}">${icon}Step ${step.step}</div>`;
             });
             if (data.success) {
                 flow.innerHTML += '<span class="flow-arrow">→</span><div class="flow-node final">Answer</div>';
@@ -566,14 +801,22 @@ Line 7: ERROR - Invalid input received</textarea>
             timeline.innerHTML = data.history.map((step, i) => {
                 const hasError = !!step.error;
                 const isFinal = step.output.startsWith('FINAL:');
-                return `<div class="step${hasError ? ' has-error' : ''}${isFinal ? ' is-final' : ''}"
-                             onclick="showStep(${i})">
+                const isWasm = hasWasm(step.commands);
+                let stepClass = hasError ? ' has-error' : (isWasm ? ' has-wasm' : (isFinal ? ' is-final' : ''));
+
+                let badges = '';
+                if (isWasm) {
+                    badges = '<div class="step-badges"><span class="badge wasm">WASM</span></div>';
+                }
+
+                return `<div class="step${stepClass}" onclick="showStep(${i})">
                     <div class="step-number">Step ${step.step}</div>
                     <div class="step-meta">
-                        ${step.commands ? 'Commands executed' : 'No commands'}
+                        ${step.commands ? (isWasm ? 'rust_wasm executed' : 'Commands executed') : 'No commands'}
                         ${step.sub_calls > 0 ? ` • ${step.sub_calls} sub-calls` : ''}
                         ${hasError ? ' • Error' : ''}
                     </div>
+                    ${badges}
                 </div>`;
             }).join('');
 
@@ -593,10 +836,20 @@ Line 7: ERROR - Invalid input received</textarea>
 
             // Render detail
             let html = '';
+            const isWasm = hasWasm(step.commands);
+            const rustCode = extractRustCode(step.commands);
+
+            // Show Rust code separately if this is a WASM step
+            if (isWasm && rustCode) {
+                html += `<div class="detail-section">
+                    <h3 class="wasm-title">🔧 Rust Code (rust_wasm)</h3>
+                    <pre class="code-block rust">${escapeHtml(rustCode)}</pre>
+                </div>`;
+            }
 
             if (step.commands) {
                 html += `<div class="detail-section">
-                    <h3>Commands (JSON)</h3>
+                    <h3>${isWasm ? 'Command JSON' : 'Commands (JSON)'}</h3>
                     <pre class="code-block json">${escapeHtml(formatJson(step.commands))}</pre>
                 </div>`;
             }
