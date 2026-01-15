@@ -199,10 +199,31 @@ fn print_header(args: &CliArgs, file_size: usize, line_count: usize) {
     eprintln!();
 }
 
-fn print_iteration(step: usize, llm_response: &str, commands: &str, output: &str, verbose: u8) {
+fn print_iteration(
+    step: usize,
+    llm_response: &str,
+    commands: &str,
+    output: &str,
+    verbose: u8,
+    llm_ms: u64,
+    exec_ms: u64,
+    compile_ms: u64,
+) {
+    // Build timing string
+    let timing_str = if compile_ms > 0 {
+        format!("LLM: {}ms | Exec: {}ms (compile: {}ms)", llm_ms, exec_ms, compile_ms)
+    } else {
+        format!("LLM: {}ms | Exec: {}ms", llm_ms, exec_ms)
+    };
+
     eprintln!(
         "{}",
         format!("┌─ Iteration {step} ─────────────────────────────────────────────────").cyan()
+    );
+    eprintln!(
+        "{} {}",
+        "│".cyan(),
+        format!("⏱  {}", timing_str).dimmed()
     );
 
     // At -vv level, show the full LLM response
@@ -453,6 +474,9 @@ async fn main() -> Result<()> {
                         &record.commands,
                         &record.output,
                         args.verbose,
+                        record.timing.llm_ms,
+                        record.timing.exec_ms,
+                        record.timing.compile_ms,
                     );
                 }
             }

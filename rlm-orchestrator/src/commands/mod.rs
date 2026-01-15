@@ -7,6 +7,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use thiserror::Error;
 
 use crate::wasm::{
@@ -245,6 +246,8 @@ pub struct CommandExecutor {
     rust_compiler: Option<RustCompiler>,
     /// Cache for compiled WASM modules
     wasm_cache: ModuleCache,
+    /// Last rust_wasm compile time in milliseconds (for instrumentation)
+    last_compile_time_ms: u64,
 }
 
 impl CommandExecutor {
@@ -319,7 +322,13 @@ impl CommandExecutor {
             wasm_library: WasmLibrary::new(),
             rust_compiler,
             wasm_cache,
+            last_compile_time_ms: 0,
         }
+    }
+
+    /// Get the last rust_wasm compile time in milliseconds (for instrumentation)
+    pub fn last_compile_time_ms(&self) -> u64 {
+        self.last_compile_time_ms
     }
 
     /// Check if Rust WASM compilation is available
@@ -758,6 +767,9 @@ impl CommandExecutor {
             }
 
             Command::RustWasm { code, on, store } => {
+                // Reset compile time (will be set if we actually compile)
+                self.last_compile_time_ms = 0;
+
                 // Check if Rust compiler is available
                 let compiler = self.rust_compiler.as_ref().ok_or_else(|| {
                     CommandError::RustCompilerUnavailable(
@@ -777,11 +789,14 @@ impl CommandExecutor {
                     tracing::debug!("Cache hit for rust_wasm");
                     cached
                 } else {
-                    // Compile Rust to WASM
+                    // Compile Rust to WASM (with timing)
                     tracing::debug!("Compiling Rust code ({} bytes)", code.len());
+                    let compile_start = Instant::now();
                     let compiled = compiler
                         .compile(code)
                         .map_err(|e| CommandError::RustCompileError(e.to_string()))?;
+                    self.last_compile_time_ms = compile_start.elapsed().as_millis() as u64;
+                    tracing::info!("Rust compilation took {}ms", self.last_compile_time_ms);
 
                     // Cache the result
                     self.wasm_cache.put(code, compiled.clone());

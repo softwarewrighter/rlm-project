@@ -8,6 +8,7 @@ use crate::provider::{LlmRequest, ProviderError};
 use crate::RlmConfig;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
@@ -39,6 +40,17 @@ pub struct IterationTokens {
     pub completion_tokens: u32,
 }
 
+/// Timing information for an iteration
+#[derive(Debug, Clone, Default)]
+pub struct IterationTiming {
+    /// Time spent waiting for LLM response (milliseconds)
+    pub llm_ms: u64,
+    /// Time spent executing commands (milliseconds)
+    pub exec_ms: u64,
+    /// Time spent compiling rust_wasm (milliseconds, if any)
+    pub compile_ms: u64,
+}
+
 /// Record of a single RLM iteration
 #[derive(Debug, Clone)]
 pub struct IterationRecord {
@@ -56,6 +68,8 @@ pub struct IterationRecord {
     pub sub_calls: usize,
     /// Token usage for this iteration
     pub tokens: IterationTokens,
+    /// Timing information for this iteration
+    pub timing: IterationTiming,
 }
 
 /// Result of an RLM query
@@ -153,8 +167,10 @@ impl RlmOrchestrator {
         let system_prompt = "You are a helpful assistant. Answer the question based on the provided context. Be extremely concise - respond with just the answer (number, name, or short phrase). Do not explain or elaborate.";
         let prompt = format!("Context:\n{}\n\nQuestion: {}", context, query);
 
+        let llm_start = Instant::now();
         let request = LlmRequest::new(system_prompt, &prompt);
         let response = self.pool.complete(&request, false).await?;
+        let llm_ms = llm_start.elapsed().as_millis() as u64;
 
         let (prompt_tokens, completion_tokens) = response
             .usage
@@ -175,6 +191,7 @@ impl RlmOrchestrator {
                     prompt_tokens,
                     completion_tokens,
                 },
+                timing: IterationTiming { llm_ms, exec_ms: 0, compile_ms: 0 },
             }],
             total_sub_calls: 0,
             success: true,
@@ -227,9 +244,11 @@ impl RlmOrchestrator {
             // Build the prompt with history
             let prompt = self.build_prompt(query, context, &history);
 
-            // Call the root LLM
+            // Call the root LLM (with timing)
+            let llm_start = Instant::now();
             let request = LlmRequest::new(&system_prompt, &prompt);
             let response = self.pool.complete(&request, false).await?;
+            let llm_ms = llm_start.elapsed().as_millis() as u64;
 
             // Track token usage
             let iter_tokens = response
@@ -252,8 +271,15 @@ impl RlmOrchestrator {
             let llm_response = response.content.clone();
 
             if let Some(json) = commands_json {
-                // Execute the commands
-                match executor.execute_json(&json) {
+                // Execute the commands (with timing)
+                let exec_start = Instant::now();
+                let exec_result = executor.execute_json(&json);
+                let exec_ms = exec_start.elapsed().as_millis() as u64;
+                let compile_ms = executor.last_compile_time_ms();
+
+                let timing = IterationTiming { llm_ms, exec_ms, compile_ms };
+
+                match exec_result {
                     Ok(ExecutionResult::Final { answer, sub_calls }) => {
                         history.push(IterationRecord {
                             step: iteration + 1,
@@ -263,6 +289,7 @@ impl RlmOrchestrator {
                             error: None,
                             sub_calls,
                             tokens: iter_tokens,
+                            timing,
                         });
 
                         return Ok(RlmResult {
@@ -288,6 +315,7 @@ impl RlmOrchestrator {
                             error: None,
                             sub_calls,
                             tokens: iter_tokens,
+                            timing,
                         });
                     }
                     Err(e) => {
@@ -299,12 +327,15 @@ impl RlmOrchestrator {
                             error: Some(e.to_string()),
                             sub_calls: 0,
                             tokens: iter_tokens,
+                            timing,
                         });
                         debug!("Command execution had error: {}", e);
                     }
                 }
             } else {
                 // No JSON commands - check for FINAL in plain text (fallback)
+                let timing = IterationTiming { llm_ms, exec_ms: 0, compile_ms: 0 };
+
                 if let Some(final_answer) = extract_final(&response.content) {
                     history.push(IterationRecord {
                         step: iteration + 1,
@@ -314,6 +345,7 @@ impl RlmOrchestrator {
                         error: None,
                         sub_calls: 0,
                         tokens: iter_tokens,
+                        timing,
                     });
                     return Ok(RlmResult {
                         answer: final_answer,
@@ -339,6 +371,7 @@ impl RlmOrchestrator {
                     error: Some("No JSON commands found in response".to_string()),
                     sub_calls: 0,
                     tokens: iter_tokens,
+                    timing,
                 });
             }
         }
