@@ -1,0 +1,117 @@
+2024-01-15 08:00:01.234 INFO  [main] Application starting up
+2024-01-15 08:00:01.456 INFO  [main] Loading configuration from /etc/app/config.yaml
+2024-01-15 08:00:02.100 INFO  [main] Database connection pool initialized (size=10)
+2024-01-15 08:00:02.345 INFO  [worker-1] Worker thread started
+2024-01-15 08:00:02.346 INFO  [worker-2] Worker thread started
+2024-01-15 08:00:02.347 INFO  [worker-3] Worker thread started
+2024-01-15 08:00:03.001 INFO  [http] HTTP server listening on 0.0.0.0:8080
+2024-01-15 08:00:15.123 INFO  [http] GET /api/health - 200 OK (2ms)
+2024-01-15 08:00:23.456 INFO  [http] GET /api/users/123 - 200 OK (45ms)
+2024-01-15 08:00:31.789 WARN  [db] Slow query detected: SELECT * FROM orders (523ms)
+2024-01-15 08:00:45.012 INFO  [http] POST /api/orders - 201 Created (89ms)
+2024-01-15 08:01:02.345 ERROR [db] ConnectionTimeout: Failed to acquire connection from pool after 5000ms
+2024-01-15 08:01:02.456 ERROR [http] Request failed: POST /api/orders - 503 Service Unavailable
+2024-01-15 08:01:15.678 INFO  [db] Connection pool recovered
+2024-01-15 08:01:23.901 INFO  [http] GET /api/products - 200 OK (34ms)
+2024-01-15 08:02:05.234 WARN  [memory] Heap usage at 75% (768MB/1024MB)
+2024-01-15 08:02:45.567 ERROR [auth] AuthenticationFailed: Invalid token for user_id=456
+2024-01-15 08:03:12.890 INFO  [http] GET /api/users/456 - 401 Unauthorized (12ms)
+2024-01-15 08:03:34.123 ERROR [db] ConnectionTimeout: Failed to acquire connection from pool after 5000ms
+2024-01-15 08:03:34.234 ERROR [http] Request failed: GET /api/reports - 503 Service Unavailable
+2024-01-15 08:03:45.456 WARN  [db] Slow query detected: SELECT * FROM analytics (1205ms)
+2024-01-15 08:04:01.789 INFO  [db] Connection pool recovered
+2024-01-15 08:04:23.012 ERROR [validation] ValidationError: Missing required field 'email' in request body
+2024-01-15 08:04:56.345 INFO  [http] POST /api/users - 400 Bad Request (5ms)
+2024-01-15 08:05:12.678 ERROR [auth] AuthenticationFailed: Expired token for user_id=789
+2024-01-15 08:05:34.901 WARN  [memory] Heap usage at 80% (819MB/1024MB)
+2024-01-15 08:06:01.234 ERROR [db] ConnectionTimeout: Failed to acquire connection from pool after 5000ms
+2024-01-15 08:06:01.345 ERROR [http] Request failed: POST /api/checkout - 503 Service Unavailable
+2024-01-15 08:06:15.567 INFO  [db] Connection pool recovered
+2024-01-15 08:06:45.890 INFO  [http] GET /api/products/99 - 200 OK (23ms)
+2024-01-15 08:07:12.123 ERROR [validation] ValidationError: Invalid email format in request body
+2024-01-15 08:07:34.456 ERROR [auth] AuthenticationFailed: Invalid token for user_id=101
+2024-01-15 08:08:01.789 WARN  [db] Slow query detected: SELECT * FROM users WHERE last_login < ? (890ms)
+2024-01-15 08:08:23.012 ERROR [db] ConnectionTimeout: Failed to acquire connection from pool after 5000ms
+2024-01-15 08:08:23.123 ERROR [http] Request failed: GET /api/dashboard - 503 Service Unavailable
+2024-01-15 08:08:45.345 INFO  [db] Connection pool recovered
+2024-01-15 08:09:12.567 ERROR [validation] ValidationError: Password too short (minimum 8 characters)
+2024-01-15 08:09:34.890 INFO  [http] POST /api/users - 400 Bad Request (3ms)
+2024-01-15 08:10:01.123 WARN  [memory] Heap usage at 85% (870MB/1024MB)
+2024-01-15 08:10:23.456 ERROR [auth] AuthenticationFailed: Account locked for user_id=202
+2024-01-15 08:10:45.789 ERROR [db] DeadlockDetected: Transaction rolled back due to deadlock
+2024-01-15 08:11:01.012 WARN  [db] Retrying transaction after deadlock
+2024-01-15 08:11:12.234 INFO  [db] Transaction completed successfully after retry
+2024-01-15 08:11:34.456 ERROR [network] ConnectionRefused: Failed to connect to payment-service:8443
+2024-01-15 08:11:45.678 ERROR [http] Request failed: POST /api/payments - 502 Bad Gateway
+2024-01-15 08:12:01.901 WARN  [network] Retrying connection to payment-service:8443 (attempt 2/3)
+2024-01-15 08:12:05.123 INFO  [network] Connection established to payment-service:8443
+2024-01-15 08:12:23.345 INFO  [http] POST /api/payments - 200 OK (1823ms)
+2024-01-15 08:12:45.567 ERROR [auth] AuthenticationFailed: Invalid token for user_id=303
+2024-01-15 08:13:01.789 ERROR [db] ConnectionTimeout: Failed to acquire connection from pool after 5000ms
+2024-01-15 08:13:01.890 ERROR [http] Request failed: GET /api/inventory - 503 Service Unavailable
+2024-01-15 08:13:15.012 INFO  [db] Connection pool recovered
+2024-01-15 08:13:34.234 ERROR [validation] ValidationError: Quantity must be positive integer
+2024-01-15 08:14:01.456 WARN  [memory] Heap usage at 90% (922MB/1024MB)
+2024-01-15 08:14:12.678 WARN  [gc] Triggering garbage collection
+2024-01-15 08:14:15.901 INFO  [gc] GC completed: freed 384MB in 3223ms
+2024-01-15 08:14:23.123 INFO  [memory] Heap usage at 52% (538MB/1024MB)
+2024-01-15 08:14:45.345 ERROR [auth] AuthenticationFailed: Expired token for user_id=404
+2024-01-15 08:15:01.567 ERROR [network] ConnectionRefused: Failed to connect to email-service:8025
+2024-01-15 08:15:12.789 ERROR [notification] Failed to send email notification: Connection refused
+2024-01-15 08:15:34.012 WARN  [network] email-service appears to be down, queuing notifications
+2024-01-15 08:16:01.234 ERROR [db] ConnectionTimeout: Failed to acquire connection from pool after 5000ms
+2024-01-15 08:16:01.345 ERROR [http] Request failed: POST /api/orders - 503 Service Unavailable
+2024-01-15 08:16:15.456 INFO  [db] Connection pool recovered
+2024-01-15 08:16:34.678 INFO  [http] GET /api/health - 200 OK (1ms)
+2024-01-15 08:17:01.901 ERROR [validation] ValidationError: Order total exceeds maximum limit
+2024-01-15 08:17:23.123 ERROR [auth] AuthenticationFailed: Invalid token for user_id=505
+2024-01-15 08:17:45.345 WARN  [db] Slow query detected: SELECT * FROM audit_log (2341ms)
+2024-01-15 08:18:01.567 ERROR [db] QueryTimeout: Query exceeded 30 second timeout
+2024-01-15 08:18:12.789 WARN  [db] Cancelling long-running query
+2024-01-15 08:18:34.012 INFO  [http] GET /api/users - 200 OK (156ms)
+2024-01-15 08:19:01.234 ERROR [auth] AuthenticationFailed: Account suspended for user_id=606
+2024-01-15 08:19:23.456 ERROR [db] ConnectionTimeout: Failed to acquire connection from pool after 5000ms
+2024-01-15 08:19:23.567 ERROR [http] Request failed: GET /api/analytics - 503 Service Unavailable
+2024-01-15 08:19:45.678 INFO  [db] Connection pool recovered
+2024-01-15 08:20:01.901 INFO  [scheduler] Running scheduled job: cleanup_expired_sessions
+2024-01-15 08:20:23.123 INFO  [scheduler] Job completed: deleted 1,247 expired sessions
+2024-01-15 08:20:45.345 ERROR [validation] ValidationError: Invalid date format (expected YYYY-MM-DD)
+2024-01-15 08:21:01.567 ERROR [network] ConnectionRefused: Failed to connect to analytics-service:9090
+2024-01-15 08:21:12.789 WARN  [network] analytics-service appears to be down
+2024-01-15 08:21:34.012 ERROR [auth] AuthenticationFailed: Invalid token for user_id=707
+2024-01-15 08:22:01.234 ERROR [db] ConnectionTimeout: Failed to acquire connection from pool after 5000ms
+2024-01-15 08:22:01.345 ERROR [http] Request failed: POST /api/reports - 503 Service Unavailable
+2024-01-15 08:22:15.456 INFO  [db] Connection pool recovered
+2024-01-15 08:22:34.678 INFO  [http] GET /api/products - 200 OK (67ms)
+2024-01-15 08:23:01.901 WARN  [memory] Heap usage at 78% (799MB/1024MB)
+2024-01-15 08:23:23.123 ERROR [auth] AuthenticationFailed: Expired token for user_id=808
+2024-01-15 08:23:45.345 ERROR [validation] ValidationError: SKU not found in inventory
+2024-01-15 08:24:01.567 INFO  [http] POST /api/orders - 400 Bad Request (12ms)
+2024-01-15 08:24:23.789 ERROR [db] DeadlockDetected: Transaction rolled back due to deadlock
+2024-01-15 08:24:34.012 WARN  [db] Retrying transaction after deadlock
+2024-01-15 08:24:45.234 INFO  [db] Transaction completed successfully after retry
+2024-01-15 08:25:01.456 ERROR [auth] AuthenticationFailed: Invalid token for user_id=909
+2024-01-15 08:25:23.678 ERROR [db] ConnectionTimeout: Failed to acquire connection from pool after 5000ms
+2024-01-15 08:25:23.789 ERROR [http] Request failed: GET /api/users/909 - 503 Service Unavailable
+2024-01-15 08:25:45.901 INFO  [db] Connection pool recovered
+2024-01-15 08:26:01.123 INFO  [http] GET /api/health - 200 OK (1ms)
+2024-01-15 08:26:23.345 ERROR [network] SocketTimeout: Connection to cache-service:6379 timed out
+2024-01-15 08:26:34.567 WARN  [cache] Falling back to database for cache miss
+2024-01-15 08:26:45.789 INFO  [cache] Cache connection restored
+2024-01-15 08:27:01.012 ERROR [auth] AuthenticationFailed: Invalid token for user_id=111
+2024-01-15 08:27:23.234 ERROR [validation] ValidationError: Credit card number invalid
+2024-01-15 08:27:45.456 INFO  [http] POST /api/payments - 400 Bad Request (8ms)
+2024-01-15 08:28:01.678 ERROR [db] ConnectionTimeout: Failed to acquire connection from pool after 5000ms
+2024-01-15 08:28:01.789 ERROR [http] Request failed: POST /api/checkout - 503 Service Unavailable
+2024-01-15 08:28:15.901 INFO  [db] Connection pool recovered
+2024-01-15 08:28:34.123 WARN  [memory] Heap usage at 82% (840MB/1024MB)
+2024-01-15 08:29:01.345 ERROR [auth] AuthenticationFailed: Account locked for user_id=222
+2024-01-15 08:29:23.567 INFO  [http] GET /api/orders/12345 - 200 OK (89ms)
+2024-01-15 08:29:45.789 ERROR [validation] ValidationError: Shipping address incomplete
+2024-01-15 08:30:01.012 INFO  [main] Graceful shutdown initiated
+2024-01-15 08:30:02.234 INFO  [worker-1] Worker thread stopping
+2024-01-15 08:30:02.456 INFO  [worker-2] Worker thread stopping
+2024-01-15 08:30:02.678 INFO  [worker-3] Worker thread stopping
+2024-01-15 08:30:03.901 INFO  [http] HTTP server stopped
+2024-01-15 08:30:04.123 INFO  [db] Database connection pool closed
+2024-01-15 08:30:05.345 INFO  [main] Application shutdown complete
