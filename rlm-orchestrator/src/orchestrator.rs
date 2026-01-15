@@ -425,8 +425,15 @@ Sub-LM calls (for semantic analysis of EXTRACTED content):
 
 WASM (dynamic code execution):
 - {{"op": "wasm", "module": "line_counter"}} - Run pre-compiled WASM module
-- {{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{...}}", "on": "$var", "store": "result"}}
-  Compile and execute custom Rust code. The function receives input (context or variable) and returns a String.
+- {{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{...}}", "store": "result"}}
+  Compile and execute custom Rust code. The function receives the FULL CONTEXT as input and returns a String.
+- {{"op": "rust_wasm", "code": "...", "on": "$myvar", "store": "result"}}
+  With "on": operates on a stored variable instead of the full context.
+
+IMPORTANT for rust_wasm:
+- WITHOUT "on:" → input is the FULL original context (usually what you want for log analysis!)
+- WITH "on": "$var" → input is the content of that variable
+- For analyzing logs/files, just omit "on:" and process the full context directly.
 
 Available WASM modules: line_counter (counts lines in context)
 
@@ -462,17 +469,29 @@ Example - Custom pattern extraction:
 {{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{ input.lines().filter(|line| line.contains(\"ERROR\") && line.contains(\"timeout\")).count().to_string() }}", "store": "timeout_errors"}}
 ```
 
+Example - Count items by category (HashMap aggregation):
+```json
+{{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{ let mut counts: HashMap<&str, usize> = HashMap::new(); for line in input.lines() {{ if line.contains(\"ERROR\") {{ let cat = if line.contains(\"Timeout\") {{ \"Timeout\" }} else if line.contains(\"Auth\") {{ \"Auth\" }} else {{ \"Other\" }}; *counts.entry(cat).or_insert(0) += 1; }} }} let mut v: Vec<_> = counts.into_iter().collect(); v.sort_by(|a,b| b.1.cmp(&a.1)); v.iter().map(|(k,c)| format!(\"{{}}:{{}}\", k, c)).collect::<Vec<_>>().join(\", \") }}", "store": "error_counts"}}
+{{"op": "final_var", "name": "error_counts"}}
+```
+Note: No "on:" parameter - processes the FULL context directly. Uses final_var to output the result.
+
 When to use rust_wasm vs built-in commands:
 - Use find/regex for simple searches and pattern matching
 - Use count for basic counting (lines, words, chars)
 - Use rust_wasm for: aggregations, frequency analysis, custom filtering, numeric computations, multi-step transformations
 
 Finishing:
-- {{"op": "final", "answer": "The result is..."}}
-- {{"op": "final_var", "name": "result"}}
+- {{"op": "final", "answer": "The result is..."}} - Use for simple text answers
+- {{"op": "final_var", "name": "result"}} - Use to output a computed variable (PREFERRED for rust_wasm results!)
+
+IMPORTANT: Use final_var when your answer is stored in a variable from rust_wasm or other computation.
+Do NOT try to interpolate variables in final's answer string - use final_var instead.
 
 ## Variable References
-Use ${{var}} or $var in strings to reference stored variables.
+- Variables persist across iterations - no need to re-extract data you already have!
+- Use $var in the "on" parameter: {{"op": "rust_wasm", ..., "on": "$mydata"}}
+- Variable interpolation in strings (${{var}}) has limited support - prefer final_var for outputs.
 
 ## Workflow (MANDATORY: SEARCH FIRST!)
 
@@ -514,10 +533,12 @@ Then examine results and extract context:
 Note: The extracted ${{error_lines}} is passed TO the sub-LLM in the prompt.
 
 ## Important Notes
-- Variables store strings only. Use `count` with `what: "matches"` after `regex` to count results.
+- Variables store strings and PERSIST across iterations - don't re-extract data you already have!
 - The `regex` command stores matched text (one per line). Use `count` with `what: "lines"` on that variable.
 - Always use `store` to save results you need later.
-- Wrap commands in ```json blocks. Execute multiple commands per iteration."#,
+- Wrap commands in ```json blocks. Execute multiple commands per iteration.
+- For aggregation tasks (counting by category, frequency analysis), use rust_wasm with HashMap on the FULL context.
+- Prefer final_var over final with variable interpolation for computed results."#,
             context_len = context_len
         )
     }
