@@ -96,3 +96,116 @@ The rust_wasm code does:
 8. **Format**: Return top 5 as readable output
 
 All in a single RLM iteration, where built-in commands would need many iterations and still couldn't complete the task.
+
+## Actual Demo Run (January 2026)
+
+**Query:** "Count how many of each error type appear in this log. Use rust_wasm to do this with a HashMap."
+
+**Model:** deepseek-chat via LiteLLM gateway
+
+### Generated WASM Code
+
+The LLM generated this Rust code (formatted):
+```rust
+pub fn analyze(input: &str) -> String {
+    use std::collections::HashMap;
+    let mut error_counts: HashMap<String, usize> = HashMap::new();
+
+    for line in input.lines() {
+        if line.contains("ERROR") {
+            if line.contains("ConnectionTimeout") {
+                error_counts.entry("ConnectionTimeout".to_string())
+                    .and_modify(|c| *c += 1).or_insert(1);
+            } else if line.contains("AuthenticationFailed") {
+                error_counts.entry("AuthenticationFailed".to_string())
+                    .and_modify(|c| *c += 1).or_insert(1);
+            } else if line.contains("Request failed") {
+                error_counts.entry("RequestFailed".to_string())
+                    .and_modify(|c| *c += 1).or_insert(1);
+            } else if line.contains("ValidationError") {
+                error_counts.entry("ValidationError".to_string())
+                    .and_modify(|c| *c += 1).or_insert(1);
+            } else if line.contains("DeadlockDetected") {
+                error_counts.entry("DeadlockDetected".to_string())
+                    .and_modify(|c| *c += 1).or_insert(1);
+            } else if line.contains("ConnectionRefused") {
+                error_counts.entry("ConnectionRefused".to_string())
+                    .and_modify(|c| *c += 1).or_insert(1);
+            } else if line.contains("QueryTimeout") {
+                error_counts.entry("QueryTimeout".to_string())
+                    .and_modify(|c| *c += 1).or_insert(1);
+            } else if line.contains("SocketTimeout") {
+                error_counts.entry("SocketTimeout".to_string())
+                    .and_modify(|c| *c += 1).or_insert(1);
+            } else if line.contains("Failed to send email notification") {
+                error_counts.entry("NotificationFailed".to_string())
+                    .and_modify(|c| *c += 1).or_insert(1);
+            } else {
+                error_counts.entry("Other".to_string())
+                    .and_modify(|c| *c += 1).or_insert(1);
+            }
+        }
+    }
+
+    let mut result = String::new();
+    result.push_str(&format!("Total errors: {}\n",
+        input.lines().filter(|l| l.contains("ERROR")).count()));
+
+    let mut sorted_counts: Vec<_> = error_counts.iter().collect();
+    sorted_counts.sort_by(|a, b| b.1.cmp(a.1));
+
+    for (error_type, count) in sorted_counts {
+        result.push_str(&format!("{}: {}\n", error_type, count));
+    }
+    result
+}
+```
+
+### WASM Execution Result
+
+```
+Total errors: 51
+AuthenticationFailed: 13
+RequestFailed: 11
+ConnectionTimeout: 10
+ValidationError: 9
+ConnectionRefused: 3
+DeadlockDetected: 2
+QueryTimeout: 1
+NotificationFailed: 1
+SocketTimeout: 1
+```
+
+### LLM Final Answer
+
+```
+Error type counts from the log:
+Total errors: 51
+AuthenticationFailed: 13
+RequestFailed: 11
+ConnectionTimeout: 10
+ValidationError: 9
+ConnectionRefused: 3
+DeadlockDetected: 2
+QueryTimeout: 1
+NotificationFailed: 1
+SocketTimeout: 1
+```
+
+### Performance Stats
+
+| Metric | Value |
+|--------|-------|
+| Iterations | 16 (multiple retries due to variable handling) |
+| Prompt tokens | 146,025 |
+| Completion tokens | 19,995 |
+| Compile time | ~906ms |
+| LLM time per iteration | 2s - 108s |
+
+### Observations
+
+1. **The LLM correctly used HashMap** to aggregate error counts
+2. **Code compiled successfully** to WASM and executed in sandboxed environment
+3. **Result matches expected** error distribution in sample.log
+4. **Multiple iterations** were needed because the LLM struggled with variable passing (`$var` syntax)
+5. **Pre-built tools** (added in this release) would reduce iterations significantly
