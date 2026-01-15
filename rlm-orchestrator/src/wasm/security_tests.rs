@@ -317,12 +317,12 @@ mod tests {
             // Attempt to use unsafe to access memory
             (
                 r#"pub fn analyze(input: &str) -> String { unsafe { let ptr = 0x12345678 as *const u8; *ptr }.to_string() }"#,
-                "raw pointer access"
+                "raw pointer access",
             ),
             // Attempt to use inline assembly
             (
                 r#"pub fn analyze(input: &str) -> String { unsafe { std::arch::asm!("nop"); } String::new() }"#,
-                "inline assembly"
+                "inline assembly",
             ),
         ];
 
@@ -393,7 +393,12 @@ mod tests {
         for (code, description) in valid_codes {
             println!("Testing: {}", description);
             let result = compiler.validate_source(code);
-            assert!(result.is_ok(), "Validation failed for '{}': {:?}", description, result);
+            assert!(
+                result.is_ok(),
+                "Validation failed for '{}': {:?}",
+                description,
+                result
+            );
 
             match compiler.compile(code) {
                 Ok(wasm_bytes) => {

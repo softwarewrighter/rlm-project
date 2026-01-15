@@ -756,19 +756,20 @@ impl CommandExecutor {
                 })?;
 
                 // Resolve the source input
-                let source = self.resolve_source(&on)?.to_string();
+                let source = self.resolve_source(on)?.to_string();
 
                 // Try tool library first if a tool name is specified
                 if let Some(tool_name) = tool {
                     // Check if tool library is available
                     let tool_lib = self.wasm_tool_library.as_ref().ok_or_else(|| {
                         CommandError::InvalidCommand(
-                            "WASM tool library not available. Set RLM_PRECOMPILE_TOOLS=1".to_string(),
+                            "WASM tool library not available. Set RLM_PRECOMPILE_TOOLS=1"
+                                .to_string(),
                         )
                     })?;
 
                     let wasm_bytes = tool_lib
-                        .get(&tool_name)
+                        .get(tool_name)
                         .ok_or_else(|| CommandError::WasmModuleNotFound(tool_name.clone()))?;
 
                     // Prepend args to source if provided
@@ -779,10 +780,14 @@ impl CommandExecutor {
                     };
 
                     // Tools use run_analyze function
-                    let func_name = if function == "analyze" { "run_analyze" } else { &function };
+                    let func_name = if function == "analyze" {
+                        "run_analyze"
+                    } else {
+                        function
+                    };
                     let result = executor.execute(&wasm_bytes, func_name, &input)?;
 
-                    self.store_result(&store, result.clone());
+                    self.store_result(store, result.clone());
                     return Ok(ExecutionResult::Continue {
                         output: format!("wasm_tool {}: {}", tool_name, result),
                         sub_calls: 0,
@@ -801,9 +806,9 @@ impl CommandExecutor {
                     .get(&module_name)
                     .ok_or_else(|| CommandError::WasmModuleNotFound(module_name.clone()))?;
 
-                let result = executor.execute(wasm_bytes, &function, &source)?;
+                let result = executor.execute(wasm_bytes, function, &source)?;
 
-                self.store_result(&store, result.clone());
+                self.store_result(store, result.clone());
                 Ok(ExecutionResult::Continue {
                     output: format!("WASM {}.{}: {}", module_name, function, result),
                     sub_calls: 0,

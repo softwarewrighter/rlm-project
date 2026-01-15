@@ -52,7 +52,8 @@ impl WasmToolLibrary {
 
     /// Generate a prompt fragment listing available tools
     pub fn prompt_fragment(&self) -> String {
-        let mut s = String::from("Available WASM tools (use {\"op\": \"wasm\", \"tool\": \"<name>\"}):\n");
+        let mut s =
+            String::from("Available WASM tools (use {\"op\": \"wasm\", \"tool\": \"<name>\"}):\n");
         for desc in self.descriptions.values() {
             s.push_str(&format!("  - {}: {}\n", desc.name, desc.description));
             s.push_str(&format!("    Example: {}\n", desc.example));
@@ -401,8 +402,8 @@ impl Default for WasmToolLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wasm::WasmExecutor;
     use crate::wasm::WasmConfig;
+    use crate::wasm::WasmExecutor;
 
     fn setup() -> (WasmToolLibrary, WasmExecutor) {
         let lib = WasmToolLibrary::new();
@@ -415,7 +416,11 @@ mod tests {
         let (lib, executor) = setup();
         let wasm = lib.get("count_pattern").expect("Tool should exist");
 
-        let result = executor.execute(&wasm, "run_analyze", "ERROR|line1 ERROR here\nline2 ERROR again\nline3 ok");
+        let result = executor.execute(
+            &wasm,
+            "run_analyze",
+            "ERROR|line1 ERROR here\nline2 ERROR again\nline3 ok",
+        );
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "2");
     }
@@ -425,7 +430,11 @@ mod tests {
         let (lib, executor) = setup();
         let wasm = lib.get("count_lines_matching").expect("Tool should exist");
 
-        let result = executor.execute(&wasm, "run_analyze", "ERROR|line1 ERROR here\nline2 ERROR again\nline3 ok");
+        let result = executor.execute(
+            &wasm,
+            "run_analyze",
+            "ERROR|line1 ERROR here\nline2 ERROR again\nline3 ok",
+        );
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "2");
     }
@@ -447,7 +456,8 @@ mod tests {
         let (lib, executor) = setup();
         let wasm = lib.get("categorize_lines").expect("Tool should exist");
 
-        let input = "ERROR,WARN,INFO|ERROR: db failed\nWARN: slow query\nINFO: started\nERROR: timeout";
+        let input =
+            "ERROR,WARN,INFO|ERROR: db failed\nWARN: slow query\nINFO: started\nERROR: timeout";
         let result = executor.execute(&wasm, "run_analyze", input);
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -461,7 +471,11 @@ mod tests {
         let (lib, executor) = setup();
         let wasm = lib.get("statistics").expect("Tool should exist");
 
-        let result = executor.execute(&wasm, "run_analyze", "latency: 10ms, latency: 20ms, latency: 30ms");
+        let result = executor.execute(
+            &wasm,
+            "run_analyze",
+            "latency: 10ms, latency: 20ms, latency: 30ms",
+        );
         assert!(result.is_ok());
         let output = result.unwrap();
         assert!(output.contains("count: 3"));
@@ -476,7 +490,11 @@ mod tests {
         let tools = lib.list();
 
         // Should have all 10 tools
-        assert!(tools.len() >= 9, "Expected at least 9 tools, got {}", tools.len());
+        assert!(
+            tools.len() >= 9,
+            "Expected at least 9 tools, got {}",
+            tools.len()
+        );
 
         // Check some specific tools exist
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();

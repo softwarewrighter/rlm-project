@@ -191,7 +191,11 @@ impl RlmOrchestrator {
                     prompt_tokens,
                     completion_tokens,
                 },
-                timing: IterationTiming { llm_ms, exec_ms: 0, compile_ms: 0 },
+                timing: IterationTiming {
+                    llm_ms,
+                    exec_ms: 0,
+                    compile_ms: 0,
+                },
             }],
             total_sub_calls: 0,
             success: true,
@@ -277,7 +281,11 @@ impl RlmOrchestrator {
                 let exec_ms = exec_start.elapsed().as_millis() as u64;
                 let compile_ms = executor.last_compile_time_ms();
 
-                let timing = IterationTiming { llm_ms, exec_ms, compile_ms };
+                let timing = IterationTiming {
+                    llm_ms,
+                    exec_ms,
+                    compile_ms,
+                };
 
                 match exec_result {
                     Ok(ExecutionResult::Final { answer, sub_calls }) => {
@@ -334,7 +342,11 @@ impl RlmOrchestrator {
                 }
             } else {
                 // No JSON commands - check for FINAL in plain text (fallback)
-                let timing = IterationTiming { llm_ms, exec_ms: 0, compile_ms: 0 };
+                let timing = IterationTiming {
+                    llm_ms,
+                    exec_ms: 0,
+                    compile_ms: 0,
+                };
 
                 if let Some(final_answer) = extract_final(&response.content) {
                     history.push(IterationRecord {

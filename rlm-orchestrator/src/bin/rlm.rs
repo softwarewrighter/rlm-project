@@ -245,46 +245,52 @@ fn print_header(args: &CliArgs, file_size: usize, line_count: usize) {
     eprintln!();
 }
 
-fn print_iteration(
+/// Data for printing an iteration's results
+struct IterationDisplay<'a> {
     step: usize,
-    llm_response: &str,
-    commands: &str,
-    output: &str,
+    llm_response: &'a str,
+    commands: &'a str,
+    output: &'a str,
     verbose: u8,
     llm_ms: u64,
     exec_ms: u64,
     compile_ms: u64,
-) {
+}
+
+fn print_iteration(iter: &IterationDisplay) {
     // Build timing string
-    let timing_str = if compile_ms > 0 {
-        format!("LLM: {}ms | Exec: {}ms (compile: {}ms)", llm_ms, exec_ms, compile_ms)
+    let timing_str = if iter.compile_ms > 0 {
+        format!(
+            "LLM: {}ms | Exec: {}ms (compile: {}ms)",
+            iter.llm_ms, iter.exec_ms, iter.compile_ms
+        )
     } else {
-        format!("LLM: {}ms | Exec: {}ms", llm_ms, exec_ms)
+        format!("LLM: {}ms | Exec: {}ms", iter.llm_ms, iter.exec_ms)
     };
 
     eprintln!(
         "{}",
-        format!("┌─ Iteration {step} ─────────────────────────────────────────────────").cyan()
+        format!(
+            "┌─ Iteration {} ─────────────────────────────────────────────────",
+            iter.step
+        )
+        .cyan()
     );
-    eprintln!(
-        "{} {}",
-        "│".cyan(),
-        format!("⏱  {}", timing_str).dimmed()
-    );
+    eprintln!("{} {}", "│".cyan(), format!("⏱  {}", timing_str).dimmed());
 
     // At -vv level, show the full LLM response
-    if verbose >= 2 && !llm_response.is_empty() {
+    if iter.verbose >= 2 && !iter.llm_response.is_empty() {
         eprintln!("{}", "│".cyan());
         eprintln!("{} {}", "│".cyan(), "▼ LLM Response:".blue());
         // Show LLM response with green color, truncated if very long
-        let response_preview = if llm_response.len() > 500 {
+        let response_preview = if iter.llm_response.len() > 500 {
             format!(
                 "{}...\n{}",
-                &llm_response[..497],
-                format!("({} chars total)", llm_response.len()).dimmed()
+                &iter.llm_response[..497],
+                format!("({} chars total)", iter.llm_response.len()).dimmed()
             )
         } else {
-            llm_response.to_string()
+            iter.llm_response.to_string()
         };
         for line in response_preview.lines() {
             eprintln!("{}   {}", "│".cyan(), line.green());
@@ -293,36 +299,36 @@ fn print_iteration(
     }
 
     // Show the JSON command(s)
-    if !commands.is_empty() && commands != "(direct)" {
+    if !iter.commands.is_empty() && iter.commands != "(direct)" {
         eprintln!("{} {}", "│".cyan(), "▶ Command(s):".yellow());
         // Pretty print the JSON
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(commands) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(iter.commands) {
             if let Ok(pretty) = serde_json::to_string_pretty(&json) {
                 for line in pretty.lines() {
                     eprintln!("{}   {}", "│".cyan(), line.yellow());
                 }
             } else {
-                eprintln!("{}   {}", "│".cyan(), commands.yellow());
+                eprintln!("{}   {}", "│".cyan(), iter.commands.yellow());
             }
         } else {
             // Not valid JSON, show raw
-            eprintln!("{}   {}", "│".cyan(), commands.yellow());
+            eprintln!("{}   {}", "│".cyan(), iter.commands.yellow());
         }
-    } else if !commands.is_empty() {
-        eprintln!("{} {} {}", "│".cyan(), "▶ Command:".yellow(), commands);
+    } else if !iter.commands.is_empty() {
+        eprintln!("{} {} {}", "│".cyan(), "▶ Command:".yellow(), iter.commands);
     }
 
     // Show output (truncated) with cyan color
-    if !output.is_empty() {
-        if verbose >= 2 || output.len() < 100 {
-            let output_preview = if output.len() > 300 {
+    if !iter.output.is_empty() {
+        if iter.verbose >= 2 || iter.output.len() < 100 {
+            let output_preview = if iter.output.len() > 300 {
                 format!(
                     "{}...\n{}",
-                    &output[..297],
-                    format!("({} chars total)", output.len()).dimmed()
+                    &iter.output[..297],
+                    format!("({} chars total)", iter.output.len()).dimmed()
                 )
             } else {
-                output.to_string()
+                iter.output.to_string()
             };
             eprintln!("{} {}", "│".cyan(), "◀ Output:".magenta());
             for line in output_preview.lines() {
@@ -333,7 +339,7 @@ fn print_iteration(
                 "{} {} {}",
                 "│".cyan(),
                 "◀ Output:".magenta(),
-                format!("{} chars", output.len()).dimmed()
+                format!("{} chars", iter.output.len()).dimmed()
             );
         }
     }
@@ -539,16 +545,16 @@ async fn main() -> Result<()> {
             // Show iteration history if verbose
             if args.verbose > 0 {
                 for record in &rlm_result.history {
-                    print_iteration(
-                        record.step,
-                        &record.llm_response,
-                        &record.commands,
-                        &record.output,
-                        args.verbose,
-                        record.timing.llm_ms,
-                        record.timing.exec_ms,
-                        record.timing.compile_ms,
-                    );
+                    print_iteration(&IterationDisplay {
+                        step: record.step,
+                        llm_response: &record.llm_response,
+                        commands: &record.commands,
+                        output: &record.output,
+                        verbose: args.verbose,
+                        llm_ms: record.timing.llm_ms,
+                        exec_ms: record.timing.exec_ms,
+                        compile_ms: record.timing.compile_ms,
+                    });
                 }
             }
 

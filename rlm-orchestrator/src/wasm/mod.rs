@@ -8,13 +8,13 @@
 //! - `compiler` - Rust to WASM compilation
 //! - `cache` - Module caching for compiled WASM
 
-pub mod cache;
-pub mod compiler;
-pub mod library;
 #[cfg(test)]
 mod benchmark_tests;
+pub mod cache;
+pub mod compiler;
 #[cfg(test)]
 mod demo_tests;
+pub mod library;
 #[cfg(test)]
 mod security_tests;
 

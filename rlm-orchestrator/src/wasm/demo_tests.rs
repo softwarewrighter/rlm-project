@@ -108,13 +108,24 @@ pub fn analyze(input: &str) -> String {
                 println!("\n=====================================\n");
 
                 // Verify results contain expected error types
-                assert!(result.contains("AuthenticationFailed"), "Should find AuthenticationFailed");
-                assert!(result.contains("ConnectionTimeout"), "Should find ConnectionTimeout");
-                assert!(result.contains("ValidationError"), "Should find ValidationError");
+                assert!(
+                    result.contains("AuthenticationFailed"),
+                    "Should find AuthenticationFailed"
+                );
+                assert!(
+                    result.contains("ConnectionTimeout"),
+                    "Should find ConnectionTimeout"
+                );
+                assert!(
+                    result.contains("ValidationError"),
+                    "Should find ValidationError"
+                );
 
                 // Verify counts are reasonable
-                assert!(result.contains("5 errors") || result.contains("4 errors"),
-                    "AuthenticationFailed should have 4-5 occurrences");
+                assert!(
+                    result.contains("5 errors") || result.contains("4 errors"),
+                    "AuthenticationFailed should have 4-5 occurrences"
+                );
             }
             Err(e) => {
                 println!("Execution failed: {}", e);
@@ -299,8 +310,10 @@ pub fn analyze(input: &str) -> String {
                 println!("\n=====================================\n");
 
                 assert!(result.contains("192.168.1.100"), "Should find frequent IP");
-                assert!(result.contains("5 requests") || result.contains("requests"),
-                    "Should show request count");
+                assert!(
+                    result.contains("5 requests") || result.contains("requests"),
+                    "Should show request count"
+                );
             }
             Err(e) => {
                 println!("Execution failed: {}", e);

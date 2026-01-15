@@ -171,6 +171,25 @@ Return the final answer and end the loop.
 |-----------|------|---------|-------------|
 | `answer` | string | required | The final answer to return |
 
+**Note:** For simple text answers only. For computed results stored in variables, use `final_var` instead.
+
+### final_var
+
+Return a stored variable's value as the final answer.
+
+```json
+{
+  "op": "final_var",
+  "name": "analysis_result"
+}
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | string | required | Variable name containing the answer |
+
+**Recommended for rust_wasm results:** When your answer is computed and stored in a variable (e.g., from `rust_wasm`), use `final_var` to output it directly rather than trying to interpolate it in a `final` answer string.
+
 ## Variables
 
 Commands can store results in variables for later use:
@@ -179,6 +198,8 @@ Commands can store results in variables for later use:
 {"op": "find", "text": "ERROR", "store": "errors"}
 {"op": "count", "what": "matches", "on": "errors", "store": "count"}
 ```
+
+**Important:** Variables **persist across iterations**. Once you've stored data in a variable, you don't need to re-extract it in subsequent iterations.
 
 ### Built-in Variables
 
@@ -266,7 +287,6 @@ Compile and execute custom Rust analysis code. The Rust code is compiled to WASM
 {
   "op": "rust_wasm",
   "code": "pub fn analyze(input: &str) -> String { input.lines().count().to_string() }",
-  "on": "context",
   "store": "line_count"
 }
 ```
@@ -274,8 +294,14 @@ Compile and execute custom Rust analysis code. The Rust code is compiled to WASM
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `code` | string | required | Rust source code with `analyze` function |
-| `on` | string | "context" | Variable to pass as input |
+| `on` | string | null | Variable to pass as input. **If omitted, operates on the FULL original context** |
 | `store` | string | null | Variable to store result |
+
+**Important: The `on` parameter behavior:**
+- **Without `on:`** → input is the FULL original context (usually what you want for log/file analysis!)
+- **With `on: "$var"`** → input is the content of that stored variable
+
+For most analysis tasks (counting errors, aggregating data, etc.), **omit the `on` parameter** and process the full context directly.
 
 **Function Signature (REQUIRED):**
 
@@ -328,6 +354,14 @@ Custom pattern counting:
   "store": "timeout_errors"
 }
 ```
+
+Count items by category (HashMap aggregation):
+```json
+{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String { let mut counts: HashMap<&str, usize> = HashMap::new(); for line in input.lines() { if line.contains(\"ERROR\") { let cat = if line.contains(\"Timeout\") { \"Timeout\" } else if line.contains(\"Auth\") { \"Auth\" } else { \"Other\" }; *counts.entry(cat).or_insert(0) += 1; } } let mut v: Vec<_> = counts.into_iter().collect(); v.sort_by(|a,b| b.1.cmp(&a.1)); v.iter().map(|(k,c)| format!(\"{}:{}\", k, c)).collect::<Vec<_>>().join(\", \") }", "store": "error_counts"}
+{"op": "final_var", "name": "error_counts"}
+```
+
+**Note:** This processes the FULL context directly (no `on` parameter) and uses `final_var` to output the computed result.
 
 **When to use rust_wasm:**
 - Complex aggregations that can't be done with `count`

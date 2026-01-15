@@ -56,11 +56,7 @@ mod tests {
             let avg = times.iter().sum::<std::time::Duration>() / times.len() as u32;
             println!("\nSimple function compile time: {:?} average", avg);
             // Should be under 5 seconds
-            assert!(
-                avg.as_secs() < 5,
-                "Compilation too slow: {:?}",
-                avg
-            );
+            assert!(avg.as_secs() < 5, "Compilation too slow: {:?}", avg);
         }
     }
 
@@ -138,10 +134,7 @@ mod tests {
 
             match result {
                 Ok(count) => {
-                    println!(
-                        "Line count for {} lines: {} in {:?}",
-                        size, count, elapsed
-                    );
+                    println!("Line count for {} lines: {} in {:?}", size, count, elapsed);
                     // Should be under 1 second
                     assert!(
                         elapsed.as_secs() < 1,
@@ -182,7 +175,9 @@ mod tests {
         let executor = get_executor();
 
         // Test with ~100KB of text
-        let words = ["the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog"];
+        let words = [
+            "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog",
+        ];
         let input: String = (0..10000)
             .map(|i| words[i % words.len()])
             .collect::<Vec<_>>()
@@ -253,11 +248,7 @@ mod tests {
         );
 
         // Should be under 1ms per lookup (usually microseconds)
-        assert!(
-            avg_ns < 1_000_000,
-            "Cache hit too slow: {} ns",
-            avg_ns
-        );
+        assert!(avg_ns < 1_000_000, "Cache hit too slow: {} ns", avg_ns);
     }
 
     #[test]
@@ -286,11 +277,7 @@ mod tests {
         );
 
         // Should be under 1ms per lookup
-        assert!(
-            avg_ns < 1_000_000,
-            "Cache miss too slow: {} ns",
-            avg_ns
-        );
+        assert!(avg_ns < 1_000_000, "Cache miss too slow: {} ns", avg_ns);
     }
 
     // ==================== Comparison Benchmarks ====================
@@ -320,8 +307,14 @@ mod tests {
             let native_result = input.lines().count().to_string();
             let native_elapsed = native_start.elapsed();
 
-            println!("WASM execution: {:?} (result: {:?})", wasm_elapsed, wasm_result);
-            println!("Native execution: {:?} (result: {})", native_elapsed, native_result);
+            println!(
+                "WASM execution: {:?} (result: {:?})",
+                wasm_elapsed, wasm_result
+            );
+            println!(
+                "Native execution: {:?} (result: {})",
+                native_elapsed, native_result
+            );
 
             if let Ok(wasm_count) = wasm_result {
                 assert_eq!(wasm_count, native_result, "Results should match");
