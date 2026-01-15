@@ -1,15 +1,21 @@
 //! REST API for RLM orchestrator
 
-use crate::orchestrator::{IterationRecord, RlmOrchestrator, RlmResult};
+use crate::orchestrator::{IterationRecord, ProgressEvent, RlmOrchestrator, RlmResult};
 use axum::{
     extract::State,
     http::StatusCode,
-    response::Html,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        Html,
+    },
     routing::{get, post},
     Json, Router,
 };
+use futures::stream::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
@@ -137,12 +143,64 @@ pub struct HealthResponse {
     pub rust_wasm_enabled: bool,
 }
 
+/// SSE event for streaming progress
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum StreamEvent {
+    #[serde(rename = "iteration_start")]
+    IterationStart { step: usize },
+    #[serde(rename = "llm_start")]
+    LlmStart { step: usize },
+    #[serde(rename = "llm_complete")]
+    LlmComplete {
+        step: usize,
+        duration_ms: u64,
+        response_preview: String,
+    },
+    #[serde(rename = "commands")]
+    Commands { step: usize, commands: String },
+    #[serde(rename = "wasm_compile_start")]
+    WasmCompileStart { step: usize },
+    #[serde(rename = "wasm_compile_complete")]
+    WasmCompileComplete { step: usize, duration_ms: u64 },
+    #[serde(rename = "command_complete")]
+    CommandComplete {
+        step: usize,
+        output_preview: String,
+        exec_ms: u64,
+    },
+    #[serde(rename = "iteration_complete")]
+    IterationComplete {
+        step: usize,
+        llm_response: String,
+        commands: String,
+        output: String,
+        error: Option<String>,
+    },
+    #[serde(rename = "final_answer")]
+    FinalAnswer { answer: String },
+    #[serde(rename = "complete")]
+    Complete {
+        success: bool,
+        answer: String,
+        error: Option<String>,
+        iterations: usize,
+        total_sub_calls: usize,
+        context_length: usize,
+        total_prompt_tokens: u32,
+        total_completion_tokens: u32,
+    },
+    #[serde(rename = "error")]
+    Error { message: String },
+}
+
 /// Create the API router
 pub fn create_router(state: Arc<ApiState>) -> Router {
     Router::new()
         .route("/health", get(health_check))
         .route("/query", post(process_query))
         .route("/debug", post(debug_query))
+        .route("/stream", post(stream_query))
         .route("/visualize", get(visualize_page))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -217,6 +275,111 @@ async fn debug_query(
     }
 }
 
+/// Streaming query - returns SSE events for real-time progress
+async fn stream_query(
+    State(state): State<Arc<ApiState>>,
+    Json(request): Json<QueryRequest>,
+) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let (tx, rx) = mpsc::channel::<StreamEvent>(100);
+    let context_length = request.context.len();
+
+    // Spawn the processing task
+    let orchestrator = state.orchestrator.clone();
+    let query = request.query.clone();
+    let context = request.context.clone();
+
+    tokio::spawn(async move {
+        // Create a progress callback that sends events to the channel
+        let tx_clone = tx.clone();
+        let callback = Box::new(move |event: ProgressEvent| {
+            let stream_event = match event {
+                ProgressEvent::IterationStart { step } => StreamEvent::IterationStart { step },
+                ProgressEvent::LlmCallStart { step } => StreamEvent::LlmStart { step },
+                ProgressEvent::LlmCallComplete {
+                    step,
+                    duration_ms,
+                    response_preview,
+                } => StreamEvent::LlmComplete {
+                    step,
+                    duration_ms,
+                    response_preview,
+                },
+                ProgressEvent::CommandsExtracted { step, commands } => {
+                    StreamEvent::Commands { step, commands }
+                }
+                ProgressEvent::WasmCompileStart { step } => StreamEvent::WasmCompileStart { step },
+                ProgressEvent::WasmCompileComplete { step, duration_ms } => {
+                    StreamEvent::WasmCompileComplete { step, duration_ms }
+                }
+                ProgressEvent::CommandComplete {
+                    step,
+                    output_preview,
+                    exec_ms,
+                } => StreamEvent::CommandComplete {
+                    step,
+                    output_preview,
+                    exec_ms,
+                },
+                ProgressEvent::IterationComplete { step, record } => {
+                    StreamEvent::IterationComplete {
+                        step,
+                        llm_response: record.llm_response.clone(),
+                        commands: record.commands.clone(),
+                        output: record.output.clone(),
+                        error: record.error.clone(),
+                    }
+                }
+                ProgressEvent::FinalAnswer { answer } => StreamEvent::FinalAnswer { answer },
+                ProgressEvent::Complete {
+                    iterations: _,
+                    success: _,
+                } => {
+                    // We'll send the complete event with full data after process returns
+                    return;
+                }
+            };
+            // Use try_send to avoid blocking - drop events if channel is full
+            let _ = tx_clone.try_send(stream_event);
+        });
+
+        // Run the query with progress callback
+        match orchestrator
+            .process_with_progress(&query, &context, Some(callback))
+            .await
+        {
+            Ok(result) => {
+                let _ = tx
+                    .send(StreamEvent::Complete {
+                        success: result.success,
+                        answer: result.answer,
+                        error: result.error,
+                        iterations: result.iterations,
+                        total_sub_calls: result.total_sub_calls,
+                        context_length,
+                        total_prompt_tokens: result.total_prompt_tokens,
+                        total_completion_tokens: result.total_completion_tokens,
+                    })
+                    .await;
+            }
+            Err(e) => {
+                let _ = tx
+                    .send(StreamEvent::Error {
+                        message: e.to_string(),
+                    })
+                    .await;
+            }
+        }
+    });
+
+    // Convert the receiver to a stream of SSE events
+    let stream = ReceiverStream::new(rx).map(|event| {
+        let json = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string());
+        Ok(Event::default().data(json))
+    });
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
 /// Visualization page
 async fn visualize_page() -> Html<&'static str> {
     Html(VISUALIZE_HTML)
@@ -239,6 +402,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             --success: #4ade80;
             --error: #f87171;
             --wasm: #f59e0b;
+            --progress: #3b82f6;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -246,9 +410,9 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
-            padding: 20px;
+            padding: 20px 40px;
         }
-        .container { max-width: 1400px; margin: 0 auto; }
+        .container { max-width: 100%; margin: 0 auto; }
         h1 {
             font-size: 1.5rem;
             margin-bottom: 20px;
@@ -499,9 +663,85 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             line-height: 1.5;
         }
 
+        /* Progress section */
+        .progress-section {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .progress-header h2 {
+            font-size: 0.9rem;
+            color: var(--progress);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .progress-status {
+            font-size: 0.8rem;
+            color: var(--muted);
+        }
+        .progress-status.active { color: var(--progress); }
+        .progress-log {
+            background: var(--bg);
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 0.8rem;
+            line-height: 1.6;
+        }
+        .progress-log .event {
+            margin-bottom: 4px;
+            display: flex;
+            gap: 8px;
+        }
+        .progress-log .event-time {
+            color: var(--muted);
+            min-width: 70px;
+        }
+        .progress-log .event-icon { min-width: 20px; }
+        .progress-log .event-llm { color: var(--highlight); }
+        .progress-log .event-wasm { color: var(--wasm); }
+        .progress-log .event-cmd { color: #7dd3fc; }
+        .progress-log .event-done { color: var(--success); }
+
+        /* Context preview */
+        .context-preview {
+            background: var(--bg);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 0.75rem;
+            margin-top: 8px;
+            max-height: 100px;
+            overflow: hidden;
+        }
+        .context-preview .line {
+            color: var(--muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .context-preview .ellipsis {
+            color: var(--highlight);
+            text-align: center;
+            padding: 4px 0;
+        }
+        .context-stats {
+            font-size: 0.75rem;
+            color: var(--muted);
+            margin-top: 8px;
+        }
+
         @media (max-width: 900px) {
             .results { grid-template-columns: 1fr; }
             .input-row { grid-template-columns: 1fr; }
+            body { padding: 15px; }
         }
     </style>
 </head>
@@ -534,17 +774,26 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
                     <textarea id="query" placeholder="What do you want to know about the context?">How many ERROR lines are there?</textarea>
                 </div>
                 <div>
-                    <label for="context">Context</label>
-                    <textarea id="context" placeholder="Paste your text/code here...">Line 1: INFO - System started
+                    <label for="context">Context <span id="contextStats" class="context-stats"></span></label>
+                    <textarea id="context" placeholder="Paste your text/code here..." oninput="updateContextPreview()">Line 1: INFO - System started
 Line 2: ERROR - Connection failed
 Line 3: INFO - Retrying connection
 Line 4: ERROR - Timeout occurred
 Line 5: WARNING - High memory usage
 Line 6: INFO - Connection established
 Line 7: ERROR - Invalid input received</textarea>
+                    <div id="contextPreview" class="context-preview"></div>
                 </div>
             </div>
             <button id="runBtn" onclick="runQuery()">Run RLM Query</button>
+        </div>
+
+        <div id="progressSection" class="progress-section hidden">
+            <div class="progress-header">
+                <h2>Live Progress</h2>
+                <span id="progressStatus" class="progress-status">Waiting...</span>
+            </div>
+            <div id="progressLog" class="progress-log"></div>
         </div>
 
         <div id="resultsSection" class="hidden">
@@ -596,6 +845,47 @@ Line 7: ERROR - Invalid input received</textarea>
 
     <script>
         let currentData = null;
+        let eventSource = null;
+        let startTime = null;
+
+        // Initialize context preview on load
+        document.addEventListener('DOMContentLoaded', updateContextPreview);
+
+        function updateContextPreview() {
+            const context = document.getElementById('context').value;
+            const lines = context.split('\n');
+            const lineCount = lines.length;
+            const charCount = context.length;
+
+            // Update stats
+            document.getElementById('contextStats').textContent = `(${lineCount} lines, ${charCount.toLocaleString()} chars)`;
+
+            // Show head/tail preview
+            const preview = document.getElementById('contextPreview');
+            if (lineCount <= 6) {
+                preview.innerHTML = lines.map(l => `<div class="line">${escapeHtml(l)}</div>`).join('');
+            } else {
+                const head = lines.slice(0, 3).map(l => `<div class="line">${escapeHtml(l)}</div>`).join('');
+                const tail = lines.slice(-3).map(l => `<div class="line">${escapeHtml(l)}</div>`).join('');
+                preview.innerHTML = head + `<div class="ellipsis">... ${lineCount - 6} more lines ...</div>` + tail;
+            }
+        }
+
+        function logProgress(icon, message, className = '') {
+            const log = document.getElementById('progressLog');
+            const elapsed = startTime ? ((Date.now() - startTime) / 1000).toFixed(1) + 's' : '0.0s';
+            const event = document.createElement('div');
+            event.className = 'event';
+            event.innerHTML = `<span class="event-time">${elapsed}</span><span class="event-icon">${icon}</span><span class="${className}">${escapeHtml(message)}</span>`;
+            log.appendChild(event);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function clearProgress() {
+            document.getElementById('progressLog').innerHTML = '';
+            document.getElementById('progressStatus').textContent = 'Connecting...';
+            document.getElementById('progressStatus').className = 'progress-status active';
+        }
 
         // Example data for the dropdown
         const examples = {
@@ -692,6 +982,7 @@ POST /api/batch - 789ms`,
             if (example) {
                 document.getElementById('query').value = example.query;
                 document.getElementById('context').value = example.context;
+                updateContextPreview();
 
                 // Show tags
                 const tagsHtml = example.tags.map(tag => {
@@ -709,24 +1000,138 @@ POST /api/batch - 789ms`,
             const context = document.getElementById('context').value;
             const btn = document.getElementById('runBtn');
 
+            // Cancel any existing connection
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+
             btn.disabled = true;
             btn.textContent = 'Running...';
+            startTime = Date.now();
+
+            // Show progress section, hide results
+            document.getElementById('progressSection').classList.remove('hidden');
+            document.getElementById('resultsSection').classList.add('hidden');
+            clearProgress();
+
+            // Build the history as we receive events
+            const history = [];
+            let currentStep = null;
 
             try {
-                const response = await fetch('/debug', {
+                // Use fetch to POST and get SSE stream
+                const response = await fetch('/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ query, context })
                 });
 
-                const data = await response.json();
-                currentData = data;
-                renderResults(data);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const jsonStr = line.slice(6);
+                            if (jsonStr.trim()) {
+                                try {
+                                    const event = JSON.parse(jsonStr);
+                                    handleStreamEvent(event, history);
+                                } catch (e) {
+                                    console.error('Parse error:', e, jsonStr);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                document.getElementById('progressStatus').textContent = 'Complete';
+                document.getElementById('progressStatus').className = 'progress-status';
+
             } catch (err) {
+                logProgress('❌', `Error: ${err.message}`, 'event-error');
+                document.getElementById('progressStatus').textContent = 'Failed';
                 alert('Error: ' + err.message);
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Run RLM Query';
+            }
+        }
+
+        function handleStreamEvent(event, history) {
+            const type = event.type;
+
+            switch (type) {
+                case 'iteration_start':
+                    logProgress('🔄', `Starting iteration ${event.step}`, 'event-llm');
+                    break;
+                case 'llm_start':
+                    logProgress('⏳', `Calling LLM...`, 'event-llm');
+                    break;
+                case 'llm_complete':
+                    logProgress('✓', `LLM responded (${event.duration_ms}ms)`, 'event-llm');
+                    break;
+                case 'commands':
+                    const isWasm = event.commands.includes('rust_wasm');
+                    logProgress('▶', `Commands: ${isWasm ? 'rust_wasm' : 'executing...'}`, isWasm ? 'event-wasm' : 'event-cmd');
+                    break;
+                case 'wasm_compile_start':
+                    logProgress('🔧', `Compiling WASM...`, 'event-wasm');
+                    break;
+                case 'wasm_compile_complete':
+                    logProgress('✓', `WASM compiled (${event.duration_ms}ms)`, 'event-wasm');
+                    break;
+                case 'command_complete':
+                    logProgress('◀', `Output (${event.exec_ms}ms): ${event.output_preview.substring(0, 50)}...`, 'event-cmd');
+                    break;
+                case 'iteration_complete':
+                    history.push({
+                        step: event.step,
+                        llm_response: event.llm_response,
+                        commands: event.commands,
+                        output: event.output,
+                        error: event.error,
+                        sub_calls: 0,
+                        prompt_tokens: 0,
+                        completion_tokens: 0
+                    });
+                    break;
+                case 'final_answer':
+                    logProgress('✅', `Final answer received`, 'event-done');
+                    break;
+                case 'complete':
+                    logProgress('🏁', `Complete: ${event.iterations} iterations, ${event.success ? 'success' : 'failed'}`, 'event-done');
+
+                    // Build the final data object and render results
+                    currentData = {
+                        success: event.success,
+                        answer: event.answer,
+                        error: event.error,
+                        iterations: event.iterations,
+                        total_sub_calls: event.total_sub_calls,
+                        context_length: event.context_length,
+                        total_prompt_tokens: event.total_prompt_tokens,
+                        total_completion_tokens: event.total_completion_tokens,
+                        history: history
+                    };
+                    renderResults(currentData);
+                    break;
+                case 'error':
+                    logProgress('❌', `Error: ${event.message}`, 'event-error');
+                    break;
             }
         }
 
