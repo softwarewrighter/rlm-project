@@ -16,6 +16,8 @@ use tower_http::trace::TraceLayer;
 /// API state
 pub struct ApiState {
     pub orchestrator: Arc<RlmOrchestrator>,
+    pub wasm_enabled: bool,
+    pub rust_wasm_enabled: bool,
 }
 
 /// Request to process a query
@@ -131,6 +133,8 @@ impl From<&IterationRecord> for IterationRecordJson {
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
+    pub wasm_enabled: bool,
+    pub rust_wasm_enabled: bool,
 }
 
 /// Create the API router
@@ -146,10 +150,12 @@ pub fn create_router(state: Arc<ApiState>) -> Router {
 }
 
 /// Health check endpoint
-async fn health_check() -> Json<HealthResponse> {
+async fn health_check(State(state): State<Arc<ApiState>>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "healthy".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
+        wasm_enabled: state.wasm_enabled,
+        rust_wasm_enabled: state.rust_wasm_enabled,
     })
 }
 

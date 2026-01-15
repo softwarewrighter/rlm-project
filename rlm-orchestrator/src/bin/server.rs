@@ -129,10 +129,16 @@ async fn main() -> Result<()> {
     pool.clone().start_health_check_task(30);
 
     // Create orchestrator
+    let wasm_enabled = config.wasm.enabled;
+    let rust_wasm_enabled = config.wasm.rust_wasm_enabled;
     let orchestrator = Arc::new(RlmOrchestrator::new(config, pool));
 
     // Create API state
-    let state = Arc::new(ApiState { orchestrator });
+    let state = Arc::new(ApiState {
+        orchestrator,
+        wasm_enabled,
+        rust_wasm_enabled,
+    });
 
     // Create router
     let app = create_router(state);

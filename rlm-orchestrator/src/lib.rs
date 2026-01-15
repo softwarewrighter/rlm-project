@@ -44,6 +44,10 @@ pub struct RlmConfig {
 
     /// Provider configuration
     pub providers: Vec<ProviderConfig>,
+
+    /// WASM execution configuration
+    #[serde(default)]
+    pub wasm: WasmConfig,
 }
 
 fn default_max_iterations() -> usize {
@@ -91,4 +95,64 @@ fn default_weight() -> u32 {
 }
 fn default_role() -> String {
     "both".to_string()
+}
+
+/// Configuration for WASM execution features
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct WasmConfig {
+    /// Enable WASM execution features
+    #[serde(default = "default_wasm_enabled")]
+    pub enabled: bool,
+
+    /// Enable rust_wasm command (requires rustc with wasm32-unknown-unknown target)
+    #[serde(default = "default_rust_wasm_enabled")]
+    pub rust_wasm_enabled: bool,
+
+    /// Maximum WASM instructions (fuel limit)
+    #[serde(default = "default_fuel_limit")]
+    pub fuel_limit: u64,
+
+    /// Maximum WASM memory in bytes
+    #[serde(default = "default_memory_limit")]
+    pub memory_limit: usize,
+
+    /// Directory for WASM module cache (None = memory-only)
+    pub cache_dir: Option<String>,
+
+    /// Maximum memory cache entries
+    #[serde(default = "default_cache_size")]
+    pub cache_size: usize,
+
+    /// Path to rustc binary (None = auto-detect)
+    pub rustc_path: Option<String>,
+}
+
+impl Default for WasmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            rust_wasm_enabled: true,
+            fuel_limit: 1_000_000,
+            memory_limit: 64 * 1024 * 1024,
+            cache_dir: None,
+            cache_size: 100,
+            rustc_path: None,
+        }
+    }
+}
+
+fn default_wasm_enabled() -> bool {
+    true
+}
+fn default_rust_wasm_enabled() -> bool {
+    true
+}
+fn default_fuel_limit() -> u64 {
+    1_000_000
+}
+fn default_memory_limit() -> usize {
+    64 * 1024 * 1024
+}
+fn default_cache_size() -> usize {
+    100
 }

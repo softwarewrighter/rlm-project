@@ -38,6 +38,8 @@ fn print_usage() {
     -v, --verbose               Show detailed iteration info
     -vv                         Extra verbose (show full LLM commands)
     --dry-run                   Show what would be done without executing
+    --no-wasm                   Disable all WASM features
+    --no-rust-wasm              Disable rust_wasm command (keep pre-compiled WASM)
     -h, --help                  Print this help message
 
 {}
@@ -67,6 +69,8 @@ struct CliArgs {
     max_iterations: usize,
     verbose: u8, // 0=off, 1=verbose, 2=extra verbose
     dry_run: bool,
+    wasm_enabled: bool,
+    rust_wasm_enabled: bool,
 }
 
 fn parse_args() -> Result<CliArgs> {
@@ -89,6 +93,8 @@ fn parse_args() -> Result<CliArgs> {
     let mut max_iterations = 20;
     let mut verbose: u8 = 0;
     let mut dry_run = false;
+    let mut wasm_enabled = true;
+    let mut rust_wasm_enabled = true;
 
     let mut i = 3;
     while i < args.len() {
@@ -120,6 +126,13 @@ fn parse_args() -> Result<CliArgs> {
             "--dry-run" => {
                 dry_run = true;
             }
+            "--no-wasm" => {
+                wasm_enabled = false;
+                rust_wasm_enabled = false;
+            }
+            "--no-rust-wasm" => {
+                rust_wasm_enabled = false;
+            }
             _ => {}
         }
         i += 1;
@@ -133,6 +146,8 @@ fn parse_args() -> Result<CliArgs> {
         max_iterations,
         verbose,
         dry_run,
+        wasm_enabled,
+        rust_wasm_enabled,
     })
 }
 
@@ -368,7 +383,23 @@ async fn main() -> Result<()> {
         eprintln!("  - {}     Extract line range", "lines".green());
         eprintln!("  - {}     Count lines/chars/matches", "count".magenta());
         eprintln!("  - {} Delegate to sub-LLM", "llm_query".cyan());
+        if args.wasm_enabled {
+            eprintln!("  - {}      Execute pre-compiled WASM", "wasm".blue());
+            if args.rust_wasm_enabled {
+                eprintln!("  - {} Compile & execute Rust code", "rust_wasm".blue());
+            }
+        }
         eprintln!("  - {}     Return answer", "final".bold());
+        eprintln!();
+        eprintln!("{}", "WASM features:".dimmed());
+        eprintln!(
+            "  - WASM enabled: {}",
+            if args.wasm_enabled { "yes" } else { "no" }
+        );
+        eprintln!(
+            "  - rust_wasm enabled: {}",
+            if args.rust_wasm_enabled { "yes" } else { "no" }
+        );
         return Ok(());
     }
 
@@ -387,6 +418,11 @@ async fn main() -> Result<()> {
             weight: 1,
             role: "root".to_string(),
         }],
+        wasm: rlm::WasmConfig {
+            enabled: args.wasm_enabled,
+            rust_wasm_enabled: args.rust_wasm_enabled,
+            ..Default::default()
+        },
     };
 
     // Create pool with Ollama provider

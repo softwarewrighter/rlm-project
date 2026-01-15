@@ -248,21 +248,65 @@ pub struct CommandExecutor {
 }
 
 impl CommandExecutor {
-    /// Create a new executor
+    /// Create a new executor with default WASM settings
     pub fn new(context: String, max_sub_calls: usize) -> Self {
-        // Initialize WASM executor (may fail on some platforms)
-        let wasm_executor = WasmExecutor::new(WasmConfig::default()).ok();
+        Self::with_wasm_config(context, max_sub_calls, &crate::WasmConfig::default())
+    }
 
-        // Initialize Rust compiler (may fail if rustc not installed)
-        let rust_compiler = RustCompiler::new(CompilerConfig::default()).ok();
-        if rust_compiler.is_some() {
-            tracing::info!("Rust WASM compiler available");
+    /// Create a new executor with custom WASM configuration
+    pub fn with_wasm_config(
+        context: String,
+        max_sub_calls: usize,
+        wasm_config: &crate::WasmConfig,
+    ) -> Self {
+        // Initialize WASM executor if enabled
+        let wasm_executor = if wasm_config.enabled {
+            let config = WasmConfig {
+                fuel_limit: wasm_config.fuel_limit,
+                memory_limit: wasm_config.memory_limit,
+                timeout_ms: 5000,
+            };
+            WasmExecutor::new(config).ok()
         } else {
-            tracing::debug!("Rust WASM compiler not available (rustc not found)");
-        }
+            None
+        };
 
-        // Initialize module cache (memory-only by default)
-        let wasm_cache = ModuleCache::memory_only(100);
+        // Initialize Rust compiler if enabled
+        let rust_compiler = if wasm_config.rust_wasm_enabled {
+            let config = CompilerConfig {
+                rustc_path: wasm_config
+                    .rustc_path
+                    .as_ref()
+                    .map(std::path::PathBuf::from),
+                timeout_secs: 30,
+                opt_level: "2".to_string(),
+            };
+            match RustCompiler::new(config) {
+                Ok(compiler) => {
+                    tracing::info!("Rust WASM compiler available");
+                    Some(compiler)
+                }
+                Err(e) => {
+                    tracing::debug!("Rust WASM compiler not available: {}", e);
+                    None
+                }
+            }
+        } else {
+            tracing::debug!("rust_wasm disabled by configuration");
+            None
+        };
+
+        // Initialize module cache
+        let wasm_cache = if let Some(ref dir) = wasm_config.cache_dir {
+            use crate::wasm::CacheConfig;
+            ModuleCache::new(CacheConfig {
+                memory_size: wasm_config.cache_size,
+                disk_dir: Some(std::path::PathBuf::from(dir)),
+                max_disk_bytes: 100 * 1024 * 1024,
+            })
+        } else {
+            ModuleCache::memory_only(wasm_config.cache_size)
+        };
 
         Self {
             variables: HashMap::new(),

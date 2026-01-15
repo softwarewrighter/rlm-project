@@ -209,8 +209,12 @@ impl RlmOrchestrator {
         let llm_query_cb = self.create_llm_query_callback(Arc::clone(&total_sub_calls));
 
         // Create command executor (persists across iterations)
-        let mut executor = CommandExecutor::new(context.to_string(), self.config.max_sub_calls)
-            .with_llm_callback(llm_query_cb);
+        let mut executor = CommandExecutor::with_wasm_config(
+            context.to_string(),
+            self.config.max_sub_calls,
+            &self.config.wasm,
+        )
+        .with_llm_callback(llm_query_cb);
 
         for iteration in 0..self.config.max_iterations {
             info!(iteration = iteration + 1, "Starting RLM iteration");
