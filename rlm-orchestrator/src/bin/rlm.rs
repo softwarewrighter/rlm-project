@@ -21,6 +21,18 @@ const DEFAULT_MODEL: &str = "llama3.2:3b";
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 const DEFAULT_LITELLM_URL: &str = "http://localhost:4000";
 
+/// Safely truncate a string at a valid UTF-8 character boundary.
+fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if max_bytes >= s.len() {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 fn print_usage() {
     eprintln!(
         r#"
@@ -286,7 +298,7 @@ fn print_iteration(iter: &IterationDisplay) {
         let response_preview = if iter.llm_response.len() > 500 {
             format!(
                 "{}...\n{}",
-                &iter.llm_response[..497],
+                truncate_to_char_boundary(iter.llm_response, 497),
                 format!("({} chars total)", iter.llm_response.len()).dimmed()
             )
         } else {
@@ -324,7 +336,7 @@ fn print_iteration(iter: &IterationDisplay) {
             let output_preview = if iter.output.len() > 300 {
                 format!(
                     "{}...\n{}",
-                    &iter.output[..297],
+                    truncate_to_char_boundary(iter.output, 297),
                     format!("({} chars total)", iter.output.len()).dimmed()
                 )
             } else {

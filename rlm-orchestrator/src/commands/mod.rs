@@ -15,6 +15,20 @@ use crate::wasm::{
     WasmToolLibrary,
 };
 
+/// Safely truncate a string at a valid UTF-8 character boundary.
+/// Returns the largest prefix of `s` that is at most `max_bytes` bytes.
+fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if max_bytes >= s.len() {
+        return s;
+    }
+    // Find the largest valid char boundary <= max_bytes
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Errors from command execution
 #[derive(Error, Debug)]
 pub enum CommandError {
@@ -889,7 +903,7 @@ impl CommandExecutor {
 
                 // Return concise output
                 let preview = if result.len() > 100 {
-                    format!("{}...", &result[..97])
+                    format!("{}...", truncate_to_char_boundary(&result, 97))
                 } else {
                     result.clone()
                 };

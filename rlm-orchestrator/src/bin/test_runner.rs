@@ -22,6 +22,18 @@ use serde::{Deserialize, Serialize};
 const RLM_SERVER: &str = "http://localhost:8080";
 const TIMEOUT_SECS: u64 = 120;
 
+/// Safely truncate a string at a valid UTF-8 character boundary.
+fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if max_bytes >= s.len() {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 #[derive(Debug, Deserialize)]
 struct BenchmarkSpec {
     name: String,
@@ -377,7 +389,7 @@ async fn run_test_suite(client: &Client, spec: BenchmarkSpec) -> Result<TestResu
             metrics.error.is_none() && check_match(&metrics.answer, &q.expected, &q.match_type);
 
         let actual_display = if metrics.answer.len() > 200 {
-            format!("{}...", &metrics.answer[..200])
+            format!("{}...", truncate_to_char_boundary(&metrics.answer, 200))
         } else {
             metrics.answer.clone()
         };
