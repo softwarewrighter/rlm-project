@@ -258,6 +258,94 @@ Modules must export:
 - `get_result_ptr() -> i32` - Get result string pointer
 - `get_result_len() -> i32` - Get result string length
 
+### rust_wasm
+
+Compile and execute custom Rust analysis code. The Rust code is compiled to WASM and executed in a sandbox.
+
+```json
+{
+  "op": "rust_wasm",
+  "code": "pub fn analyze(input: &str) -> String { input.lines().count().to_string() }",
+  "on": "context",
+  "store": "line_count"
+}
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `code` | string | required | Rust source code with `analyze` function |
+| `on` | string | "context" | Variable to pass as input |
+| `store` | string | null | Variable to store result |
+
+**Function Signature (REQUIRED):**
+
+```rust
+pub fn analyze(input: &str) -> String {
+    // Your analysis code
+    // Return result as String
+}
+```
+
+**Available in Rust code:**
+- Core Rust: iterators, pattern matching, string operations, formatting
+- Collections: `HashMap`, `HashSet`, `BTreeMap`, `BTreeSet`, `VecDeque`
+- Standard library types and traits
+
+**NOT Available (blocked for security):**
+- File I/O (`std::fs`)
+- Network (`std::net`)
+- Process spawning (`std::process`)
+- Environment access (`std::env`)
+- External crates (`extern crate`)
+- File inclusion macros (`include!`, `include_str!`, `include_bytes!`)
+
+**Examples:**
+
+Word frequency analysis:
+```json
+{
+  "op": "rust_wasm",
+  "code": "pub fn analyze(input: &str) -> String { let mut counts: HashMap<&str, usize> = HashMap::new(); for word in input.split_whitespace() { *counts.entry(word).or_insert(0) += 1; } let mut pairs: Vec<_> = counts.into_iter().collect(); pairs.sort_by(|a, b| b.1.cmp(&a.1)); pairs.iter().take(10).map(|(w, c)| format!(\"{}: {}\", w, c)).collect::<Vec<_>>().join(\", \") }",
+  "store": "top_words"
+}
+```
+
+Sum numbers in text:
+```json
+{
+  "op": "rust_wasm",
+  "code": "pub fn analyze(input: &str) -> String { let sum: i64 = input.split_whitespace().filter_map(|s| s.parse::<i64>().ok()).sum(); sum.to_string() }",
+  "on": "data",
+  "store": "total"
+}
+```
+
+Custom pattern counting:
+```json
+{
+  "op": "rust_wasm",
+  "code": "pub fn analyze(input: &str) -> String { input.lines().filter(|l| l.contains(\"ERROR\") && l.contains(\"timeout\")).count().to_string() }",
+  "store": "timeout_errors"
+}
+```
+
+**When to use rust_wasm:**
+- Complex aggregations that can't be done with `count`
+- Frequency analysis and statistics
+- Custom filtering with multiple conditions
+- Numeric computations across data
+- Multi-step transformations
+
+**When NOT to use rust_wasm:**
+- Simple text search → use `find` or `regex`
+- Basic counting → use `count`
+- Line/character extraction → use `lines` or `slice`
+
+**Performance Notes:**
+- First execution requires compilation (~1-2 seconds)
+- Subsequent executions of identical code use cached WASM (~instant)
+- WASM execution is sandboxed with fuel limits
+
 ## Limits
 
 Configured in `config.toml`:

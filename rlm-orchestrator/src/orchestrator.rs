@@ -388,9 +388,47 @@ Sub-LM calls (for semantic analysis of EXTRACTED content):
 
 WASM (dynamic code execution):
 - {{"op": "wasm", "module": "line_counter"}} - Run pre-compiled WASM module
-- {{"op": "wasm_wat", "wat": "(module ...)"}} - Compile and run WAT code
+- {{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{...}}", "on": "$var", "store": "result"}}
+  Compile and execute custom Rust code. The function receives input (context or variable) and returns a String.
 
 Available WASM modules: line_counter (counts lines in context)
+
+## rust_wasm: Custom Analysis Functions
+
+Use rust_wasm when built-in commands cannot express the analysis you need.
+
+Function signature (REQUIRED):
+```rust
+pub fn analyze(input: &str) -> String {{
+    // Your analysis code here
+    // Return result as String
+}}
+```
+
+Available in your code:
+- All core Rust: iterators, pattern matching, string operations
+- Collections: HashMap, HashSet, BTreeMap, BTreeSet, VecDeque
+- NO: file I/O, network, process spawning, environment access
+
+Example - Word frequency count:
+```json
+{{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{ let mut counts: HashMap<&str, usize> = HashMap::new(); for word in input.split_whitespace() {{ *counts.entry(word).or_insert(0) += 1; }} let mut pairs: Vec<_> = counts.into_iter().collect(); pairs.sort_by(|a, b| b.1.cmp(&a.1)); pairs.iter().take(10).map(|(w, c)| format!(\"{{}}: {{}}\", w, c)).collect::<Vec<_>>().join(\", \") }}", "store": "top_words"}}
+```
+
+Example - Extract numbers and sum:
+```json
+{{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{ let sum: i64 = input.split_whitespace().filter_map(|s| s.parse::<i64>().ok()).sum(); sum.to_string() }}", "on": "$data", "store": "total"}}
+```
+
+Example - Custom pattern extraction:
+```json
+{{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{ input.lines().filter(|line| line.contains(\"ERROR\") && line.contains(\"timeout\")).count().to_string() }}", "store": "timeout_errors"}}
+```
+
+When to use rust_wasm vs built-in commands:
+- Use find/regex for simple searches and pattern matching
+- Use count for basic counting (lines, words, chars)
+- Use rust_wasm for: aggregations, frequency analysis, custom filtering, numeric computations, multi-step transformations
 
 Finishing:
 - {{"op": "final", "answer": "The result is..."}}
