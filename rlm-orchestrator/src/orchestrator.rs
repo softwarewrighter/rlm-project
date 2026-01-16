@@ -40,6 +40,12 @@ pub enum ProgressEvent {
     WasmCompileComplete { step: usize, duration_ms: u64 },
     /// WASM execution complete (separate from compilation)
     WasmRunComplete { step: usize, duration_ms: u64 },
+    /// CLI compilation starting
+    CliCompileStart { step: usize },
+    /// CLI compilation complete
+    CliCompileComplete { step: usize, duration_ms: u64 },
+    /// CLI execution complete
+    CliRunComplete { step: usize, duration_ms: u64 },
     /// Command execution complete
     CommandComplete {
         step: usize,
@@ -384,8 +390,12 @@ impl RlmOrchestrator {
                     commands: json.clone(),
                 });
 
-                // Check if this might involve WASM compilation
-                if json.contains("rust_wasm") {
+                // Check if this might involve code compilation
+                let is_cli = json.contains("rust_cli_intent");
+                let is_wasm = json.contains("rust_wasm");
+                if is_cli {
+                    emit(ProgressEvent::CliCompileStart { step });
+                } else if is_wasm {
                     emit(ProgressEvent::WasmCompileStart { step });
                 }
 
@@ -397,10 +407,17 @@ impl RlmOrchestrator {
 
                 // Emit compile complete if there was compilation
                 if compile_ms > 0 {
-                    emit(ProgressEvent::WasmCompileComplete {
-                        step,
-                        duration_ms: compile_ms,
-                    });
+                    if is_cli {
+                        emit(ProgressEvent::CliCompileComplete {
+                            step,
+                            duration_ms: compile_ms,
+                        });
+                    } else {
+                        emit(ProgressEvent::WasmCompileComplete {
+                            step,
+                            duration_ms: compile_ms,
+                        });
+                    }
                 }
 
                 let wasm_run_ms = executor.last_wasm_run_time_ms();
@@ -411,12 +428,19 @@ impl RlmOrchestrator {
                     wasm_run_ms,
                 };
 
-                // Emit WASM run complete if there was WASM execution
+                // Emit run complete if there was execution
                 if wasm_run_ms > 0 {
-                    emit(ProgressEvent::WasmRunComplete {
-                        step,
-                        duration_ms: wasm_run_ms,
-                    });
+                    if is_cli {
+                        emit(ProgressEvent::CliRunComplete {
+                            step,
+                            duration_ms: wasm_run_ms,
+                        });
+                    } else {
+                        emit(ProgressEvent::WasmRunComplete {
+                            step,
+                            duration_ms: wasm_run_ms,
+                        });
+                    }
                 }
 
                 match exec_result {

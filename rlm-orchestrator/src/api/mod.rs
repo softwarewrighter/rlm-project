@@ -172,6 +172,12 @@ pub enum StreamEvent {
     WasmCompileComplete { step: usize, duration_ms: u64 },
     #[serde(rename = "wasm_run_complete")]
     WasmRunComplete { step: usize, duration_ms: u64 },
+    #[serde(rename = "cli_compile_start")]
+    CliCompileStart { step: usize },
+    #[serde(rename = "cli_compile_complete")]
+    CliCompileComplete { step: usize, duration_ms: u64 },
+    #[serde(rename = "cli_run_complete")]
+    CliRunComplete { step: usize, duration_ms: u64 },
     #[serde(rename = "command_complete")]
     CommandComplete {
         step: usize,
@@ -392,6 +398,13 @@ async fn stream_query(
                 }
                 ProgressEvent::WasmRunComplete { step, duration_ms } => {
                     StreamEvent::WasmRunComplete { step, duration_ms }
+                }
+                ProgressEvent::CliCompileStart { step } => StreamEvent::CliCompileStart { step },
+                ProgressEvent::CliCompileComplete { step, duration_ms } => {
+                    StreamEvent::CliCompileComplete { step, duration_ms }
+                }
+                ProgressEvent::CliRunComplete { step, duration_ms } => {
+                    StreamEvent::CliRunComplete { step, duration_ms }
                 }
                 ProgressEvent::CommandComplete {
                     step,
@@ -803,6 +816,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .progress-log .event-icon { min-width: 20px; }
         .progress-log .event-llm { color: var(--highlight); }
         .progress-log .event-wasm { color: var(--wasm); }
+        .progress-log .event-cli { color: #a78bfa; }  /* Purple for CLI */
         .progress-log .event-cmd { color: #7dd3fc; }
         .progress-log .event-done { color: var(--success); }
 
@@ -1289,7 +1303,10 @@ Line 7: ERROR - Invalid input received</textarea>
                     break;
                 case 'commands':
                     const isWasm = event.commands.includes('rust_wasm');
-                    logProgress('▶', `Commands: ${isWasm ? 'rust_wasm' : 'executing...'}`, isWasm ? 'event-wasm' : 'event-cmd');
+                    const isCli = event.commands.includes('rust_cli_intent');
+                    const label = isCli ? 'rust_cli_intent' : (isWasm ? 'rust_wasm' : 'executing...');
+                    const cssClass = isCli ? 'event-cli' : (isWasm ? 'event-wasm' : 'event-cmd');
+                    logProgress('▶', `Commands: ${label}`, cssClass);
                     break;
                 case 'wasm_compile_start':
                     logProgress('🔧', `Compiling WASM...`, 'event-wasm');
@@ -1299,6 +1316,15 @@ Line 7: ERROR - Invalid input received</textarea>
                     break;
                 case 'wasm_run_complete':
                     logProgress('⚡', `WASM executed (${event.duration_ms}ms)`, 'event-wasm');
+                    break;
+                case 'cli_compile_start':
+                    logProgress('🔧', `Compiling CLI binary...`, 'event-cli');
+                    break;
+                case 'cli_compile_complete':
+                    logProgress('✓', `CLI compiled (${event.duration_ms}ms)`, 'event-cli');
+                    break;
+                case 'cli_run_complete':
+                    logProgress('⚡', `CLI executed (${event.duration_ms}ms)`, 'event-cli');
                     break;
                 case 'command_complete':
                     logProgress('◀', `Output (${event.exec_ms}ms): ${event.output_preview.substring(0, 50)}...`, 'event-cmd');
