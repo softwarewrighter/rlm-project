@@ -7,6 +7,7 @@
 //! - REST API for external integration
 
 pub mod api;
+pub mod codegen;
 pub mod commands;
 pub mod orchestrator;
 pub mod pool;
@@ -125,6 +126,29 @@ pub struct WasmConfig {
 
     /// Path to rustc binary (None = auto-detect)
     pub rustc_path: Option<String>,
+
+    /// Code generation provider type: "ollama" or "litellm"
+    #[serde(default = "default_codegen_provider")]
+    pub codegen_provider: String,
+
+    /// Code generation LLM URL
+    /// For Ollama: "http://localhost:11434"
+    /// For LiteLLM: "http://localhost:4000"
+    pub codegen_url: Option<String>,
+
+    /// Code generation LLM model
+    /// For Ollama: "qwen2.5-coder:14b"
+    /// For LiteLLM: "deepseek/deepseek-coder"
+    #[serde(default = "default_codegen_model")]
+    pub codegen_model: String,
+}
+
+fn default_codegen_provider() -> String {
+    "litellm".to_string()
+}
+
+fn default_codegen_model() -> String {
+    "deepseek/deepseek-coder".to_string()
 }
 
 impl Default for WasmConfig {
@@ -137,6 +161,9 @@ impl Default for WasmConfig {
             cache_dir: None,
             cache_size: 100,
             rustc_path: None,
+            codegen_provider: default_codegen_provider(),
+            codegen_url: None,
+            codegen_model: default_codegen_model(),
         }
     }
 }

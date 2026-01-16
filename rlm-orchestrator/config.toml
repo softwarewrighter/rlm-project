@@ -4,58 +4,27 @@ max_iterations = 20
 max_sub_calls = 50
 output_limit = 10000
 
-# Smart bypass: skip RLM for small contexts and send directly to LLM
-# This avoids RLM overhead when the full context fits easily
-bypass_enabled = true
-bypass_threshold = 4000  # chars (~1000 tokens) - contexts smaller than this use direct LLM
+# Disable bypass to ensure RLM is always used (for testing)
+bypass_enabled = false
+bypass_threshold = 0
 
 # WASM execution configuration
 [wasm]
-enabled = true                  # Enable WASM features (wasm, wasm_wat commands)
-rust_wasm_enabled = true        # Enable rust_wasm command (requires rustc + wasm target)
-fuel_limit = 1000000            # Max WASM instructions (prevents infinite loops)
-memory_limit = 67108864         # Max WASM memory in bytes (64MB)
-cache_size = 100                # Max modules in memory cache
-# cache_dir = "/tmp/rlm-wasm-cache"  # Disk cache directory (optional)
-# rustc_path = "/path/to/rustc"      # Custom rustc path (optional, auto-detected)
+enabled = true
+rust_wasm_enabled = true
+fuel_limit = 1000000
+memory_limit = 67108864
+cache_size = 100
 
-# DeepSeek API for root LLM (production - requires DEEPSEEK_API_KEY)
-# [[providers]]
-# provider_type = "deepseek"
-# base_url = "https://api.deepseek.com"
-# model = "deepseek-chat"
-# role = "root"
-# weight = 1
+# Two-LLM code generation via LiteLLM gateway
+codegen_provider = "litellm"
+codegen_url = "http://localhost:4000"
+codegen_model = "deepseek/deepseek-coder"
 
-# LiteLLM Proxy for root LLM (for usage tracking via LiteLLM dashboard)
-# Requires LITELLM_API_KEY or LITELLM_MASTER_KEY env var
+# LiteLLM Proxy for root LLM (DeepSeek-coder for both reasoning and coding)
 [[providers]]
 provider_type = "litellm"
 base_url = "http://localhost:4000"
-model = "deepseek/deepseek-chat"
-role = "root"
-weight = 1
-
-# Remote Ollama on big72 for root LLM (fallback for testing)
-[[providers]]
-provider_type = "ollama"
-base_url = "http://big72.local:11434"
-model = "qwen2.5-coder:14b"
-role = "root"
-weight = 1
-
-# Local Ollama for sub-LM calls (testing 9B model)
-[[providers]]
-provider_type = "ollama"
-base_url = "http://localhost:11434"
-model = "gemma2:9b"
-role = "sub"
-weight = 1
-
-# Remote Ollama on big72 for sub-LM calls
-[[providers]]
-provider_type = "ollama"
-base_url = "http://big72.local:11434"
-model = "mistral:7b"
-role = "sub"
+model = "deepseek/deepseek-coder"
+role = "both"
 weight = 1

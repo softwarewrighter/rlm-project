@@ -147,6 +147,11 @@ pub struct HealthResponse {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum StreamEvent {
+    #[serde(rename = "query_start")]
+    QueryStart {
+        context_chars: usize,
+        query_len: usize,
+    },
     #[serde(rename = "iteration_start")]
     IterationStart { step: usize },
     #[serde(rename = "llm_start")]
@@ -155,6 +160,8 @@ pub enum StreamEvent {
     LlmComplete {
         step: usize,
         duration_ms: u64,
+        prompt_tokens: u32,
+        completion_tokens: u32,
         response_preview: String,
     },
     #[serde(rename = "commands")]
@@ -163,6 +170,8 @@ pub enum StreamEvent {
     WasmCompileStart { step: usize },
     #[serde(rename = "wasm_compile_complete")]
     WasmCompileComplete { step: usize, duration_ms: u64 },
+    #[serde(rename = "wasm_run_complete")]
+    WasmRunComplete { step: usize, duration_ms: u64 },
     #[serde(rename = "command_complete")]
     CommandComplete {
         step: usize,
@@ -176,6 +185,8 @@ pub enum StreamEvent {
         commands: String,
         output: String,
         error: Option<String>,
+        prompt_tokens: u32,
+        completion_tokens: u32,
     },
     #[serde(rename = "final_answer")]
     FinalAnswer { answer: String },
@@ -189,6 +200,7 @@ pub enum StreamEvent {
         context_length: usize,
         total_prompt_tokens: u32,
         total_completion_tokens: u32,
+        total_duration_ms: u64,
     },
     #[serde(rename = "error")]
     Error { message: String },
@@ -347,20 +359,28 @@ async fn stream_query(
     let context = request.context.clone();
 
     tokio::spawn(async move {
+        let query_start = std::time::Instant::now();
         // Create a progress callback that sends events to the channel
         let tx_clone = tx.clone();
         let callback = Box::new(move |event: ProgressEvent| {
             tracing::debug!("Progress event: {:?}", event);
             let stream_event = match event {
+                ProgressEvent::QueryStart { context_chars, query_len } => {
+                    StreamEvent::QueryStart { context_chars, query_len }
+                }
                 ProgressEvent::IterationStart { step } => StreamEvent::IterationStart { step },
                 ProgressEvent::LlmCallStart { step } => StreamEvent::LlmStart { step },
                 ProgressEvent::LlmCallComplete {
                     step,
                     duration_ms,
+                    prompt_tokens,
+                    completion_tokens,
                     response_preview,
                 } => StreamEvent::LlmComplete {
                     step,
                     duration_ms,
+                    prompt_tokens,
+                    completion_tokens,
                     response_preview,
                 },
                 ProgressEvent::CommandsExtracted { step, commands } => {
@@ -369,6 +389,9 @@ async fn stream_query(
                 ProgressEvent::WasmCompileStart { step } => StreamEvent::WasmCompileStart { step },
                 ProgressEvent::WasmCompileComplete { step, duration_ms } => {
                     StreamEvent::WasmCompileComplete { step, duration_ms }
+                }
+                ProgressEvent::WasmRunComplete { step, duration_ms } => {
+                    StreamEvent::WasmRunComplete { step, duration_ms }
                 }
                 ProgressEvent::CommandComplete {
                     step,
@@ -386,13 +409,12 @@ async fn stream_query(
                         commands: record.commands.clone(),
                         output: record.output.clone(),
                         error: record.error.clone(),
+                        prompt_tokens: record.tokens.prompt_tokens,
+                        completion_tokens: record.tokens.completion_tokens,
                     }
                 }
                 ProgressEvent::FinalAnswer { answer } => StreamEvent::FinalAnswer { answer },
-                ProgressEvent::Complete {
-                    iterations: _,
-                    success: _,
-                } => {
+                ProgressEvent::Complete { .. } => {
                     // We'll send the complete event with full data after process returns
                     return;
                 }
@@ -420,6 +442,7 @@ async fn stream_query(
                         context_length,
                         total_prompt_tokens: result.total_prompt_tokens,
                         total_completion_tokens: result.total_completion_tokens,
+                        total_duration_ms: query_start.elapsed().as_millis() as u64,
                     })
                     .await;
             }
@@ -891,6 +914,14 @@ Line 7: ERROR - Invalid input received</textarea>
                     <div class="stat-value wasm">-</div>
                     <div class="stat-label">WASM Steps</div>
                 </div>
+                <div class="stat">
+                    <div class="stat-value" id="statTokens">-</div>
+                    <div class="stat-label">Tokens</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="statDuration">-</div>
+                    <div class="stat-label">Duration</div>
+                </div>
             </div>
 
             <div id="wasmInfo" class="wasm-info hidden">
@@ -1243,6 +1274,10 @@ Line 7: ERROR - Invalid input received</textarea>
                         }, 1000);
                     }
                     break;
+                case 'query_start':
+                    const sizeKb = (event.context_chars / 1024).toFixed(1);
+                    logProgress('📊', `Input: ${event.context_chars.toLocaleString()} chars (${sizeKb}KB), Query: ${event.query_len} chars`, 'event-info');
+                    break;
                 case 'llm_complete':
                     // Clear the wait timer
                     if (window.llmWaitTimer) {
@@ -1250,7 +1285,7 @@ Line 7: ERROR - Invalid input received</textarea>
                         window.llmWaitTimer = null;
                     }
                     document.getElementById('progressStatus').textContent = 'Processing...';
-                    logProgress('✓', `LLM responded (${event.duration_ms}ms)`, 'event-llm');
+                    logProgress('✓', `LLM responded (${event.duration_ms}ms, ${event.prompt_tokens}p + ${event.completion_tokens}c tokens)`, 'event-llm');
                     break;
                 case 'commands':
                     const isWasm = event.commands.includes('rust_wasm');
@@ -1261,6 +1296,9 @@ Line 7: ERROR - Invalid input received</textarea>
                     break;
                 case 'wasm_compile_complete':
                     logProgress('✓', `WASM compiled (${event.duration_ms}ms)`, 'event-wasm');
+                    break;
+                case 'wasm_run_complete':
+                    logProgress('⚡', `WASM executed (${event.duration_ms}ms)`, 'event-wasm');
                     break;
                 case 'command_complete':
                     logProgress('◀', `Output (${event.exec_ms}ms): ${event.output_preview.substring(0, 50)}...`, 'event-cmd');
@@ -1273,15 +1311,16 @@ Line 7: ERROR - Invalid input received</textarea>
                         output: event.output,
                         error: event.error,
                         sub_calls: 0,
-                        prompt_tokens: 0,
-                        completion_tokens: 0
+                        prompt_tokens: event.prompt_tokens || 0,
+                        completion_tokens: event.completion_tokens || 0
                     });
                     break;
                 case 'final_answer':
                     logProgress('✅', `Final answer received`, 'event-done');
                     break;
                 case 'complete':
-                    logProgress('🏁', `Complete: ${event.iterations} iterations, ${event.success ? 'success' : 'failed'}`, 'event-done');
+                    const durationSec = (event.total_duration_ms / 1000).toFixed(1);
+                    logProgress('🏁', `Complete: ${event.iterations} iterations, ${durationSec}s, ${event.success ? 'success' : 'failed'}`, 'event-done');
 
                     // Build the final data object and render results
                     currentData = {
@@ -1293,6 +1332,7 @@ Line 7: ERROR - Invalid input received</textarea>
                         context_length: event.context_length,
                         total_prompt_tokens: event.total_prompt_tokens,
                         total_completion_tokens: event.total_completion_tokens,
+                        total_duration_ms: event.total_duration_ms,
                         history: history
                     };
                     renderResults(currentData);
@@ -1334,6 +1374,17 @@ Line 7: ERROR - Invalid input received</textarea>
             if (wasmStatEl) {
                 wasmStatEl.querySelector('.stat-value').textContent = wasmSteps.length;
                 wasmStatEl.style.display = usedWasm ? 'block' : 'none';
+            }
+
+            // Update total tokens
+            const totalTokens = (data.total_prompt_tokens || 0) + (data.total_completion_tokens || 0);
+            document.getElementById('statTokens').textContent = totalTokens.toLocaleString();
+            document.getElementById('statTokens').title = `${(data.total_prompt_tokens || 0).toLocaleString()} prompt + ${(data.total_completion_tokens || 0).toLocaleString()} completion`;
+
+            // Update duration
+            if (data.total_duration_ms) {
+                const durationSec = (data.total_duration_ms / 1000).toFixed(1);
+                document.getElementById('statDuration').textContent = durationSec + 's';
             }
 
             // Show WASM info box if WASM was used
@@ -1445,6 +1496,15 @@ Line 7: ERROR - Invalid input received</textarea>
                 html += `<div class="detail-section">
                     <h3>Sub-LM Calls</h3>
                     <p>${step.sub_calls} call(s) made to sub-LM</p>
+                </div>`;
+            }
+
+            // Show token info if available
+            if (step.prompt_tokens || step.completion_tokens) {
+                const total = (step.prompt_tokens || 0) + (step.completion_tokens || 0);
+                html += `<div class="detail-section">
+                    <h3>Tokens</h3>
+                    <p>${step.prompt_tokens || 0} prompt + ${step.completion_tokens || 0} completion = ${total} total</p>
                 </div>`;
             }
 

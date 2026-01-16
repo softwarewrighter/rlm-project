@@ -38,6 +38,15 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
     Box::new(move |event: ProgressEvent| {
         let mut stderr = std::io::stderr();
         match event {
+            ProgressEvent::QueryStart { context_chars, query_len } => {
+                if verbose >= 1 {
+                    eprintln!(
+                        "{}",
+                        format!("Starting query (input: {} chars, query: {} chars)", context_chars, query_len).dimmed()
+                    );
+                    let _ = stderr.flush();
+                }
+            }
             ProgressEvent::IterationStart { step } => {
                 // Always show iteration start (minimal output)
                 eprintln!("{}", format!("┌─ Iteration {} ", step).cyan());
@@ -52,6 +61,8 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
             ProgressEvent::LlmCallComplete {
                 step: _,
                 duration_ms,
+                prompt_tokens,
+                completion_tokens,
                 response_preview,
             } => {
                 if verbose >= 1 {
@@ -60,7 +71,7 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
                     eprintln!(
                         "\r{} {}",
                         "│".cyan(),
-                        format!("⏱  LLM: {}ms", duration_ms).dimmed()
+                        format!("⏱  LLM: {}ms ({}p + {}c tokens)", duration_ms, prompt_tokens, completion_tokens).dimmed()
                     );
                     if verbose >= 2 {
                         eprintln!("{} {}", "│".cyan(), "▼ Response preview:".blue());
@@ -73,16 +84,37 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
                 }
             }
             ProgressEvent::CommandsExtracted { step: _, commands } => {
-                if verbose >= 2 {
-                    eprintln!("{} {}", "│".cyan(), "▶ Commands:".yellow());
-                    let preview = truncate_to_char_boundary(&commands, 150);
-                    eprintln!("{}   {}", "│".cyan(), preview.yellow());
+                if verbose >= 1 {
+                    // Detect command type and show summary
+                    let is_wasm = commands.contains("rust_wasm");
+                    let is_final = commands.contains("\"FINAL\"");
+
+                    if is_wasm {
+                        eprintln!("{} {}", "│".cyan(), "🦀 Generated rust_wasm code".yellow());
+                    } else if is_final {
+                        eprintln!("{} {}", "│".cyan(), "✓ Returning FINAL answer".green());
+                    } else {
+                        // Count commands
+                        let cmd_count = commands.matches("\"cmd\"").count();
+                        if cmd_count > 0 {
+                            eprintln!("{} {}", "│".cyan(), format!("▶ Extracted {} command(s)", cmd_count).dimmed());
+                        }
+                    }
+
+                    if verbose >= 2 {
+                        eprintln!("{} {}", "│".cyan(), "  Commands JSON:".dimmed());
+                        let preview = truncate_to_char_boundary(&commands, 500);
+                        for line in preview.lines().take(6) {
+                            let line_preview = truncate_to_char_boundary(line, 120);
+                            eprintln!("{}   {}", "│".cyan(), line_preview.yellow());
+                        }
+                    }
                     let _ = stderr.flush();
                 }
             }
             ProgressEvent::WasmCompileStart { step: _ } => {
                 if verbose >= 1 {
-                    eprint!("{} {}", "│".cyan(), "🔧 Compiling WASM...".dimmed());
+                    eprint!("{} {}", "│".cyan(), "🔧 Compiling Rust to WASM...".yellow());
                     let _ = stderr.flush();
                 }
             }
@@ -95,21 +127,50 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
                     let _ = stderr.flush();
                 }
             }
+            ProgressEvent::WasmRunComplete {
+                step: _,
+                duration_ms,
+            } => {
+                if verbose >= 1 {
+                    eprintln!(
+                        "{} {}",
+                        "│".cyan(),
+                        format!("⚡ Executing WASM: {}ms", duration_ms).green()
+                    );
+                    let _ = stderr.flush();
+                }
+            }
             ProgressEvent::CommandComplete {
                 step: _,
                 output_preview,
                 exec_ms,
             } => {
                 if verbose >= 1 {
-                    eprintln!(
-                        "{} {} {}",
-                        "│".cyan(),
-                        "◀ Exec:".magenta(),
-                        format!("{}ms", exec_ms).dimmed()
-                    );
+                    // Show output summary
+                    let output_lines = output_preview.lines().count();
+                    let output_len = output_preview.len();
+                    if output_len > 0 {
+                        eprintln!(
+                            "{} {} {}",
+                            "│".cyan(),
+                            "◀ Output:".magenta(),
+                            format!("{} chars, {} lines ({}ms)", output_len, output_lines, exec_ms).dimmed()
+                        );
+                    } else {
+                        eprintln!(
+                            "{} {} {}",
+                            "│".cyan(),
+                            "◀ Output:".magenta(),
+                            format!("(empty) {}ms", exec_ms).dimmed()
+                        );
+                    }
                     if verbose >= 2 && !output_preview.is_empty() {
-                        let preview = truncate_to_char_boundary(&output_preview, 150);
-                        eprintln!("{}   {}", "│".cyan(), preview.cyan());
+                        let preview = truncate_to_char_boundary(&output_preview, 200);
+                        eprintln!("{} {}", "│".cyan(), "  Preview:".dimmed());
+                        for line in preview.lines().take(3) {
+                            let line_preview = truncate_to_char_boundary(line, 70);
+                            eprintln!("{}   {}", "│".cyan(), line_preview.cyan());
+                        }
                     }
                     let _ = stderr.flush();
                 }
@@ -128,18 +189,19 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
             ProgressEvent::Complete {
                 iterations,
                 success,
+                total_duration_ms,
             } => {
                 if success {
                     eprintln!(
                         "{}",
-                        format!("Completed in {} iteration(s)", iterations)
+                        format!("Completed in {} iteration(s), {}ms total", iterations, total_duration_ms)
                             .green()
                             .dimmed()
                     );
                 } else {
                     eprintln!(
                         "{}",
-                        format!("Stopped after {} iteration(s)", iterations)
+                        format!("Stopped after {} iteration(s), {}ms total", iterations, total_duration_ms)
                             .yellow()
                             .dimmed()
                     );
@@ -209,6 +271,9 @@ struct CliArgs {
     dry_run: bool,
     wasm_enabled: bool,
     rust_wasm_enabled: bool,
+    codegen_url: Option<String>,
+    codegen_model: String,
+    codegen_provider: String, // "litellm" or "ollama"
 }
 
 fn parse_args() -> Result<CliArgs> {
@@ -236,6 +301,9 @@ fn parse_args() -> Result<CliArgs> {
     let mut dry_run = false;
     let mut wasm_enabled = true;
     let mut rust_wasm_enabled = true;
+    let mut codegen_url: Option<String> = None; // Auto-set from --litellm or explicit --codegen-url
+    let mut codegen_model = "deepseek/deepseek-coder".to_string(); // Default to DeepSeek-coder
+    let mut codegen_provider = "litellm".to_string(); // Default to LiteLLM
 
     let mut i = 3;
     while i < args.len() {
@@ -289,9 +357,36 @@ fn parse_args() -> Result<CliArgs> {
                     litellm_key = Some(args[i].clone());
                 }
             }
+            "--codegen-url" => {
+                i += 1;
+                if i < args.len() {
+                    codegen_url = Some(args[i].clone());
+                }
+            }
+            "--codegen-model" => {
+                i += 1;
+                if i < args.len() {
+                    codegen_model = args[i].clone();
+                }
+            }
+            "--no-codegen" => {
+                codegen_url = None;
+            }
+            "--codegen-provider" => {
+                i += 1;
+                if i < args.len() {
+                    codegen_provider = args[i].clone();
+                }
+            }
             _ => {}
         }
         i += 1;
+    }
+
+    // When using --litellm, auto-configure codegen to use same gateway unless overridden
+    if use_litellm && codegen_url.is_none() {
+        codegen_url = Some(litellm_url.clone());
+        codegen_provider = "litellm".to_string();
     }
 
     Ok(CliArgs {
@@ -307,6 +402,9 @@ fn parse_args() -> Result<CliArgs> {
         dry_run,
         wasm_enabled,
         rust_wasm_enabled,
+        codegen_url,
+        codegen_model,
+        codegen_provider,
     })
 }
 
@@ -528,6 +626,9 @@ async fn main() -> Result<()> {
         wasm: rlm::WasmConfig {
             enabled: args.wasm_enabled,
             rust_wasm_enabled: args.rust_wasm_enabled,
+            codegen_provider: args.codegen_provider.clone(),
+            codegen_url: args.codegen_url.clone(),
+            codegen_model: args.codegen_model.clone(),
             ..Default::default()
         },
     };

@@ -10,9 +10,10 @@ use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
 
+use crate::codegen::{CodeGenConfig, CodeGenerator};
 use crate::wasm::{
-    CompilerConfig, ModuleCache, RustCompiler, WasmConfig, WasmExecutor, WasmLibrary,
-    WasmToolLibrary,
+    CompilerConfig, ModuleCache, PrebuiltHooks, RustCompiler, TemplateFramework, TemplateType,
+    WasmConfig, WasmExecutor, WasmLibrary, WasmToolLibrary,
 };
 
 /// Safely truncate a string at a valid UTF-8 character boundary.
@@ -27,6 +28,14 @@ fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
         end -= 1;
     }
     &s[..end]
+}
+
+/// Sanitize string to ASCII-only for safe WASM processing.
+/// Non-ASCII bytes are replaced with '?' to preserve structure.
+fn to_ascii(s: &str) -> String {
+    s.bytes()
+        .map(|b| if b.is_ascii() { b as char } else { '?' })
+        .collect()
 }
 
 /// Errors from command execution
@@ -68,6 +77,12 @@ pub enum CommandError {
 
     #[error("Rust compiler not available: {0}")]
     RustCompilerUnavailable(String),
+
+    #[error("Code generation failed: {0}")]
+    CodeGenError(String),
+
+    #[error("Code generation LLM not configured")]
+    CodeGenNotConfigured,
 }
 
 /// A single command that can be executed
@@ -219,6 +234,46 @@ pub enum Command {
         #[serde(default)]
         store: Option<String>,
     },
+
+    /// Use a template with hook: {"op": "wasm_template", "template": "group_count", "prebuilt": "error_type"}
+    /// Or with custom hook: {"op": "wasm_template", "template": "group_count", "hook": "fn classify..."}
+    ///
+    /// PREFER using prebuilt hooks - they are tested and reliable!
+    /// Available templates: group_count, filter_lines, map_lines, numeric_stats, count_matching
+    WasmTemplate {
+        /// Template name: group_count, filter_lines, map_lines, numeric_stats, count_matching
+        template: String,
+        /// Prebuilt hook name (PREFERRED): error_type, log_level, http_status, ip_address, etc.
+        #[serde(default)]
+        prebuilt: Option<String>,
+        /// Custom hook function code (fallback if no prebuilt matches)
+        #[serde(default)]
+        hook: Option<String>,
+        /// Variable to use as input (default: context)
+        #[serde(default)]
+        on: Option<String>,
+        /// Store result in variable
+        #[serde(default)]
+        store: Option<String>,
+    },
+
+    /// Two-LLM code generation: {"op": "rust_wasm_intent", "intent": "count each error type..."}
+    ///
+    /// Uses a specialized coding LLM (qwen2.5-coder) to generate Rust code from a
+    /// natural language description. The coding LLM is constrained to use safe
+    /// helper functions that work reliably in WASM.
+    ///
+    /// Example: {"op": "rust_wasm_intent", "intent": "Count occurrences of each error type after [ERROR] marker and return sorted by frequency", "store": "counts"}
+    RustWasmIntent {
+        /// Natural language description of what the code should do
+        intent: String,
+        /// Variable to use as input (default: context)
+        #[serde(default)]
+        on: Option<String>,
+        /// Store result in variable
+        #[serde(default)]
+        store: Option<String>,
+    },
 }
 
 fn default_wasm_function() -> String {
@@ -273,6 +328,10 @@ pub struct CommandExecutor {
     wasm_cache: ModuleCache,
     /// Last rust_wasm compile time in milliseconds (for instrumentation)
     last_compile_time_ms: u64,
+    /// Time spent executing WASM (not compiling)
+    last_wasm_run_time_ms: u64,
+    /// Code generator for two-LLM architecture (None if not configured)
+    code_generator: Option<CodeGenerator>,
 }
 
 impl CommandExecutor {
@@ -349,6 +408,34 @@ impl CommandExecutor {
             None
         };
 
+        // Initialize code generator if configured
+        let code_generator = if let Some(ref url) = wasm_config.codegen_url {
+            use crate::codegen::CodeGenProviderType;
+            let provider_type = if wasm_config.codegen_provider == "litellm" {
+                CodeGenProviderType::LiteLLM
+            } else {
+                CodeGenProviderType::Ollama
+            };
+            let api_key = std::env::var("LITELLM_MASTER_KEY")
+                .or_else(|_| std::env::var("LITELLM_API_KEY"))
+                .ok();
+            tracing::info!(
+                "Code generation LLM configured: {} via {:?} (model: {})",
+                url,
+                provider_type,
+                wasm_config.codegen_model
+            );
+            Some(CodeGenerator::new(CodeGenConfig {
+                provider_type,
+                url: url.clone(),
+                model: wasm_config.codegen_model.clone(),
+                api_key,
+                temperature: 0.1,
+            }))
+        } else {
+            None
+        };
+
         Self {
             variables: HashMap::new(),
             context,
@@ -362,12 +449,19 @@ impl CommandExecutor {
             rust_compiler,
             wasm_cache,
             last_compile_time_ms: 0,
+            last_wasm_run_time_ms: 0,
+            code_generator,
         }
     }
 
     /// Get the last rust_wasm compile time in milliseconds (for instrumentation)
     pub fn last_compile_time_ms(&self) -> u64 {
         self.last_compile_time_ms
+    }
+
+    /// Get the last WASM execution time in milliseconds (for instrumentation)
+    pub fn last_wasm_run_time_ms(&self) -> u64 {
+        self.last_wasm_run_time_ms
     }
 
     /// Check if Rust WASM compilation is available
@@ -856,8 +950,9 @@ impl CommandExecutor {
             }
 
             Command::RustWasm { code, on, store } => {
-                // Reset compile time (will be set if we actually compile)
+                // Reset timing (will be set if we actually compile/run)
                 self.last_compile_time_ms = 0;
+                self.last_wasm_run_time_ms = 0;
 
                 // Check if Rust compiler is available
                 let compiler = self.rust_compiler.as_ref().ok_or_else(|| {
@@ -892,8 +987,10 @@ impl CommandExecutor {
                     compiled
                 };
 
-                // Execute the compiled WASM
-                let source = self.resolve_source(on)?.to_string();
+                // Execute the compiled WASM (with timing)
+                // Sanitize to ASCII for safe byte-level processing
+                let source = to_ascii(&self.resolve_source(on)?.to_string());
+                let exec_start = std::time::Instant::now();
                 let result = executor
                     .execute(&wasm_bytes, "run_analyze", &source)
                     .map_err(|e| {
@@ -901,6 +998,7 @@ impl CommandExecutor {
                             e.to_string(),
                         ))
                     })?;
+                self.last_wasm_run_time_ms = exec_start.elapsed().as_millis() as u64;
 
                 self.store_result(store, result.clone());
 
@@ -912,6 +1010,223 @@ impl CommandExecutor {
                 };
                 Ok(ExecutionResult::Continue {
                     output: format!("rust_wasm result: {}", preview),
+                    sub_calls: 0,
+                })
+            }
+
+            Command::WasmTemplate {
+                template,
+                prebuilt,
+                hook,
+                on,
+                store,
+            } => {
+                // Reset timing (will be set if we actually compile/run)
+                self.last_compile_time_ms = 0;
+                self.last_wasm_run_time_ms = 0;
+
+                // Parse template type
+                let template_type = TemplateType::from_str(template).ok_or_else(|| {
+                    CommandError::InvalidCommand(format!(
+                        "Unknown template '{}'. Available: group_count, filter_lines, map_lines, numeric_stats, count_matching",
+                        template
+                    ))
+                })?;
+
+                // Get hook code: prefer prebuilt, fall back to custom hook
+                let hook_code = if let Some(prebuilt_name) = prebuilt {
+                    // Try to get prebuilt hook
+                    let (code, desc) = PrebuiltHooks::get(template_type, prebuilt_name)
+                        .ok_or_else(|| {
+                            let available: Vec<_> = PrebuiltHooks::list(template_type)
+                                .iter()
+                                .map(|(name, _)| *name)
+                                .collect();
+                            CommandError::InvalidCommand(format!(
+                                "Unknown prebuilt hook '{}' for template '{}'. Available: {}",
+                                prebuilt_name,
+                                template,
+                                available.join(", ")
+                            ))
+                        })?;
+                    tracing::info!("Using prebuilt hook '{}': {}", prebuilt_name, desc);
+                    code.to_string()
+                } else if let Some(custom_hook) = hook {
+                    // Use custom hook code
+                    tracing::debug!("Using custom hook code");
+                    custom_hook.clone()
+                } else {
+                    return Err(CommandError::InvalidCommand(
+                        "wasm_template requires either 'prebuilt' or 'hook' parameter".to_string(),
+                    ));
+                };
+
+                // Check if Rust compiler is available
+                let compiler = self.rust_compiler.as_ref().ok_or_else(|| {
+                    CommandError::RustCompilerUnavailable(
+                        "rustc not found. Install Rust: https://rustup.rs".to_string(),
+                    )
+                })?;
+
+                // Check if WASM executor is available
+                let executor = self.wasm_executor.as_ref().ok_or_else(|| {
+                    CommandError::WasmError(crate::wasm::WasmError::CompileError(
+                        "WASM runtime not available".to_string(),
+                    ))
+                })?;
+
+                // Generate complete module source from template + hook
+                let full_source = TemplateFramework::generate_module(template_type, &hook_code);
+                tracing::debug!(
+                    "Generated template source ({} bytes) for {}",
+                    full_source.len(),
+                    template
+                );
+
+                // Check cache using the full generated source as key
+                let wasm_bytes = if let Some(cached) = self.wasm_cache.get(&full_source) {
+                    tracing::debug!("Cache hit for wasm_template");
+                    cached
+                } else {
+                    // Compile Rust to WASM (with timing)
+                    tracing::debug!("Compiling template code ({} bytes)", full_source.len());
+                    let compile_start = Instant::now();
+                    let compiled = compiler
+                        .compile(&full_source)
+                        .map_err(|e| CommandError::RustCompileError(e.to_string()))?;
+                    self.last_compile_time_ms = compile_start.elapsed().as_millis() as u64;
+                    tracing::info!(
+                        "Template compilation took {}ms (template: {})",
+                        self.last_compile_time_ms,
+                        template
+                    );
+
+                    // Cache the result
+                    self.wasm_cache.put(&full_source, compiled.clone());
+                    compiled
+                };
+
+                // Execute the compiled WASM (with timing)
+                // Sanitize to ASCII for safe byte-level processing
+                let source = to_ascii(&self.resolve_source(on)?.to_string());
+                let exec_start = std::time::Instant::now();
+                let result = executor
+                    .execute(&wasm_bytes, "run_analyze", &source)
+                    .map_err(|e| {
+                        CommandError::WasmError(crate::wasm::WasmError::ExecutionError(
+                            e.to_string(),
+                        ))
+                    })?;
+                self.last_wasm_run_time_ms = exec_start.elapsed().as_millis() as u64;
+
+                self.store_result(store, result.clone());
+
+                // Return concise output
+                let preview = if result.len() > 100 {
+                    format!("{}...", truncate_to_char_boundary(&result, 97))
+                } else {
+                    result.clone()
+                };
+                let hook_desc = prebuilt.as_ref().map(|s| s.as_str()).unwrap_or("custom");
+                Ok(ExecutionResult::Continue {
+                    output: format!("wasm_template({}/{}): {}", template, hook_desc, preview),
+                    sub_calls: 0,
+                })
+            }
+
+            Command::RustWasmIntent { intent, on, store } => {
+                // Reset timing
+                self.last_compile_time_ms = 0;
+                self.last_wasm_run_time_ms = 0;
+
+                // Check if code generator is configured
+                let generator = self.code_generator.as_ref().ok_or_else(|| {
+                    CommandError::CodeGenNotConfigured
+                })?;
+
+                // Check if Rust compiler is available
+                let compiler = self.rust_compiler.as_ref().ok_or_else(|| {
+                    CommandError::RustCompilerUnavailable(
+                        "rustc not found. Install Rust: https://rustup.rs".to_string(),
+                    )
+                })?;
+
+                // Check if WASM executor is available
+                let executor = self.wasm_executor.as_ref().ok_or_else(|| {
+                    CommandError::WasmError(crate::wasm::WasmError::CompileError(
+                        "WASM runtime not available".to_string(),
+                    ))
+                })?;
+
+                // Generate code using the coding LLM
+                tracing::info!("Generating code for intent: {}", intent);
+                let codegen_start = Instant::now();
+
+                // We need to use block_in_place to call async code from sync context
+                let handle = tokio::runtime::Handle::try_current()
+                    .map_err(|e| CommandError::CodeGenError(format!("No tokio runtime: {}", e)))?;
+
+                let generator_ref = generator;
+                let intent_clone = intent.clone();
+                let code = tokio::task::block_in_place(|| {
+                    handle.block_on(async {
+                        generator_ref.generate(&intent_clone).await
+                    })
+                }).map_err(|e| CommandError::CodeGenError(e.to_string()))?;
+
+                let codegen_ms = codegen_start.elapsed().as_millis() as u64;
+                tracing::info!("Code generation took {}ms, generated {} bytes", codegen_ms, code.len());
+                tracing::debug!("Generated code:\n{}", code);
+
+                // Check cache first (using generated code as key)
+                let wasm_bytes = if let Some(cached) = self.wasm_cache.get(&code) {
+                    tracing::debug!("Cache hit for generated code");
+                    cached
+                } else {
+                    // Compile the generated Rust to WASM
+                    tracing::debug!("Compiling generated code ({} bytes)", code.len());
+                    let compile_start = Instant::now();
+                    let compiled = compiler
+                        .compile(&code)
+                        .map_err(|e| {
+                            tracing::error!("Compilation failed for code:\n{}", code);
+                            CommandError::RustCompileError(e.to_string())
+                        })?;
+                    self.last_compile_time_ms = compile_start.elapsed().as_millis() as u64;
+                    tracing::info!("Rust compilation took {}ms", self.last_compile_time_ms);
+
+                    // Cache the result
+                    self.wasm_cache.put(&code, compiled.clone());
+                    compiled
+                };
+
+                // Execute the compiled WASM
+                // Sanitize to ASCII for safe byte-level processing
+                let source = to_ascii(&self.resolve_source(on)?.to_string());
+                let exec_start = Instant::now();
+                let result = executor
+                    .execute(&wasm_bytes, "run_analyze", &source)
+                    .map_err(|e| {
+                        tracing::error!("WASM execution failed for code:\n{}", code);
+                        CommandError::WasmError(crate::wasm::WasmError::ExecutionError(
+                            e.to_string(),
+                        ))
+                    })?;
+                self.last_wasm_run_time_ms = exec_start.elapsed().as_millis() as u64;
+
+                self.store_result(store, result.clone());
+
+                // Return concise output
+                let preview = if result.len() > 100 {
+                    format!("{}...", truncate_to_char_boundary(&result, 97))
+                } else {
+                    result.clone()
+                };
+                Ok(ExecutionResult::Continue {
+                    output: format!(
+                        "rust_wasm_intent (codegen: {}ms, compile: {}ms, run: {}ms): {}",
+                        codegen_ms, self.last_compile_time_ms, self.last_wasm_run_time_ms, preview
+                    ),
                     sub_calls: 0,
                 })
             }

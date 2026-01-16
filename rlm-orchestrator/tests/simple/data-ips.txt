@@ -1,0 +1,10 @@
+2024-01-15 10:00:01 [INFO] Connection from 192.168.1.10
+2024-01-15 10:00:02 [ERROR] Failed request from 10.0.0.5
+2024-01-15 10:00:03 [INFO] Connection from 192.168.1.10
+2024-01-15 10:00:04 [INFO] Connection from 172.16.0.1
+2024-01-15 10:00:05 [ERROR] Timeout from 10.0.0.5
+2024-01-15 10:00:06 [INFO] Connection from 192.168.1.10
+2024-01-15 10:00:07 [INFO] Connection from 192.168.1.20
+2024-01-15 10:00:08 [ERROR] Failed request from 10.0.0.5
+2024-01-15 10:00:09 [INFO] Connection from 172.16.0.1
+2024-01-15 10:00:10 [INFO] Connection from 192.168.1.10

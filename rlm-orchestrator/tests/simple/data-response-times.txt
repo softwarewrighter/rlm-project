@@ -1,0 +1,10 @@
+2024-01-15 10:00:01 GET /api/users 15ms
+2024-01-15 10:00:02 GET /api/posts 22ms
+2024-01-15 10:00:03 GET /api/users 18ms
+2024-01-15 10:00:04 GET /api/data 45ms
+2024-01-15 10:00:05 GET /api/users 12ms
+2024-01-15 10:00:06 GET /api/posts 28ms
+2024-01-15 10:00:07 GET /api/data 150ms
+2024-01-15 10:00:08 GET /api/users 20ms
+2024-01-15 10:00:09 GET /api/posts 35ms
+2024-01-15 10:00:10 GET /api/data 500ms

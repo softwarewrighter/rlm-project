@@ -15,6 +15,11 @@ use tracing::{debug, info, warn};
 /// Progress events emitted during RLM processing for real-time feedback
 #[derive(Debug, Clone)]
 pub enum ProgressEvent {
+    /// Query starting (emitted once at the beginning)
+    QueryStart {
+        context_chars: usize,
+        query_len: usize,
+    },
     /// Starting a new iteration
     IterationStart { step: usize },
     /// LLM call starting
@@ -23,6 +28,8 @@ pub enum ProgressEvent {
     LlmCallComplete {
         step: usize,
         duration_ms: u64,
+        prompt_tokens: u32,
+        completion_tokens: u32,
         response_preview: String,
     },
     /// Commands extracted and about to execute
@@ -31,6 +38,8 @@ pub enum ProgressEvent {
     WasmCompileStart { step: usize },
     /// WASM compilation complete
     WasmCompileComplete { step: usize, duration_ms: u64 },
+    /// WASM execution complete (separate from compilation)
+    WasmRunComplete { step: usize, duration_ms: u64 },
     /// Command execution complete
     CommandComplete {
         step: usize,
@@ -45,7 +54,11 @@ pub enum ProgressEvent {
     /// Final answer found
     FinalAnswer { answer: String },
     /// Processing complete
-    Complete { iterations: usize, success: bool },
+    Complete {
+        iterations: usize,
+        success: bool,
+        total_duration_ms: u64,
+    },
 }
 
 /// Callback type for progress events
@@ -88,6 +101,8 @@ pub struct IterationTiming {
     pub exec_ms: u64,
     /// Time spent compiling rust_wasm (milliseconds, if any)
     pub compile_ms: u64,
+    /// Time spent running WASM (milliseconds, if any)
+    pub wasm_run_ms: u64,
 }
 
 /// Record of a single RLM iteration
@@ -234,6 +249,7 @@ impl RlmOrchestrator {
                     llm_ms,
                     exec_ms: 0,
                     compile_ms: 0,
+                    wasm_run_ms: 0,
                 },
             }],
             total_sub_calls: 0,
@@ -262,6 +278,9 @@ impl RlmOrchestrator {
         context: &str,
         progress: Option<ProgressCallback>,
     ) -> Result<RlmResult, OrchestratorError> {
+        // Track overall query duration
+        let query_start = Instant::now();
+
         // Helper to emit progress events
         let emit = |event: ProgressEvent| {
             if let Some(ref cb) = progress {
@@ -279,6 +298,12 @@ impl RlmOrchestrator {
         let mut total_prompt_tokens: u32 = 0;
         let mut total_completion_tokens: u32 = 0;
         let context_chars = context.len();
+
+        // Emit query start event
+        emit(ProgressEvent::QueryStart {
+            context_chars,
+            query_len: query.len(),
+        });
 
         let system_prompt = self.build_system_prompt(context.len());
 
@@ -303,6 +328,7 @@ impl RlmOrchestrator {
                 emit(ProgressEvent::Complete {
                     iterations: step,
                     success: false,
+                    total_duration_ms: query_start.elapsed().as_millis() as u64,
                 });
                 return Err(OrchestratorError::MaxSubCalls(self.config.max_sub_calls));
             }
@@ -313,23 +339,12 @@ impl RlmOrchestrator {
             // Call the root LLM (with timing)
             emit(ProgressEvent::LlmCallStart { step });
             let llm_start = Instant::now();
-            let request = LlmRequest::new(&system_prompt, &prompt);
+            let request = LlmRequest::new(&system_prompt, &prompt)
+                .with_max_tokens(2048);  // Ensure enough tokens for WASM code
             let response = self.pool.complete(&request, false).await?;
             let llm_ms = llm_start.elapsed().as_millis() as u64;
 
-            // Emit LLM complete with preview (UTF-8 safe truncation)
-            let response_preview = if response.content.chars().count() > 100 {
-                format!("{}...", response.content.chars().take(100).collect::<String>())
-            } else {
-                response.content.clone()
-            };
-            emit(ProgressEvent::LlmCallComplete {
-                step,
-                duration_ms: llm_ms,
-                response_preview,
-            });
-
-            // Track token usage
+            // Track token usage (extract before emitting event)
             let iter_tokens = response
                 .usage
                 .as_ref()
@@ -340,6 +355,20 @@ impl RlmOrchestrator {
                 .unwrap_or_default();
             total_prompt_tokens += iter_tokens.prompt_tokens;
             total_completion_tokens += iter_tokens.completion_tokens;
+
+            // Emit LLM complete with preview and tokens (UTF-8 safe truncation)
+            let response_preview = if response.content.chars().count() > 100 {
+                format!("{}...", response.content.chars().take(100).collect::<String>())
+            } else {
+                response.content.clone()
+            };
+            emit(ProgressEvent::LlmCallComplete {
+                step,
+                duration_ms: llm_ms,
+                prompt_tokens: iter_tokens.prompt_tokens,
+                completion_tokens: iter_tokens.completion_tokens,
+                response_preview,
+            });
 
             debug!(content_len = response.content.len(), "Got LLM response");
 
@@ -374,11 +403,21 @@ impl RlmOrchestrator {
                     });
                 }
 
+                let wasm_run_ms = executor.last_wasm_run_time_ms();
                 let timing = IterationTiming {
                     llm_ms,
                     exec_ms,
                     compile_ms,
+                    wasm_run_ms,
                 };
+
+                // Emit WASM run complete if there was WASM execution
+                if wasm_run_ms > 0 {
+                    emit(ProgressEvent::WasmRunComplete {
+                        step,
+                        duration_ms: wasm_run_ms,
+                    });
+                }
 
                 match exec_result {
                     Ok(ExecutionResult::Final { answer, sub_calls }) => {
@@ -407,6 +446,7 @@ impl RlmOrchestrator {
                         emit(ProgressEvent::Complete {
                             iterations: step,
                             success: true,
+                            total_duration_ms: query_start.elapsed().as_millis() as u64,
                         });
                         history.push(record);
 
@@ -481,6 +521,7 @@ impl RlmOrchestrator {
                     llm_ms,
                     exec_ms: 0,
                     compile_ms: 0,
+                    wasm_run_ms: 0,
                 };
 
                 if let Some(final_answer) = extract_final(&response.content) {
@@ -504,6 +545,7 @@ impl RlmOrchestrator {
                     emit(ProgressEvent::Complete {
                         iterations: step,
                         success: true,
+                        total_duration_ms: query_start.elapsed().as_millis() as u64,
                     });
                     history.push(record);
                     return Ok(RlmResult {
@@ -544,6 +586,7 @@ impl RlmOrchestrator {
         emit(ProgressEvent::Complete {
             iterations: self.config.max_iterations,
             success: false,
+            total_duration_ms: query_start.elapsed().as_millis() as u64,
         });
         Ok(RlmResult {
             answer: String::new(),
@@ -591,63 +634,81 @@ Sub-LM calls (for semantic analysis of EXTRACTED content):
   You MUST first extract relevant content using find/regex/lines/slice,
   then include that content in the prompt using variable references like ${{var}}.
 
-WASM (dynamic code execution):
-- {{"op": "wasm", "module": "line_counter"}} - Run pre-compiled WASM module
-- {{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{...}}", "store": "result"}}
-  Compile and execute custom Rust code. The function receives the FULL CONTEXT as input and returns a String.
-- {{"op": "rust_wasm", "code": "...", "on": "$myvar", "store": "result"}}
-  With "on": operates on a stored variable instead of the full context.
+## WASM Code Execution: Use rust_wasm_intent (MANDATORY!)
 
-IMPORTANT for rust_wasm:
-- WITHOUT "on:" → input is the FULL original context (usually what you want for log analysis!)
-- WITH "on": "$var" → input is the content of that variable
-- For analyzing logs/files, just omit "on:" and process the full context directly.
+⚠️ CRITICAL: ALWAYS use rust_wasm_intent, NEVER use rust_wasm directly!
+The rust_wasm command causes WASM crashes. rust_wasm_intent uses a specialized
+coding LLM that generates safe code. DO NOT write Rust code yourself!
 
-Available WASM modules: line_counter (counts lines in context)
+### rust_wasm_intent: Describe WHAT You Want
 
-## rust_wasm: Custom Analysis Functions
+- {{"op": "rust_wasm_intent", "intent": "Count occurrences of each error type after [ERROR] marker, sorted by frequency", "store": "counts"}}
+- {{"op": "rust_wasm_intent", "intent": "...", "on": "$myvar", "store": "result"}}
 
-Use rust_wasm when built-in commands cannot express the analysis you need.
+Write a clear description of the algorithm. The coding LLM will write the code.
 
-Function signature (REQUIRED):
-```rust
-pub fn analyze(input: &str) -> String {{
-    // Your analysis code here
-    // Return result as String
-}}
-```
+### EXAMPLES
 
-Available in your code:
-- All core Rust: iterators, pattern matching, string operations
-- Collections: HashMap, HashSet, BTreeMap, BTreeSet, VecDeque
-- NO: file I/O, network, process spawning, environment access
-
-Example - Word frequency count:
 ```json
-{{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{ let mut counts: HashMap<&str, usize> = HashMap::new(); for word in input.split_whitespace() {{ *counts.entry(word).or_insert(0) += 1; }} let mut pairs: Vec<_> = counts.into_iter().collect(); pairs.sort_by(|a, b| b.1.cmp(&a.1)); pairs.iter().take(10).map(|(w, c)| format!(\"{{}}: {{}}\", w, c)).collect::<Vec<_>>().join(\", \") }}", "store": "top_words"}}
-```
-
-Example - Extract numbers and sum:
-```json
-{{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{ let sum: i64 = input.split_whitespace().filter_map(|s| s.parse::<i64>().ok()).sum(); sum.to_string() }}", "on": "$data", "store": "total"}}
-```
-
-Example - Custom pattern extraction:
-```json
-{{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{ input.lines().filter(|line| line.contains(\"ERROR\") && line.contains(\"timeout\")).count().to_string() }}", "store": "timeout_errors"}}
-```
-
-Example - Count items by category (HashMap aggregation):
-```json
-{{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{ let mut counts: HashMap<&str, usize> = HashMap::new(); for line in input.lines() {{ if line.contains(\"ERROR\") {{ let cat = if line.contains(\"Timeout\") {{ \"Timeout\" }} else if line.contains(\"Auth\") {{ \"Auth\" }} else {{ \"Other\" }}; *counts.entry(cat).or_insert(0) += 1; }} }} let mut v: Vec<_> = counts.into_iter().collect(); v.sort_by(|a,b| b.1.cmp(&a.1)); v.iter().map(|(k,c)| format!(\"{{}}:{{}}\", k, c)).collect::<Vec<_>>().join(\", \") }}", "store": "error_counts"}}
+{{"op": "rust_wasm_intent", "intent": "Count each unique error type after [ERROR]. Return sorted by frequency descending as 'ErrorType: count'", "store": "error_counts"}}
 {{"op": "final_var", "name": "error_counts"}}
 ```
-Note: No "on:" parameter - processes the FULL context directly. Uses final_var to output the result.
 
-When to use rust_wasm vs built-in commands:
-- Use find/regex for simple searches and pattern matching
-- Use count for basic counting (lines, words, chars)
-- Use rust_wasm for: aggregations, frequency analysis, custom filtering, numeric computations, multi-step transformations
+```json
+{{"op": "rust_wasm_intent", "intent": "Find all numbers after 'value:' and calculate sum, min, max, average", "store": "stats"}}
+```
+
+```json
+{{"op": "rust_wasm_intent", "intent": "Group log lines by IP address and count occurrences", "store": "ip_counts"}}
+```
+
+⚠️ DO NOT use rust_wasm - it will crash! Always use rust_wasm_intent!
+
+---
+
+## (FALLBACK) rust_wasm - Only if rust_wasm_intent fails
+
+⚠️ Use rust_wasm_intent first! Only use rust_wasm as a last resort.
+
+The code runs in WASM with strict constraints:
+- INPUT IS ASCII-ONLY - byte slicing is safe
+- HashMap/HashSet/BTreeMap CRASH in WASM - use Vec<(String, usize)> instead
+- .contains()/.find()/.split() CRASH in WASM - use helper functions instead
+
+- {{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{...}}", "store": "result"}}
+
+Function signature: `pub fn analyze(input: &str) -> String`
+
+### SAFE to use:
+- Vec, Vec::new(), .push(), .len()
+- .lines(), .trim(), .to_string(), .is_empty()
+- format!(), .push_str(), .join()
+- .iter(), .map(), .filter(), .collect()
+- .sort_by() for sorting
+
+### FORBIDDEN (will crash):
+- HashMap, HashSet, BTreeMap → use Vec<(String, usize)>
+- .contains() → use has()
+- .find() → use after()/before()
+- .split() → use word()
+- .unwrap() → use .unwrap_or()
+
+### HELPER FUNCTIONS (already defined)
+
+- `has(s, "pat")` - Check if string contains pattern (SAFE)
+- `after(s, "pat")` - Get text after pattern
+- `before(s, "pat")` - Get text before pattern
+- `word(s, n)` - Get nth word (0-indexed)
+- `eq(a, b)` - Compare strings (use instead of ==)
+- `parse_int(s)` - Parse to i64, returns 0 on failure
+
+### EXAMPLE - Count with Vec (NOT HashMap!)
+
+```json
+{{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{ let mut counts: Vec<(String, usize)> = Vec::new(); for line in input.lines() {{ if has(line, \"[ERROR]\") {{ let key = word(after(line, \"[ERROR] \"), 0).to_string(); if !key.is_empty() {{ let mut found = false; for i in 0..counts.len() {{ if eq(&counts[i].0, &key) {{ counts[i].1 += 1; found = true; break; }} }} if !found {{ counts.push((key, 1)); }} }} }} }} counts.sort_by(|a,b| b.1.cmp(&a.1)); counts.iter().map(|(k,c)| format!(\"{{}}:{{}}\", k, c)).collect::<Vec<_>>().join(\"\\n\") }}", "store": "counts"}}
+```
+
+⚠️ Prefer rust_wasm_intent - it handles these constraints automatically!
 
 Finishing:
 - {{"op": "final", "answer": "The result is..."}} - Use for simple text answers

@@ -44,6 +44,9 @@ struct BenchmarkSpec {
     context: Option<String>,
     context_generator: Option<String>,
     context_params: Option<ContextParams>,
+    /// URL path to fetch context from server (e.g., "/samples/war-and-peace")
+    #[serde(default)]
+    context_url: Option<String>,
     queries: Vec<QuerySpec>,
 }
 
@@ -126,9 +129,25 @@ struct TestResult {
     avg_savings_pct: f64,
 }
 
-fn generate_context(spec: &BenchmarkSpec) -> String {
+async fn generate_context(client: &Client, spec: &BenchmarkSpec) -> String {
+    // First check for direct context
     if let Some(ctx) = &spec.context {
         return ctx.clone();
+    }
+
+    // Check for URL-based context
+    if let Some(url_path) = &spec.context_url {
+        let url = format!("{}{}", RLM_SERVER, url_path);
+        match client.get(&url).send().await {
+            Ok(response) if response.status().is_success() => {
+                match response.text().await {
+                    Ok(text) => return text,
+                    Err(e) => eprintln!("Error reading context from {}: {}", url, e),
+                }
+            }
+            Ok(response) => eprintln!("Error fetching context from {}: HTTP {}", url, response.status()),
+            Err(e) => eprintln!("Error fetching context from {}: {}", url, e),
+        }
     }
 
     let generator = spec.context_generator.as_deref().unwrap_or("");
@@ -347,7 +366,7 @@ async fn run_query(client: &Client, query: &str, context: &str) -> QueryMetrics 
 }
 
 async fn run_test_suite(client: &Client, spec: BenchmarkSpec) -> Result<TestResult, String> {
-    let context = generate_context(&spec);
+    let context = generate_context(client, &spec).await;
 
     println!("\n{}", "=".repeat(70));
     println!("Test Suite: {}", spec.name);

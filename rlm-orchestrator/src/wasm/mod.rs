@@ -17,10 +17,12 @@ mod demo_tests;
 pub mod library;
 #[cfg(test)]
 mod security_tests;
+pub mod templates;
 
 pub use cache::{CacheConfig, CacheStats, ModuleCache};
 pub use compiler::{CompileError, CompilerConfig, RustCompiler};
 pub use library::{ToolDescription, WasmToolLibrary};
+pub use templates::{PrebuiltHooks, TemplateFramework, TemplateType};
 
 use std::collections::HashMap;
 use thiserror::Error;

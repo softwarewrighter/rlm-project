@@ -1,0 +1,10 @@
+2024-01-15 10:00:00 [INFO] Server started
+2024-01-15 10:00:01 [ERROR] ConnectionFailed from 192.168.1.1
+2024-01-15 10:00:02 [INFO] Request received
+2024-01-15 10:00:03 [ERROR] AuthenticationFailed from 192.168.1.2
+2024-01-15 10:00:04 [WARNING] High memory usage
+2024-01-15 10:00:05 [ERROR] ConnectionFailed from 192.168.1.3
+2024-01-15 10:00:06 [INFO] Request completed
+2024-01-15 10:00:07 [ERROR] DatabaseError on query
+2024-01-15 10:00:08 [INFO] Backup completed
+2024-01-15 10:00:09 [ERROR] ConnectionFailed from 192.168.1.4

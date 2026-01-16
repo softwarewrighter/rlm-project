@@ -149,7 +149,7 @@ impl RustCompiler {
     /// Validate source code before compilation
     pub fn validate_source(&self, code: &str) -> Result<(), CompileError> {
         // Check for forbidden patterns that could be security issues
-        let forbidden = [
+        let forbidden_security = [
             ("include!", "File inclusion not allowed"),
             ("include_str!", "File inclusion not allowed"),
             ("include_bytes!", "File inclusion not allowed"),
@@ -160,11 +160,38 @@ impl RustCompiler {
             ("extern crate", "External crates not allowed (use std only)"),
         ];
 
-        for (pattern, reason) in forbidden {
+        for (pattern, reason) in forbidden_security {
             if code.contains(pattern) {
                 return Err(CompileError::InvalidSource(format!(
                     "{}: found '{}'",
                     reason, pattern
+                )));
+            }
+        }
+
+        // Check for string operations that cause TwoWaySearcher panics in WASM
+        // These operations use pattern matching that can panic on certain inputs
+        let forbidden_string_ops = [
+            (".contains(", "Use has() helper instead of .contains()"),
+            (".find(", "Use after()/before() helpers instead of .find()"),
+            (".rfind(", "Use after()/before() helpers instead of .rfind()"),
+            (".split(", "Use word() helper instead of .split()"),
+            (".split_once(", "Use after()/before() helpers instead of .split_once()"),
+            (".rsplit(", "Use word() helper instead of .rsplit()"),
+            (".matches(", "Use has() helper instead of .matches()"),
+            (".match_indices(", "Use custom byte iteration instead of .match_indices()"),
+            (".replace(", "Build new string manually instead of .replace()"),
+            (".replacen(", "Build new string manually instead of .replacen()"),
+            (".strip_prefix(", "Use after() helper instead of .strip_prefix()"),
+            (".strip_suffix(", "Use before() helper instead of .strip_suffix()"),
+        ];
+
+        for (pattern, suggestion) in forbidden_string_ops {
+            if code.contains(pattern) {
+                return Err(CompileError::InvalidSource(format!(
+                    "WASM-unsafe string operation '{}'. {}",
+                    pattern.trim_end_matches('('),
+                    suggestion
                 )));
             }
         }
@@ -191,9 +218,187 @@ impl RustCompiler {
     fn generate_module_source(&self, user_code: &str) -> String {
         format!(
             r#"// Auto-generated WASM module for RLM
-// User code is inserted below
+// INPUT IS ASCII-ONLY - safe to use byte slicing!
 
 use std::collections::{{HashMap, HashSet, BTreeMap, BTreeSet, VecDeque}};
+
+// ============ PURE BYTE-LEVEL HELPERS ============
+// These avoid Rust's TwoWaySearcher which can panic in WASM.
+// All operations are byte-level for maximum safety.
+
+/// Convert byte slice to &str (safe because input is ASCII)
+#[inline]
+fn to_str(bytes: &[u8]) -> &str {{
+    unsafe {{ std::str::from_utf8_unchecked(bytes) }}
+}}
+
+/// Find pattern in bytes using simple byte-by-byte comparison.
+/// Returns starting position or None.
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {{
+    if needle.is_empty() {{ return Some(0); }}
+    if needle.len() > haystack.len() {{ return None; }}
+    for i in 0..=(haystack.len() - needle.len()) {{
+        if &haystack[i..i + needle.len()] == needle {{
+            return Some(i);
+        }}
+    }}
+    None
+}}
+
+/// Check if bytes contain pattern
+#[allow(dead_code)]
+fn has(s: &str, pat: &str) -> bool {{
+    find_bytes(s.as_bytes(), pat.as_bytes()).is_some()
+}}
+
+/// Count how many times pattern occurs in string
+#[allow(dead_code)]
+fn count(s: &str, pat: &str) -> usize {{
+    if pat.is_empty() {{ return 0; }}
+    let haystack = s.as_bytes();
+    let needle = pat.as_bytes();
+    let mut count = 0;
+    let mut pos = 0;
+    while pos + needle.len() <= haystack.len() {{
+        if let Some(found) = find_bytes(&haystack[pos..], needle) {{
+            count += 1;
+            pos = pos + found + 1; // Move past the match (allow overlapping)
+        }} else {{
+            break;
+        }}
+    }}
+    count
+}}
+
+/// Safe string equality (byte-by-byte comparison)
+#[allow(dead_code)]
+fn eq(a: &str, b: &str) -> bool {{
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    if a_bytes.len() != b_bytes.len() {{
+        return false;
+    }}
+    for i in 0..a_bytes.len() {{
+        if a_bytes[i] != b_bytes[i] {{
+            return false;
+        }}
+    }}
+    true
+}}
+
+/// Get text after pattern, or empty string
+#[allow(dead_code)]
+fn after<'a>(s: &'a str, pat: &str) -> &'a str {{
+    if let Some(pos) = find_bytes(s.as_bytes(), pat.as_bytes()) {{
+        &s[pos + pat.len()..]
+    }} else {{
+        ""
+    }}
+}}
+
+/// Get text before pattern, or whole string
+#[allow(dead_code)]
+fn before<'a>(s: &'a str, pat: &str) -> &'a str {{
+    if let Some(pos) = find_bytes(s.as_bytes(), pat.as_bytes()) {{
+        &s[..pos]
+    }} else {{
+        s
+    }}
+}}
+
+/// Get nth word (0-indexed), or empty string
+#[allow(dead_code)]
+fn word(s: &str, n: usize) -> &str {{
+    let bytes = s.as_bytes();
+    let mut count = 0;
+    let mut start = 0;
+    let mut in_word = false;
+
+    for (i, &b) in bytes.iter().enumerate() {{
+        let is_space = b == b' ' || b == b'\t' || b == b'\r';
+        if !is_space && !in_word {{
+            if count == n {{
+                start = i;
+            }}
+            in_word = true;
+        }} else if is_space && in_word {{
+            if count == n {{
+                return &s[start..i];
+            }}
+            count += 1;
+            in_word = false;
+        }}
+    }}
+
+    if in_word && count == n {{
+        return &s[start..];
+    }}
+    ""
+}}
+
+/// Iterate over lines (newline-separated)
+#[allow(dead_code)]
+fn each_line(s: &str) -> impl Iterator<Item = &str> {{
+    s.as_bytes().split(|&b| b == b'\n').map(|line| to_str(line))
+}}
+
+/// Slice string by byte positions (safe for ASCII)
+#[allow(dead_code)]
+fn slice(s: &str, start: usize, end: usize) -> &str {{
+    let end = end.min(s.len());
+    let start = start.min(end);
+    &s[start..end]
+}}
+
+/// Parse integer, returns 0 on failure
+#[allow(dead_code)]
+fn parse_int(s: &str) -> i64 {{
+    let s = s.trim();
+    if s.is_empty() {{ return 0; }}
+    let bytes = s.as_bytes();
+    let (neg, start) = if bytes[0] == b'-' {{ (true, 1) }} else {{ (false, 0) }};
+    let mut n: i64 = 0;
+    for &b in &bytes[start..] {{
+        if b >= b'0' && b <= b'9' {{
+            n = n * 10 + (b - b'0') as i64;
+        }} else {{
+            break;
+        }}
+    }}
+    if neg {{ -n }} else {{ n }}
+}}
+
+/// Extract all integers from string
+#[allow(dead_code)]
+fn extract_ints(s: &str) -> Vec<i64> {{
+    let mut result = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {{
+        // Skip non-digits
+        while i < bytes.len() && !(bytes[i] >= b'0' && bytes[i] <= b'9') && bytes[i] != b'-' {{
+            i += 1;
+        }}
+        if i >= bytes.len() {{ break; }}
+
+        // Check for negative
+        let neg = bytes[i] == b'-';
+        if neg {{ i += 1; }}
+        if i >= bytes.len() || !(bytes[i] >= b'0' && bytes[i] <= b'9') {{
+            continue;
+        }}
+
+        // Parse number
+        let mut n: i64 = 0;
+        while i < bytes.len() && bytes[i] >= b'0' && bytes[i] <= b'9' {{
+            n = n * 10 + (bytes[i] - b'0') as i64;
+            i += 1;
+        }}
+        result.push(if neg {{ -n }} else {{ n }});
+    }}
+    result
+}}
+// ============ END PURE BYTE-LEVEL HELPERS ============
 
 static mut RESULT_STORAGE: String = String::new();
 
@@ -259,6 +464,8 @@ pub extern "C" fn get_result_len() -> usize {{
             &format!("opt-level={}", self.config.opt_level),
             "-C",
             "lto=yes", // Link-time optimization for smaller output
+            "-C",
+            "panic=abort", // WASM doesn't support unwinding
             "-o",
         ])
         .arg(&output_path)

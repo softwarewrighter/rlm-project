@@ -1,0 +1,13 @@
+{
+  "name": "War and Peace Family Tree",
+  "category": "large-context",
+  "description": "Tests the War and Peace demo that extracts character relationships from 3.2MB of text",
+  "context_url": "/samples/war-and-peace",
+  "queries": [
+    {
+      "query": "Build a family tree for the main characters. Identify characters who appear multiple times and are related to each other (by blood or marriage). Show the relationships in a structured format.",
+      "expected": ["Bolkonsky", "Rostov", "Bezukhov"],
+      "match_type": "contains_all"
+    }
+  ]
+}

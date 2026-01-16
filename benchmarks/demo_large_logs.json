@@ -1,0 +1,18 @@
+{
+  "name": "Large Logs Analysis",
+  "category": "large-context",
+  "description": "Tests the Large Logs demo that analyzes 5000 log lines using WASM",
+  "context_url": "/samples/large-logs",
+  "queries": [
+    {
+      "query": "Rank the error types from most to least frequent. Show the count for each error type.",
+      "expected": ["AuthenticationFailed", "DatabaseError", "NetworkTimeout"],
+      "match_type": "contains_all"
+    },
+    {
+      "query": "How many unique IP addresses appear in these logs? List the top 10 most active IPs.",
+      "expected": "\\d+\\.\\d+\\.\\d+\\.\\d+",
+      "match_type": "regex"
+    }
+  ]
+}
