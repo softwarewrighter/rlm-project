@@ -387,11 +387,14 @@ impl CommandExecutor {
             None => Ok(&self.context),
             Some(n) if n == "_" || n == "last" => Ok(&self.last_result),
             Some(n) if n == "context" => Ok(&self.context),
-            Some(n) => self
-                .variables
-                .get(n)
-                .map(|s| s.as_str())
-                .ok_or_else(|| CommandError::VariableNotFound(n.clone())),
+            Some(n) => {
+                // Strip leading $ if present (LLMs often include it)
+                let var_name = n.strip_prefix('$').unwrap_or(n);
+                self.variables
+                    .get(var_name)
+                    .map(|s| s.as_str())
+                    .ok_or_else(|| CommandError::VariableNotFound(var_name.to_string()))
+            }
         }
     }
 

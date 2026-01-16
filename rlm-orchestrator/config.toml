@@ -37,12 +37,12 @@ role = "root"
 weight = 1
 
 # Remote Ollama on big72 for root LLM (fallback for testing)
-# [[providers]]
-# provider_type = "ollama"
-# base_url = "http://big72.local:11434"
-# model = "qwen2.5-coder:14b"
-# role = "root"
-# weight = 1
+[[providers]]
+provider_type = "ollama"
+base_url = "http://big72.local:11434"
+model = "qwen2.5-coder:14b"
+role = "root"
+weight = 1
 
 # Local Ollama for sub-LM calls (testing 9B model)
 [[providers]]
