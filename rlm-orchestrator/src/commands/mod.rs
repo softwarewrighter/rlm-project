@@ -370,6 +370,71 @@ fn default_wasm_function() -> String {
     "analyze".to_string()
 }
 
+impl Command {
+    /// Get the capability level required for this command
+    ///
+    /// Returns one of: "dsl", "wasm", "cli", "llm_delegation"
+    pub fn required_level(&self) -> &'static str {
+        match self {
+            // Level 1: DSL - Safe text operations
+            Command::Slice { .. }
+            | Command::Lines { .. }
+            | Command::Regex { .. }
+            | Command::Find { .. }
+            | Command::Count { .. }
+            | Command::Split { .. }
+            | Command::Len { .. }
+            | Command::Set { .. }
+            | Command::Get { .. }
+            | Command::Print { .. }
+            | Command::Final { .. }
+            | Command::FinalVar { .. } => "dsl",
+
+            // Level 2: WASM - Sandboxed computation
+            Command::Wasm { .. }
+            | Command::WasmWat { .. }
+            | Command::RustWasm { .. }
+            | Command::WasmTemplate { .. }
+            | Command::RustWasmIntent { .. }
+            | Command::RustWasmReduceIntent { .. }
+            | Command::RustWasmMapReduce { .. } => "wasm",
+
+            // Level 3: CLI - Native binary execution
+            Command::RustCliIntent { .. } => "cli",
+
+            // Level 4: LLM Delegation - Chunk-based LLM analysis
+            Command::LlmQuery { .. } => "llm_delegation",
+        }
+    }
+
+    /// Get the operation name for this command (for logging/display)
+    pub fn op_name(&self) -> &'static str {
+        match self {
+            Command::Slice { .. } => "slice",
+            Command::Lines { .. } => "lines",
+            Command::Regex { .. } => "regex",
+            Command::Find { .. } => "find",
+            Command::Count { .. } => "count",
+            Command::Split { .. } => "split",
+            Command::Len { .. } => "len",
+            Command::Set { .. } => "set",
+            Command::Get { .. } => "get",
+            Command::Print { .. } => "print",
+            Command::LlmQuery { .. } => "llm_query",
+            Command::Final { .. } => "final",
+            Command::FinalVar { .. } => "final_var",
+            Command::Wasm { .. } => "wasm",
+            Command::WasmWat { .. } => "wasm_wat",
+            Command::RustWasm { .. } => "rust_wasm",
+            Command::WasmTemplate { .. } => "wasm_template",
+            Command::RustWasmIntent { .. } => "rust_wasm_intent",
+            Command::RustWasmReduceIntent { .. } => "rust_wasm_reduce_intent",
+            Command::RustWasmMapReduce { .. } => "rust_wasm_mapreduce",
+            Command::RustCliIntent { .. } => "rust_cli_intent",
+        }
+    }
+}
+
 /// What to count
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

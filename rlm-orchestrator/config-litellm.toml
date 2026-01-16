@@ -15,6 +15,32 @@ output_limit = 10000
 bypass_enabled = true
 bypass_threshold = 4000
 
+# Level priority order
+level_priority = ["dsl", "wasm", "cli", "llm_delegation"]
+
+# Level 1: DSL (enabled by default)
+[dsl]
+enabled = true
+
+# Level 2: WASM (enabled by default)
+[wasm]
+enabled = true
+rust_wasm_enabled = true
+fuel_limit = 1000000
+memory_limit = 67108864
+cache_size = 100
+codegen_provider = "litellm"
+codegen_url = "http://localhost:4000"
+codegen_model = "deepseek/deepseek-coder"
+
+# Level 3: CLI (disabled by default)
+[cli]
+enabled = false
+
+# Level 4: LLM Delegation (disabled by default)
+[llm_delegation]
+enabled = false
+
 # LiteLLM Proxy for root LLM (usage tracked via LiteLLM dashboard)
 [[providers]]
 provider_type = "litellm"

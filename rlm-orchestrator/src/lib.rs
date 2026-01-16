@@ -5,10 +5,22 @@
 //! - Connection pooling with load balancing across distributed GPU servers
 //! - Structured command execution (pure Rust, no Python dependency)
 //! - REST API for external integration
+//!
+//! ## 4-Level Capability Architecture
+//!
+//! The system supports 4 capability levels with increasing power and risk:
+//!
+//! - **Level 1 (DSL)**: Safe text operations - slice, lines, regex, find, count
+//! - **Level 2 (WASM)**: Sandboxed computation - rust_wasm_intent, rust_wasm_mapreduce
+//! - **Level 3 (CLI)**: Full Rust capability - rust_cli_intent (process isolation only)
+//! - **Level 4 (LLM Delegation)**: Chunk-based LLM analysis - llm_query, llm_delegate_chunks
+//!
+//! By default, only Levels 1 and 2 are enabled (safe defaults).
 
 pub mod api;
 pub mod codegen;
 pub mod commands;
+pub mod levels;
 pub mod orchestrator;
 pub mod pool;
 pub mod provider;
@@ -17,6 +29,7 @@ pub mod wasm;
 pub use orchestrator::{ProgressCallback, ProgressEvent, RlmOrchestrator};
 pub use pool::LlmPool;
 pub use provider::{LlmProvider, LlmRequest, LlmResponse};
+pub use levels::{Level, LevelRegistry, RiskLevel};
 
 /// Configuration for the RLM system
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -43,12 +56,29 @@ pub struct RlmConfig {
     #[serde(default = "default_bypass_threshold")]
     pub bypass_threshold: usize,
 
+    /// Level priority order for command selection
+    /// Default: ["dsl", "wasm"] (safe levels only)
+    #[serde(default = "default_level_priority")]
+    pub level_priority: Vec<String>,
+
     /// Provider configuration
     pub providers: Vec<ProviderConfig>,
 
-    /// WASM execution configuration
+    /// Level 1: DSL configuration (text operations)
+    #[serde(default)]
+    pub dsl: DslConfig,
+
+    /// Level 2: WASM execution configuration (sandboxed computation)
     #[serde(default)]
     pub wasm: WasmConfig,
+
+    /// Level 3: CLI execution configuration (native binaries, process isolation)
+    #[serde(default)]
+    pub cli: CliConfig,
+
+    /// Level 4: LLM Delegation configuration (chunk-based LLM analysis)
+    #[serde(default)]
+    pub llm_delegation: LlmDelegationConfig,
 }
 
 fn default_max_iterations() -> usize {
@@ -65,6 +95,250 @@ fn default_bypass_enabled() -> bool {
 }
 fn default_bypass_threshold() -> usize {
     4000
+}
+fn default_level_priority() -> Vec<String> {
+    vec!["dsl".to_string(), "wasm".to_string()]
+}
+
+// ============================================================================
+// Level 1: DSL Configuration
+// ============================================================================
+
+/// Configuration for Level 1: DSL (text operations)
+///
+/// DSL commands are safe, read-only operations for text extraction and filtering.
+/// Enabled by default.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct DslConfig {
+    /// Enable DSL commands (slice, lines, regex, find, count, etc.)
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Maximum regex matches to return (prevents memory exhaustion)
+    #[serde(default = "default_max_regex_matches")]
+    pub max_regex_matches: usize,
+
+    /// Maximum slice size in bytes
+    #[serde(default = "default_max_slice_size")]
+    pub max_slice_size: usize,
+
+    /// Maximum number of variables
+    #[serde(default = "default_max_variables")]
+    pub max_variables: usize,
+
+    /// Maximum variable size in bytes
+    #[serde(default = "default_max_variable_size")]
+    pub max_variable_size: usize,
+}
+
+impl Default for DslConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_regex_matches: 10_000,
+            max_slice_size: 1024 * 1024,      // 1MB
+            max_variables: 100,
+            max_variable_size: 1024 * 1024,   // 1MB
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_max_regex_matches() -> usize {
+    10_000
+}
+fn default_max_slice_size() -> usize {
+    1024 * 1024
+}
+fn default_max_variables() -> usize {
+    100
+}
+fn default_max_variable_size() -> usize {
+    1024 * 1024
+}
+
+// ============================================================================
+// Level 3: CLI Configuration
+// ============================================================================
+
+/// Configuration for Level 3: CLI (native binary execution)
+///
+/// CLI commands compile and execute native Rust binaries with full stdlib access.
+/// Process isolation only - no WASM sandbox. Disabled by default.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct CliConfig {
+    /// Enable CLI commands (rust_cli_intent)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Sandbox mode: "none" (process only), "docker", "seccomp" (future)
+    #[serde(default = "default_sandbox_mode")]
+    pub sandbox_mode: String,
+
+    /// Execution timeout in seconds
+    #[serde(default = "default_cli_timeout")]
+    pub timeout_secs: u64,
+
+    /// Maximum output size in bytes
+    #[serde(default = "default_cli_max_output")]
+    pub max_output_size: usize,
+
+    /// Directory for binary cache
+    pub cache_dir: Option<String>,
+
+    /// Maximum cache size in bytes
+    #[serde(default = "default_cli_cache_size")]
+    pub max_cache_size: usize,
+
+    /// Code validation settings
+    #[serde(default)]
+    pub validation: CliValidationConfig,
+}
+
+impl Default for CliConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,  // OFF by default
+            sandbox_mode: "none".to_string(),
+            timeout_secs: 30,
+            max_output_size: 10 * 1024 * 1024,  // 10MB
+            cache_dir: None,
+            max_cache_size: 100 * 1024 * 1024,  // 100MB
+            validation: CliValidationConfig::default(),
+        }
+    }
+}
+
+/// Code validation configuration for CLI execution
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+pub struct CliValidationConfig {
+    /// Allow filesystem read operations
+    #[serde(default)]
+    pub allow_filesystem_read: bool,
+
+    /// Allow filesystem write operations
+    #[serde(default)]
+    pub allow_filesystem_write: bool,
+
+    /// Allow network operations
+    #[serde(default)]
+    pub allow_network: bool,
+
+    /// Allow process spawning
+    #[serde(default)]
+    pub allow_process_spawn: bool,
+
+    /// Allow unsafe code
+    #[serde(default)]
+    pub allow_unsafe: bool,
+}
+
+fn default_sandbox_mode() -> String {
+    "none".to_string()
+}
+fn default_cli_timeout() -> u64 {
+    30
+}
+fn default_cli_max_output() -> usize {
+    10 * 1024 * 1024
+}
+fn default_cli_cache_size() -> usize {
+    100 * 1024 * 1024
+}
+
+// ============================================================================
+// Level 4: LLM Delegation Configuration
+// ============================================================================
+
+/// Configuration for Level 4: LLM Delegation (chunk-based LLM analysis)
+///
+/// Delegates chunks of text to specialized LLMs for fuzzy/semantic analysis.
+/// Non-deterministic. Disabled by default.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct LlmDelegationConfig {
+    /// Enable LLM delegation commands (llm_query, llm_delegate_chunks)
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Chunk size in bytes for splitting large content
+    #[serde(default = "default_chunk_size")]
+    pub chunk_size: usize,
+
+    /// Overlap between chunks in bytes
+    #[serde(default = "default_chunk_overlap")]
+    pub overlap: usize,
+
+    /// Maximum chunks per query
+    #[serde(default = "default_max_chunks")]
+    pub max_chunks: usize,
+
+    /// Privacy mode: "local" (use local LLM), "cloud", "hybrid"
+    #[serde(default = "default_privacy_mode")]
+    pub privacy_mode: String,
+
+    /// Maximum concurrent delegation calls
+    #[serde(default = "default_max_concurrent")]
+    pub max_concurrent: usize,
+
+    /// Rate limit per minute
+    #[serde(default = "default_rate_limit")]
+    pub rate_limit_per_minute: usize,
+
+    /// Dedicated provider for delegation (optional, falls back to root provider)
+    pub provider: Option<DelegationProviderConfig>,
+}
+
+impl Default for LlmDelegationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,  // OFF by default
+            chunk_size: 4096,
+            overlap: 256,
+            max_chunks: 100,
+            privacy_mode: "local".to_string(),
+            max_concurrent: 5,
+            rate_limit_per_minute: 60,
+            provider: None,
+        }
+    }
+}
+
+/// Provider configuration for LLM delegation
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct DelegationProviderConfig {
+    /// Provider type: "litellm", "ollama", "openai"
+    #[serde(rename = "type")]
+    pub provider_type: String,
+
+    /// Provider URL
+    pub url: String,
+
+    /// Model name (use fast/cheap models for delegation)
+    pub model: String,
+
+    /// Environment variable containing API key
+    pub api_key_env: Option<String>,
+}
+
+fn default_chunk_size() -> usize {
+    4096
+}
+fn default_chunk_overlap() -> usize {
+    256
+}
+fn default_max_chunks() -> usize {
+    100
+}
+fn default_privacy_mode() -> String {
+    "local".to_string()
+}
+fn default_max_concurrent() -> usize {
+    5
+}
+fn default_rate_limit() -> usize {
+    60
 }
 
 /// Configuration for a single LLM provider

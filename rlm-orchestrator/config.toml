@@ -1,4 +1,12 @@
 # RLM Orchestrator Configuration
+#
+# 4-Level Capability Architecture:
+# - Level 1 (DSL): Safe text operations - slice, lines, regex, find, count
+# - Level 2 (WASM): Sandboxed computation - rust_wasm_intent, rust_wasm_mapreduce
+# - Level 3 (CLI): Full Rust capability - rust_cli_intent (process isolation only)
+# - Level 4 (LLM Delegation): Chunk-based LLM analysis - llm_query, llm_delegate_chunks
+#
+# By default, only Levels 1 and 2 are enabled (safe defaults).
 
 max_iterations = 20
 max_sub_calls = 50
@@ -8,7 +16,22 @@ output_limit = 10000
 bypass_enabled = false
 bypass_threshold = 0
 
-# WASM execution configuration
+# Level priority order - which level to try first
+level_priority = ["dsl", "wasm", "cli", "llm_delegation"]
+
+# ============================================================================
+# Level 1: DSL Configuration (safe text operations)
+# ============================================================================
+[dsl]
+enabled = true
+max_regex_matches = 10000
+max_slice_size = 1048576
+max_variables = 100
+max_variable_size = 1048576
+
+# ============================================================================
+# Level 2: WASM Configuration (sandboxed computation)
+# ============================================================================
 [wasm]
 enabled = true
 rust_wasm_enabled = true
@@ -21,7 +44,44 @@ codegen_provider = "litellm"
 codegen_url = "http://localhost:4000"
 codegen_model = "deepseek/deepseek-coder"
 
-# LiteLLM Proxy for root LLM (DeepSeek-coder for both reasoning and coding)
+# ============================================================================
+# Level 3: CLI Configuration (native binary execution)
+# ============================================================================
+[cli]
+enabled = false  # OFF by default - enable with --enable-cli
+sandbox_mode = "none"  # "none", "docker", "seccomp" (future)
+timeout_secs = 30
+max_output_size = 10485760
+
+[cli.validation]
+allow_filesystem_read = false
+allow_filesystem_write = false
+allow_network = false
+allow_process_spawn = false
+allow_unsafe = false
+
+# ============================================================================
+# Level 4: LLM Delegation Configuration (chunk-based LLM analysis)
+# ============================================================================
+[llm_delegation]
+enabled = false  # OFF by default - enable with --enable-llm-delegation
+chunk_size = 4096
+overlap = 256
+max_chunks = 100
+privacy_mode = "local"  # "local", "cloud", "hybrid"
+max_concurrent = 5
+rate_limit_per_minute = 60
+
+# Dedicated provider for delegation (optional)
+# [llm_delegation.provider]
+# type = "litellm"
+# url = "http://localhost:4000"
+# model = "gpt-4o-mini"
+# api_key_env = "OPENAI_API_KEY"
+
+# ============================================================================
+# Root LLM Provider (orchestration)
+# ============================================================================
 [[providers]]
 provider_type = "litellm"
 base_url = "http://localhost:4000"

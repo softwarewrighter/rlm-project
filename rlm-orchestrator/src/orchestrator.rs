@@ -630,112 +630,135 @@ impl RlmOrchestrator {
     }
 
     fn build_system_prompt(&self, context_len: usize) -> String {
-        format!(
-            r#"You are an RLM (Recursive Language Model) agent that answers queries about large contexts.
+        // Build level status strings
+        let dsl_status = if self.config.dsl.enabled { "ENABLED" } else { "DISABLED" };
+        let wasm_status = if self.config.wasm.enabled { "ENABLED" } else { "DISABLED" };
+        let cli_status = if self.config.cli.enabled { "ENABLED" } else { "DISABLED" };
+        let llm_status = if self.config.llm_delegation.enabled { "ENABLED" } else { "DISABLED" };
 
-The context has {context_len} characters. You interact with it using JSON commands.
+        // Build available commands section based on enabled levels
+        let mut commands_section = String::new();
 
-## Available Commands
-
-### Context Operations (for extraction and search)
+        // Level 1: DSL commands (always shown if enabled)
+        if self.config.dsl.enabled {
+            commands_section.push_str(r#"
+### Level 1: DSL Operations (text extraction and search) [ENABLED]
 - {{"op": "slice", "start": 0, "end": 1000}} - Get characters [start:end]
 - {{"op": "lines", "start": 0, "end": 100}} - Get lines [start:end]
 - {{"op": "len"}} - Get context length
 - {{"op": "count", "what": "lines"}} - Count lines/chars/words
 - {{"op": "regex", "pattern": "class \\w+"}} - Find regex matches
 - {{"op": "find", "text": "error"}} - Find text occurrences
-
-### Variables
 - {{"op": "set", "name": "x", "value": "..."}} - Set variable
 - {{"op": "get", "name": "x"}} - Get variable value
+"#);
+        }
 
-### Sub-LLM Calls (for semantic analysis of EXTRACTED content)
-- {{"op": "llm_query", "prompt": "Analyze this: ${{extracted_text}}", "store": "analysis"}}
-  IMPORTANT: The sub-LLM has NO access to the original context!
-  You MUST first extract relevant content, then pass it via ${{var}}.
+        // Level 2: WASM commands
+        if self.config.wasm.enabled {
+            commands_section.push_str(r#"
+### Level 2: WASM Computation (sandboxed code execution) [ENABLED]
+- {{"op": "rust_wasm_intent", "intent": "what to compute", "store": "result"}}
+- {{"op": "rust_wasm_mapreduce", "intent": "extract key-value pairs", "combiner": "count"}}
+  Use for: Counting, frequency analysis, aggregation (sandboxed, fuel-limited)
+"#);
+        }
 
-### Analysis with Code Generation: rust_cli_intent (PREFERRED)
-
-For counting, frequency analysis, aggregation, and complex data processing:
-
+        // Level 3: CLI commands
+        if self.config.cli.enabled {
+            commands_section.push_str(r#"
+### Level 3: CLI Computation (native binary, PREFERRED for analysis) [ENABLED]
 - {{"op": "rust_cli_intent", "intent": "what to compute", "store": "result"}}
+  Full Rust stdlib (HashMap, contains, split). Fast and reliable.
+  Use for: Complex analysis, large datasets, frequency counting, ranking
+"#);
+        }
 
-This compiles Rust to a native binary with full std library (HashMap, contains, split).
-Reliable and fast for any dataset size.
+        // Level 4: LLM Delegation
+        if self.config.llm_delegation.enabled {
+            commands_section.push_str(r#"
+### Level 4: LLM Delegation (semantic analysis) [ENABLED]
+- {{"op": "llm_query", "prompt": "Analyze: ${{var}}", "store": "result"}}
+  IMPORTANT: Sub-LLM has NO access to original context!
+  You MUST extract content first, then pass via ${{var}}.
+"#);
+        }
 
-**EXAMPLES - Use rust_cli_intent for frequency counting:**
+        // Build workflow section based on available levels
+        let workflow = if self.config.cli.enabled {
+            r#"
+## Workflow
+1. **Simple queries**: Use find/regex/lines to extract, then final
+2. **Aggregation/analysis**: Use rust_cli_intent (PREFERRED) for counting, ranking
+3. **Semantic analysis**: Extract content first, then use llm_query
+
+## Example: Frequency Analysis (use rust_cli_intent)
 
 ```json
-{{"op": "rust_cli_intent", "intent": "Count each error type (word after [ERROR]) and rank by frequency", "store": "error_counts"}}
-{{"op": "final_var", "name": "error_counts"}}
-```
+{{"op": "rust_cli_intent", "intent": "Count each error type and rank by frequency", "store": "counts"}}
+{{"op": "final_var", "name": "counts"}}
+```"#
+        } else if self.config.wasm.enabled {
+            r#"
+## Workflow
+1. **Simple queries**: Use find/regex/lines to extract, then final
+2. **Aggregation/analysis**: Use rust_wasm_mapreduce for counting, ranking
+3. **Semantic analysis**: Extract content first, then use llm_query
+
+## Example: Frequency Analysis (use rust_wasm_mapreduce)
 
 ```json
-{{"op": "rust_cli_intent", "intent": "Extract all IP addresses and count occurrences, show top 10", "store": "ip_stats"}}
-{{"op": "final_var", "name": "ip_stats"}}
-```
+{{"op": "rust_wasm_mapreduce", "intent": "Extract error type from each [ERROR] line", "combiner": "count", "store": "counts"}}
+{{"op": "final_var", "name": "counts"}}
+```"#
+        } else {
+            r#"
+## Workflow
+1. Use find/regex/lines to extract relevant content
+2. Use count for simple counting
+3. Return result with final
+
+## Example: Finding Content
 
 ```json
-{{"op": "rust_cli_intent", "intent": "Sum all numeric values after 'value:'", "store": "total"}}
-{{"op": "final_var", "name": "total"}}
-```
+{{"op": "find", "text": "error", "store": "matches"}}
+{{"op": "final_var", "name": "matches"}}
+```"#
+        };
 
-**WHAT IT CAN DO:**
-- Count occurrences, frequencies, unique values
-- Sum, min, max values
-- Top-N rankings
-- Complex string parsing
-- Any analysis expressible in Rust
+        format!(
+            r#"You are an RLM (Recursive Language Model) agent that answers queries about large contexts.
 
-**LIMITATIONS (not supported):**
-- Median, percentiles (could be added)
-- Multi-document correlation (use variables)
+The context has {context_len} characters. You interact with it using JSON commands.
+
+## Capability Levels
+- Level 1 (DSL): Text extraction, filtering [{dsl_status}]
+- Level 2 (WASM): Sandboxed computation [{wasm_status}]
+- Level 3 (CLI): Native binary execution [{cli_status}]
+- Level 4 (LLM): Semantic analysis delegation [{llm_status}]
+
+Use the LOWEST level that can accomplish the task.
+
+## Available Commands
+{commands_section}
 
 ### Finishing
 - {{"op": "final", "answer": "The result is..."}} - Simple text answers
 - {{"op": "final_var", "name": "result"}} - Output a computed variable (PREFERRED!)
-
-## Workflow
-
-1. **Simple queries**: Use find/regex/lines to extract, then final
-2. **Aggregation/analysis**: Use rust_cli_intent for counting, ranking, aggregation
-3. **Semantic analysis**: Extract content first, then use llm_query
-
-## Example: Error Frequency Analysis
-
-Query: "Rank error types by frequency"
-
-```json
-{{"op": "rust_cli_intent", "intent": "Count each error type (word after [ERROR]) and rank by frequency descending", "store": "ranked_errors"}}
-{{"op": "final_var", "name": "ranked_errors"}}
-```
-
-## Example: IP Address Analysis
-
-Query: "Find unique IPs and count requests"
-
-```json
-{{"op": "rust_cli_intent", "intent": "Extract all IP addresses, count occurrences, and show top 10 most frequent", "store": "ip_stats"}}
-{{"op": "final_var", "name": "ip_stats"}}
-```
-
-## Example: Finding Specific Content
-
-```json
-{{"op": "find", "text": "password", "store": "matches"}}
-```
-Then extract context around matches:
-```json
-{{"op": "lines", "start": 230, "end": 240, "store": "context"}}
-{{"op": "final", "answer": "Found: ${{context}}"}}
-```
+{workflow}
 
 ## Important Notes
 - Variables persist across iterations
 - Always use `store` to save results you need later
 - Wrap commands in ```json blocks
-- Use final_var for computed results (not final with interpolation)"#,
-            context_len = context_len
+- Use final_var for computed results"#,
+            context_len = context_len,
+            dsl_status = dsl_status,
+            wasm_status = wasm_status,
+            cli_status = cli_status,
+            llm_status = llm_status,
+            commands_section = commands_section,
+            workflow = workflow,
         )
     }
 

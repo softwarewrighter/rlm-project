@@ -262,25 +262,46 @@ fn print_usage() {
     -v, --verbose               Show detailed iteration info
     -vv                         Extra verbose (show full LLM commands)
     --dry-run                   Show what would be done without executing
-    --no-wasm                   Disable all WASM features
-    --no-rust-wasm              Disable rust_wasm command (keep pre-compiled WASM)
     -h, --help                  Print this help message
+
+{}
+    --levels <LEVELS>           Comma-separated levels to enable (default: dsl,wasm)
+                                Available: dsl, wasm, cli, llm_delegation
+    --enable-cli                Enable Level 3 CLI (native binaries, no sandbox)
+    --enable-llm-delegation     Enable Level 4 LLM Delegation (chunk-based LLM)
+    --enable-all                Enable all capability levels
+    --disable-dsl               Disable Level 1 DSL (text operations)
+    --disable-wasm              Disable Level 2 WASM (sandboxed computation)
+    --no-wasm                   Alias for --disable-wasm
+    --no-rust-wasm              Disable rust_wasm command (keep pre-compiled WASM)
+    --priority <ORDER>          Level selection priority (comma-separated)
 
 {}
     rlm document.txt "What is the main topic?"
     rlm logs.txt "Count the ERROR lines" -m phi3:3.8b
     rlm war-and-peace.txt "Find the hidden passphrase" -vv
     rlm data.log "Analyze errors" --litellm -m deepseek-coder
+    rlm large.log "Rank IPs by frequency" --enable-cli
+    rlm article.txt "Summarize each section" --enable-llm-delegation
 
 {}
     RLM enables small LLMs to analyze documents much larger than their
     context window by iteratively exploring the content using commands
     like 'find', 'slice', 'lines', and 'count' instead of reading everything.
+
+    The system supports 4 capability levels:
+    - Level 1 (DSL): Safe text operations - slice, lines, regex, find, count
+    - Level 2 (WASM): Sandboxed computation - rust_wasm_intent, rust_wasm_mapreduce
+    - Level 3 (CLI): Full Rust capability - rust_cli_intent (no sandbox)
+    - Level 4 (LLM): Chunk-based analysis - llm_query, llm_delegate_chunks
+
+    By default, only Levels 1 and 2 are enabled (safe defaults).
 "#,
         "RLM CLI".bold(),
         "USAGE:".bold(),
         "ARGS:".bold(),
         "OPTIONS:".bold(),
+        "CAPABILITY LEVELS:".bold(),
         "EXAMPLES:".bold(),
         "HOW IT WORKS:".bold(),
     );
@@ -302,6 +323,11 @@ struct CliArgs {
     codegen_url: Option<String>,
     codegen_model: String,
     codegen_provider: String, // "litellm" or "ollama"
+    // Level configuration
+    dsl_enabled: bool,
+    cli_enabled: bool,
+    llm_delegation_enabled: bool,
+    level_priority: Vec<String>,
 }
 
 fn parse_args() -> Result<CliArgs> {
@@ -333,6 +359,17 @@ fn parse_args() -> Result<CliArgs> {
     let mut codegen_model = "deepseek/deepseek-coder".to_string(); // Default to DeepSeek-coder
     let mut codegen_provider = "litellm".to_string(); // Default to LiteLLM
 
+    // Level configuration - safe defaults: DSL + WASM enabled, CLI + LLM delegation disabled
+    let mut dsl_enabled = true;
+    let mut cli_enabled = false;
+    let mut llm_delegation_enabled = false;
+    let mut level_priority: Vec<String> = vec![
+        "dsl".to_string(),
+        "wasm".to_string(),
+        "cli".to_string(),
+        "llm_delegation".to_string(),
+    ];
+
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
@@ -363,12 +400,61 @@ fn parse_args() -> Result<CliArgs> {
             "--dry-run" => {
                 dry_run = true;
             }
-            "--no-wasm" => {
+            "--no-wasm" | "--disable-wasm" => {
                 wasm_enabled = false;
                 rust_wasm_enabled = false;
             }
             "--no-rust-wasm" => {
                 rust_wasm_enabled = false;
+            }
+            // Level configuration
+            "--levels" => {
+                i += 1;
+                if i < args.len() {
+                    let levels_str = &args[i];
+                    // Reset all levels, then enable specified ones
+                    dsl_enabled = false;
+                    wasm_enabled = false;
+                    cli_enabled = false;
+                    llm_delegation_enabled = false;
+                    for level in levels_str.split(',') {
+                        match level.trim() {
+                            "dsl" => dsl_enabled = true,
+                            "wasm" => {
+                                wasm_enabled = true;
+                                rust_wasm_enabled = true;
+                            }
+                            "cli" => cli_enabled = true,
+                            "llm_delegation" | "llm" => llm_delegation_enabled = true,
+                            _ => eprintln!("Warning: Unknown level '{}', ignoring", level),
+                        }
+                    }
+                }
+            }
+            "--enable-cli" => {
+                cli_enabled = true;
+            }
+            "--enable-llm-delegation" | "--enable-llm" => {
+                llm_delegation_enabled = true;
+            }
+            "--enable-all" => {
+                dsl_enabled = true;
+                wasm_enabled = true;
+                rust_wasm_enabled = true;
+                cli_enabled = true;
+                llm_delegation_enabled = true;
+            }
+            "--disable-dsl" => {
+                dsl_enabled = false;
+            }
+            "--priority" => {
+                i += 1;
+                if i < args.len() {
+                    level_priority = args[i]
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .collect();
+                }
             }
             "--litellm" => {
                 use_litellm = true;
@@ -433,6 +519,10 @@ fn parse_args() -> Result<CliArgs> {
         codegen_url,
         codegen_model,
         codegen_provider,
+        dsl_enabled,
+        cli_enabled,
+        llm_delegation_enabled,
+        level_priority,
     })
 }
 
@@ -643,6 +733,7 @@ async fn main() -> Result<()> {
         output_limit: 10000,
         bypass_enabled: false, // Always use RLM for demo
         bypass_threshold: 0,
+        level_priority: args.level_priority.clone(),
         providers: vec![ProviderConfig {
             provider_type,
             base_url: base_url.clone(),
@@ -651,12 +742,24 @@ async fn main() -> Result<()> {
             weight: 1,
             role: "root".to_string(),
         }],
+        dsl: rlm::DslConfig {
+            enabled: args.dsl_enabled,
+            ..Default::default()
+        },
         wasm: rlm::WasmConfig {
             enabled: args.wasm_enabled,
             rust_wasm_enabled: args.rust_wasm_enabled,
             codegen_provider: args.codegen_provider.clone(),
             codegen_url: args.codegen_url.clone(),
             codegen_model: args.codegen_model.clone(),
+            ..Default::default()
+        },
+        cli: rlm::CliConfig {
+            enabled: args.cli_enabled,
+            ..Default::default()
+        },
+        llm_delegation: rlm::LlmDelegationConfig {
+            enabled: args.llm_delegation_enabled,
             ..Default::default()
         },
     };
