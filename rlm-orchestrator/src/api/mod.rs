@@ -512,58 +512,37 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             --progress: #3b82f6;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
+        html, body {
             font-family: 'SF Mono', 'Consolas', monospace;
             background: var(--bg);
             color: var(--text);
-            min-height: 100vh;
-            padding: 20px 40px;
+            height: 100vh;
+            overflow: hidden;
         }
-        .container { max-width: 100%; margin: 0 auto; }
+        .container {
+            max-width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 15px 30px;
+        }
+
+        /* Header with title and button */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            flex-shrink: 0;
+        }
         h1 {
-            font-size: 1.5rem;
-            margin-bottom: 20px;
+            font-size: 1.4rem;
             color: var(--highlight);
             display: flex;
             align-items: center;
             gap: 10px;
         }
-        h1 span { font-size: 2rem; }
-        .input-section {
-            background: var(--card);
-            padding: 20px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-        }
-        .input-row {
-            display: grid;
-            grid-template-columns: 1fr 2fr;
-            gap: 15px;
-            margin-bottom: 15px;
-        }
-        label {
-            font-size: 0.85rem;
-            color: var(--muted);
-            margin-bottom: 5px;
-            display: block;
-        }
-        textarea, input, select {
-            width: 100%;
-            background: var(--bg);
-            border: 1px solid var(--accent);
-            border-radius: 8px;
-            padding: 12px;
-            color: var(--text);
-            font-family: inherit;
-            font-size: 0.9rem;
-            resize: vertical;
-        }
-        textarea:focus, input:focus, select:focus {
-            outline: none;
-            border-color: var(--highlight);
-        }
-        #query { height: 60px; }
-        #context { height: 150px; }
+        h1 span { font-size: 1.8rem; }
         button {
             background: var(--highlight);
             color: white;
@@ -579,11 +558,71 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         button:active { transform: scale(0.98); }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-        .example-selector {
+        /* Tab bar */
+        .tab-bar {
+            display: flex;
+            gap: 0;
             margin-bottom: 15px;
+            flex-shrink: 0;
+        }
+        .tab {
+            padding: 10px 25px;
+            background: var(--accent);
+            color: var(--muted);
+            border: none;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: background 0.2s, color 0.2s;
+        }
+        .tab:first-child { border-radius: 8px 0 0 8px; }
+        .tab:last-child { border-radius: 0 8px 8px 0; }
+        .tab.active {
+            background: var(--highlight);
+            color: white;
+        }
+        .tab:hover:not(.active) { background: #1a4a7a; }
+
+        /* Tab content container */
+        .tab-content {
+            flex: 1;
+            min-height: 0;
+            display: none;
+            overflow: hidden;
+        }
+        .tab-content.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Input Data tab */
+        .input-section {
+            background: var(--card);
+            padding: 15px 20px;
+            border-radius: 12px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .example-selector {
+            margin-bottom: 12px;
+            flex-shrink: 0;
         }
         .example-selector select {
             max-width: 400px;
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            padding: 10px;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 0.9rem;
+        }
+        .example-selector select:focus {
+            outline: none;
+            border-color: var(--highlight);
         }
         .example-tags {
             display: flex;
@@ -603,27 +642,201 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .tag.aggregation { background: #7c3aed; }
         .tag.large-context { background: #dc2626; color: #fff; }
 
+        .input-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 12px;
+            flex-shrink: 0;
+        }
+        .query-col {
+            width: 300px;
+            flex-shrink: 0;
+        }
+        label {
+            font-size: 0.85rem;
+            color: var(--muted);
+            margin-bottom: 5px;
+            display: block;
+        }
+        textarea {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            padding: 12px;
+            color: var(--text);
+            font-family: inherit;
+            font-size: 0.9rem;
+            resize: none;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: var(--highlight);
+        }
+        #query { height: 80px; }
+
+        .data-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .data-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .context-stats {
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+        #context {
+            flex: 1;
+            min-height: 100px;
+        }
+
+        /* Output tab */
+        .output-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        /* Progress section */
+        .progress-section {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            flex-shrink: 0;
+        }
+        .progress-section.expanded {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .progress-header h2 {
+            font-size: 0.9rem;
+            color: var(--progress);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .progress-status {
+            font-size: 0.8rem;
+            color: var(--muted);
+        }
+        .progress-status.active { color: var(--progress); }
+        .progress-log {
+            background: var(--bg);
+            border-radius: 8px;
+            padding: 12px;
+            flex: 1;
+            overflow-y: auto;
+            font-size: 0.8rem;
+            line-height: 1.6;
+            min-height: 100px;
+        }
+        .progress-log .event {
+            margin-bottom: 4px;
+            display: flex;
+            gap: 8px;
+        }
+        .progress-log .event-time {
+            color: var(--muted);
+            min-width: 60px;
+        }
+        .progress-log .event-icon { min-width: 20px; }
+        .progress-log .event-llm { color: var(--highlight); }
+        .progress-log .event-wasm { color: var(--wasm); }
+        .progress-log .event-cli { color: #a78bfa; }
+        .progress-log .event-cmd { color: #7dd3fc; }
+        .progress-log .event-done { color: var(--success); }
+
+        /* Results section */
+        .results-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+        }
+        .summary-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+        .stat {
+            background: var(--accent);
+            padding: 10px 15px;
+            border-radius: 8px;
+        }
+        .stat.wasm-stat { border: 2px solid var(--wasm); }
+        .stat-value {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: var(--highlight);
+        }
+        .stat-value.wasm { color: var(--wasm); }
+        .stat-label {
+            font-size: 0.7rem;
+            color: var(--muted);
+            text-transform: uppercase;
+        }
+
+        .answer-box {
+            background: linear-gradient(135deg, #065f46, #064e3b);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            flex-shrink: 0;
+        }
+        .answer-box h3 {
+            color: var(--success);
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        .answer-box.error {
+            background: linear-gradient(135deg, #7f1d1d, #450a0a);
+        }
+        .answer-box.error h3 { color: var(--error); }
+
         .results {
             display: grid;
-            grid-template-columns: 300px 1fr;
-            gap: 20px;
+            grid-template-columns: 250px 1fr;
+            gap: 15px;
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
         }
         .timeline {
             background: var(--card);
             border-radius: 12px;
-            padding: 15px;
+            padding: 12px;
+            overflow-y: auto;
         }
         .timeline h2 {
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             color: var(--muted);
-            margin-bottom: 15px;
+            margin-bottom: 12px;
             text-transform: uppercase;
             letter-spacing: 1px;
         }
         .step {
             position: relative;
-            padding: 12px 15px;
-            margin-bottom: 8px;
+            padding: 10px 12px;
+            margin-bottom: 6px;
             background: var(--accent);
             border-radius: 8px;
             cursor: pointer;
@@ -641,11 +854,12 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .step-number {
             font-weight: bold;
             color: var(--highlight);
+            font-size: 0.9rem;
         }
         .step-meta {
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             color: var(--muted);
-            margin-top: 4px;
+            margin-top: 3px;
         }
         .step-badges {
             display: flex;
@@ -655,7 +869,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .badge {
             padding: 2px 6px;
             border-radius: 4px;
-            font-size: 0.65rem;
+            font-size: 0.6rem;
             font-weight: 600;
         }
         .badge.wasm { background: var(--wasm); color: #000; }
@@ -663,15 +877,16 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .detail-panel {
             background: var(--card);
             border-radius: 12px;
-            padding: 20px;
+            padding: 15px;
+            overflow-y: auto;
         }
         .detail-section {
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
         .detail-section h3 {
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             color: var(--highlight);
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             text-transform: uppercase;
             letter-spacing: 1px;
         }
@@ -679,286 +894,214 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .code-block {
             background: var(--bg);
             border-radius: 8px;
-            padding: 15px;
+            padding: 12px;
             overflow-x: auto;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             line-height: 1.5;
             white-space: pre-wrap;
             word-break: break-word;
+            max-height: 200px;
+            overflow-y: auto;
         }
         .code-block.json { color: #7dd3fc; }
         .code-block.output { color: #a5f3fc; }
         .code-block.error { color: var(--error); }
         .code-block.rust { color: var(--wasm); }
 
-        .summary-bar {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
-        .stat {
-            background: var(--accent);
-            padding: 15px 20px;
+        .hidden { display: none !important; }
+
+        .wasm-info {
+            background: linear-gradient(135deg, #78350f, #451a03);
             border-radius: 8px;
+            padding: 10px 15px;
+            margin-bottom: 15px;
+            border: 1px solid var(--wasm);
+            flex-shrink: 0;
         }
-        .stat.wasm-stat { border: 2px solid var(--wasm); }
-        .stat-value {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: var(--highlight);
+        .wasm-info h3 {
+            color: var(--wasm);
+            margin-bottom: 5px;
+            font-size: 0.85rem;
         }
-        .stat-value.wasm { color: var(--wasm); }
-        .stat-label {
-            font-size: 0.75rem;
-            color: var(--muted);
-            text-transform: uppercase;
+        .wasm-info p {
+            color: var(--text);
+            font-size: 0.8rem;
+            line-height: 1.4;
         }
-
-        .answer-box {
-            background: linear-gradient(135deg, #065f46, #064e3b);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        .answer-box h3 {
-            color: var(--success);
-            margin-bottom: 10px;
-        }
-        .answer-box.error {
-            background: linear-gradient(135deg, #7f1d1d, #450a0a);
-        }
-        .answer-box.error h3 { color: var(--error); }
-
-        .hidden { display: none; }
 
         .flow-diagram {
             display: flex;
             align-items: center;
             gap: 5px;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
             flex-wrap: wrap;
+            flex-shrink: 0;
         }
         .flow-node {
-            padding: 8px 12px;
+            padding: 6px 10px;
             background: var(--accent);
             border-radius: 6px;
-            font-size: 0.75rem;
+            font-size: 0.7rem;
         }
         .flow-node.query { background: var(--highlight); }
         .flow-node.final { background: #065f46; }
         .flow-node.wasm { background: var(--wasm); color: #000; }
         .flow-arrow {
             color: var(--muted);
-            font-size: 1.2rem;
+            font-size: 1rem;
         }
 
-        .wasm-info {
-            background: linear-gradient(135deg, #78350f, #451a03);
-            border-radius: 12px;
-            padding: 15px 20px;
-            margin-bottom: 20px;
-            border: 1px solid var(--wasm);
-        }
-        .wasm-info h3 {
-            color: var(--wasm);
-            margin-bottom: 8px;
-            font-size: 0.9rem;
-        }
-        .wasm-info p {
-            color: var(--text);
-            font-size: 0.85rem;
-            line-height: 1.5;
-        }
-
-        /* Progress section */
-        .progress-section {
-            background: var(--card);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        .progress-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        .progress-header h2 {
-            font-size: 0.9rem;
-            color: var(--progress);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .progress-status {
-            font-size: 0.8rem;
-            color: var(--muted);
-        }
-        .progress-status.active { color: var(--progress); }
-        .progress-log {
-            background: var(--bg);
-            border-radius: 8px;
-            padding: 15px;
-            max-height: 200px;
-            overflow-y: auto;
-            font-size: 0.8rem;
-            line-height: 1.6;
-        }
-        .progress-log .event {
-            margin-bottom: 4px;
-            display: flex;
-            gap: 8px;
-        }
-        .progress-log .event-time {
-            color: var(--muted);
-            min-width: 70px;
-        }
-        .progress-log .event-icon { min-width: 20px; }
-        .progress-log .event-llm { color: var(--highlight); }
-        .progress-log .event-wasm { color: var(--wasm); }
-        .progress-log .event-cli { color: #a78bfa; }  /* Purple for CLI */
-        .progress-log .event-cmd { color: #7dd3fc; }
-        .progress-log .event-done { color: var(--success); }
-
-        /* Context preview */
-        .context-preview {
-            background: var(--bg);
-            border-radius: 8px;
-            padding: 12px;
-            font-size: 0.75rem;
-            margin-top: 8px;
-            max-height: 100px;
-            overflow: hidden;
-        }
-        .context-preview .line {
-            color: var(--muted);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .context-preview .ellipsis {
-            color: var(--highlight);
+        /* Waiting message */
+        .waiting-message {
             text-align: center;
-            padding: 4px 0;
-        }
-        .context-stats {
-            font-size: 0.75rem;
             color: var(--muted);
-            margin-top: 8px;
+            padding: 40px;
+        }
+        .waiting-message h2 {
+            font-size: 1.2rem;
+            margin-bottom: 10px;
         }
 
         @media (max-width: 900px) {
             .results { grid-template-columns: 1fr; }
-            .input-row { grid-template-columns: 1fr; }
-            body { padding: 15px; }
+            .input-row { flex-direction: column; }
+            .query-col { width: 100%; }
+            .container { padding: 10px; }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1><span>🔄</span> RLM Visualizer</h1>
+        <!-- Header with title and Run button -->
+        <div class="header">
+            <h1><span>🔄</span> RLM Visualizer</h1>
+            <button id="runBtn" onclick="runQuery()">Run RLM Query</button>
+        </div>
 
-        <div class="input-section">
-            <div class="example-selector">
-                <label for="exampleSelect">Load Example</label>
-                <select id="exampleSelect" onchange="loadExample()">
-                    <option value="">-- Select an example --</option>
-                    <optgroup label="Large Context Demos">
-                        <option value="war_peace_family">War and Peace: Family Tree (3.2MB)</option>
-                        <option value="large_logs_errors">Large Logs: Error Ranking (5000 lines)</option>
-                        <option value="large_logs_ips">Large Logs: Unique IPs (5000 lines)</option>
-                    </optgroup>
-                    <optgroup label="WASM Use Cases">
-                        <option value="wasm_unique_ips">Unique IP addresses (rust_wasm)</option>
-                        <option value="wasm_error_ranking">Rank errors by frequency (rust_wasm)</option>
-                        <option value="wasm_word_freq">Word frequency analysis (rust_wasm)</option>
-                        <option value="wasm_response_times">Response time percentiles (rust_wasm)</option>
-                    </optgroup>
-                    <optgroup label="Basic Commands">
-                        <option value="count_errors">Count ERROR lines</option>
-                        <option value="find_pattern">Find text pattern</option>
-                    </optgroup>
-                </select>
-                <div class="example-tags" id="exampleTags"></div>
-            </div>
+        <!-- Tab bar -->
+        <div class="tab-bar">
+            <button class="tab active" onclick="switchTab('input')">Input Data</button>
+            <button class="tab" onclick="switchTab('output')">Output</button>
+        </div>
 
-            <div class="input-row">
-                <div>
-                    <label for="query">Query</label>
-                    <textarea id="query" placeholder="What do you want to know about the context?">How many ERROR lines are there?</textarea>
+        <!-- Input Data Tab -->
+        <div id="inputTab" class="tab-content active">
+            <div class="input-section">
+                <div class="example-selector">
+                    <label for="exampleSelect">Load Example</label>
+                    <select id="exampleSelect" onchange="loadExample()">
+                        <option value="">-- Select an example --</option>
+                        <optgroup label="Large Context Demos">
+                            <option value="war_peace_family">War and Peace: Family Tree (3.2MB)</option>
+                            <option value="large_logs_errors">Large Logs: Error Ranking (5000 lines)</option>
+                            <option value="large_logs_ips">Large Logs: Unique IPs (5000 lines)</option>
+                        </optgroup>
+                        <optgroup label="WASM Use Cases">
+                            <option value="wasm_unique_ips">Unique IP addresses (rust_wasm)</option>
+                            <option value="wasm_error_ranking">Rank errors by frequency (rust_wasm)</option>
+                            <option value="wasm_word_freq">Word frequency analysis (rust_wasm)</option>
+                            <option value="wasm_response_times">Response time percentiles (rust_wasm)</option>
+                        </optgroup>
+                        <optgroup label="Basic Commands">
+                            <option value="count_errors">Count ERROR lines</option>
+                            <option value="find_pattern">Find text pattern</option>
+                        </optgroup>
+                    </select>
+                    <div class="example-tags" id="exampleTags"></div>
                 </div>
-                <div>
-                    <label for="context">Context <span id="contextStats" class="context-stats"></span></label>
-                    <textarea id="context" placeholder="Paste your text/code here..." oninput="updateContextPreview()">Line 1: INFO - System started
+
+                <div class="input-row">
+                    <div class="query-col">
+                        <label for="query">Query</label>
+                        <textarea id="query" placeholder="What do you want to know about the data?">How many ERROR lines are there?</textarea>
+                    </div>
+                </div>
+
+                <div class="data-container">
+                    <div class="data-label">
+                        <label for="context">Input Data</label>
+                        <span id="contextStats" class="context-stats"></span>
+                    </div>
+                    <textarea id="context" placeholder="Paste your text/code/logs here..." oninput="updateContextStats()">Line 1: INFO - System started
 Line 2: ERROR - Connection failed
 Line 3: INFO - Retrying connection
 Line 4: ERROR - Timeout occurred
 Line 5: WARNING - High memory usage
 Line 6: INFO - Connection established
 Line 7: ERROR - Invalid input received</textarea>
-                    <div id="contextPreview" class="context-preview"></div>
                 </div>
             </div>
-            <button id="runBtn" onclick="runQuery()">Run RLM Query</button>
         </div>
 
-        <div id="progressSection" class="progress-section hidden">
-            <div class="progress-header">
-                <h2>Live Progress</h2>
-                <span id="progressStatus" class="progress-status">Waiting...</span>
-            </div>
-            <div id="progressLog" class="progress-log"></div>
-        </div>
-
-        <div id="resultsSection" class="hidden">
-            <div class="summary-bar">
-                <div class="stat">
-                    <div class="stat-value" id="statIterations">-</div>
-                    <div class="stat-label">Iterations</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="statSubCalls">-</div>
-                    <div class="stat-label">Sub-LM Calls</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="statContext">-</div>
-                    <div class="stat-label">Context Chars</div>
-                </div>
-                <div class="stat wasm-stat" id="statWasm" style="display: none;">
-                    <div class="stat-value wasm">-</div>
-                    <div class="stat-label">WASM Steps</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="statTokens">-</div>
-                    <div class="stat-label">Tokens</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="statDuration">-</div>
-                    <div class="stat-label">Duration</div>
-                </div>
-            </div>
-
-            <div id="wasmInfo" class="wasm-info hidden">
-                <h3>🔧 WASM Execution Used</h3>
-                <p></p>
-            </div>
-
-            <div id="flowDiagram" class="flow-diagram"></div>
-
-            <div id="answerBox" class="answer-box">
-                <h3>Final Answer</h3>
-                <div id="answerText"></div>
-            </div>
-
-            <div class="results">
-                <div class="timeline">
-                    <h2>Execution Timeline</h2>
-                    <div id="timeline"></div>
+        <!-- Output Tab -->
+        <div id="outputTab" class="tab-content">
+            <div class="output-section">
+                <!-- Progress section (always visible during run) -->
+                <div id="progressSection" class="progress-section expanded">
+                    <div class="progress-header">
+                        <h2>Live Progress</h2>
+                        <span id="progressStatus" class="progress-status">Waiting...</span>
+                    </div>
+                    <div id="progressLog" class="progress-log">
+                        <div class="waiting-message">
+                            <h2>Ready to run</h2>
+                            <p>Click "Run RLM Query" to start processing</p>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="detail-panel">
-                    <div id="detailContent">
-                        <p style="color: var(--muted);">Click on a step to see details</p>
+                <!-- Results section (shown after completion) -->
+                <div id="resultsSection" class="results-section hidden">
+                    <div class="summary-bar">
+                        <div class="stat">
+                            <div class="stat-value" id="statIterations">-</div>
+                            <div class="stat-label">Iterations</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="statSubCalls">-</div>
+                            <div class="stat-label">Sub-LM Calls</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="statContext">-</div>
+                            <div class="stat-label">Context Chars</div>
+                        </div>
+                        <div class="stat wasm-stat" id="statWasm" style="display: none;">
+                            <div class="stat-value wasm">-</div>
+                            <div class="stat-label">WASM Steps</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="statTokens">-</div>
+                            <div class="stat-label">Tokens</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="statDuration">-</div>
+                            <div class="stat-label">Duration</div>
+                        </div>
+                    </div>
+
+                    <div id="wasmInfo" class="wasm-info hidden">
+                        <h3>🔧 WASM Execution Used</h3>
+                        <p></p>
+                    </div>
+
+                    <div id="flowDiagram" class="flow-diagram"></div>
+
+                    <div id="answerBox" class="answer-box">
+                        <h3>Final Answer</h3>
+                        <div id="answerText"></div>
+                    </div>
+
+                    <div class="results">
+                        <div class="timeline">
+                            <h2>Timeline</h2>
+                            <div id="timeline"></div>
+                        </div>
+
+                        <div class="detail-panel">
+                            <div id="detailContent">
+                                <p style="color: var(--muted);">Click on a step to see details</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -970,27 +1113,29 @@ Line 7: ERROR - Invalid input received</textarea>
         let eventSource = null;
         let startTime = null;
 
-        // Initialize context preview on load
-        document.addEventListener('DOMContentLoaded', updateContextPreview);
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', updateContextStats);
 
-        function updateContextPreview() {
+        // Tab switching
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.tab:nth-child(${tabName === 'input' ? 1 : 2})`).classList.add('active');
+
+            // Update tab content
+            document.getElementById('inputTab').classList.toggle('active', tabName === 'input');
+            document.getElementById('outputTab').classList.toggle('active', tabName === 'output');
+        }
+
+        function updateContextStats() {
             const context = document.getElementById('context').value;
             const lines = context.split('\n');
             const lineCount = lines.length;
             const charCount = context.length;
+            const sizeKb = (charCount / 1024).toFixed(1);
 
             // Update stats
-            document.getElementById('contextStats').textContent = `(${lineCount} lines, ${charCount.toLocaleString()} chars)`;
-
-            // Show head/tail preview
-            const preview = document.getElementById('contextPreview');
-            if (lineCount <= 6) {
-                preview.innerHTML = lines.map(l => `<div class="line">${escapeHtml(l)}</div>`).join('');
-            } else {
-                const head = lines.slice(0, 3).map(l => `<div class="line">${escapeHtml(l)}</div>`).join('');
-                const tail = lines.slice(-3).map(l => `<div class="line">${escapeHtml(l)}</div>`).join('');
-                preview.innerHTML = head + `<div class="ellipsis">... ${lineCount - 6} more lines ...</div>` + tail;
-            }
+            document.getElementById('contextStats').textContent = `${lineCount.toLocaleString()} lines, ${charCount.toLocaleString()} chars (${sizeKb}KB)`;
         }
 
         function logProgress(icon, message, className = '') {
@@ -1014,67 +1159,85 @@ Line 7: ERROR - Invalid input received</textarea>
             }
         }
 
-        // Example data for the dropdown
+        // Example data for the dropdown with paper benchmark categories
         const examples = {
-            // Large context demos that load from server
+            // Large context demos - S-NIAH (Semantic Needle-in-a-Haystack) category
             war_peace_family: {
                 query: "Build a family tree for the main characters. Identify characters who appear multiple times and are related to each other (by blood or marriage). Show the relationships in a structured format.",
-                context: null,  // Will be loaded from /samples/war-and-peace
+                context: null,
                 loadUrl: '/samples/war-and-peace',
                 tags: ['large-context', 'synthesis', 'literature'],
-                description: 'Analyzes 3.2MB of text to extract character relationships'
+                benchmark: 'S-NIAH',
+                level: 'Level 1 (DSL) + Level 2 (WASM)',
+                description: 'S-NIAH: Find scattered character mentions in 3.2MB text. Uses slice/lines to navigate, then WASM for relationship extraction.'
             },
             large_logs_errors: {
                 query: "Rank the error types from most to least frequent. Show the count for each error type.",
-                context: null,  // Will be loaded from /samples/large-logs
+                context: null,
                 loadUrl: '/samples/large-logs',
                 tags: ['large-context', 'wasm', 'aggregation'],
-                description: 'Analyzes 5000 log lines using rust_wasm HashMap'
+                benchmark: 'BrowseComp-Plus',
+                level: 'Level 2 (WASM)',
+                description: 'BrowseComp-Plus: Aggregate error types from 5000 log lines. Uses rust_wasm_mapreduce for HashMap counting.'
             },
             large_logs_ips: {
                 query: "How many unique IP addresses appear in these logs? List the top 10 most active IPs.",
-                context: null,  // Will be loaded from /samples/large-logs
+                context: null,
                 loadUrl: '/samples/large-logs',
                 tags: ['large-context', 'wasm', 'aggregation'],
-                description: 'Extracts and counts unique IPs from 5000 log lines'
+                benchmark: 'BrowseComp-Plus',
+                level: 'Level 2 (WASM)',
+                description: 'BrowseComp-Plus: Extract and rank unique IPs. Uses rust_wasm with HashSet for uniqueness, HashMap for counts.'
             },
-            // WASM demos with moderate context (triggers RLM, not bypass)
+            // WASM demos - OOLONG category (operations over long contexts)
             wasm_unique_ips: {
                 query: "How many unique IP addresses are in these logs?",
                 context: generateLogContext(200),
                 tags: ['wasm', 'aggregation'],
-                description: 'Uses rust_wasm with HashSet to count unique IPs'
+                benchmark: 'OOLONG',
+                level: 'Level 2 (WASM)',
+                description: 'OOLONG: Count unique items in structured data. Uses rust_wasm_intent with HashSet for O(1) uniqueness.'
             },
             wasm_error_ranking: {
                 query: "Rank the error types from most to least frequent",
                 context: generateErrorLogs(150),
                 tags: ['wasm', 'aggregation', 'ranking'],
-                description: 'Uses rust_wasm with HashMap to count and sort error types'
+                benchmark: 'OOLONG',
+                level: 'Level 2 (WASM)',
+                description: 'OOLONG: Frequency ranking task. Uses rust_wasm_mapreduce for map (extract) then reduce (count+sort).'
             },
             wasm_word_freq: {
                 query: "What are the top 10 most common words in this text?",
                 context: generateTextSample(),
                 tags: ['wasm', 'aggregation', 'text-analysis'],
-                description: 'Uses rust_wasm with HashMap for word frequency analysis'
+                benchmark: 'OOLONG',
+                level: 'Level 2 (WASM)',
+                description: 'OOLONG: Word frequency analysis. Uses rust_wasm with HashMap for counting, then sorting by frequency.'
             },
             wasm_response_times: {
                 query: "Calculate the p50, p95, and p99 response time percentiles",
                 context: generateResponseTimes(300),
                 tags: ['wasm', 'statistics', 'percentiles'],
-                description: 'Uses rust_wasm to parse times and calculate percentiles'
+                benchmark: 'OOLONG',
+                level: 'Level 2 (WASM)',
+                description: 'OOLONG: Statistical computation. Uses rust_wasm to parse, collect into Vec, sort, and compute percentiles.'
             },
-            // Basic demos (still larger than before)
+            // Basic demos - Simple NIAH category
             count_errors: {
                 query: "How many ERROR lines are there?",
                 context: generateLogContext(100),
                 tags: ['basic', 'count'],
-                description: 'Error counting using basic commands'
+                benchmark: 'Simple NIAH',
+                level: 'Level 1 (DSL)',
+                description: 'Simple NIAH: Pattern counting. Uses regex/find commands for deterministic O(n) search.'
             },
             find_pattern: {
                 query: "Find all lines containing 'AuthenticationFailed'",
                 context: generateLogContext(100),
                 tags: ['basic', 'search'],
-                description: 'Pattern search using find/regex commands'
+                benchmark: 'Simple NIAH',
+                level: 'Level 1 (DSL)',
+                description: 'Simple NIAH: Pattern search. Uses find command for exact string matching.'
             }
         };
 
@@ -1162,7 +1325,7 @@ Line 7: ERROR - Invalid input received</textarea>
             if (example) {
                 document.getElementById('query').value = example.query;
 
-                // Show tags immediately
+                // Show tags with benchmark and level info
                 const tagsHtml = example.tags.map(tag => {
                     let tagClass = 'basic';
                     if (tag === 'wasm') tagClass = 'wasm';
@@ -1170,25 +1333,34 @@ Line 7: ERROR - Invalid input received</textarea>
                     else if (tag === 'aggregation' || tag === 'ranking') tagClass = 'aggregation';
                     return `<span class="tag ${tagClass}">${tag}</span>`;
                 }).join('');
-                document.getElementById('exampleTags').innerHTML = tagsHtml + `<span style="color: var(--muted); font-size: 0.75rem; margin-left: 8px;">${example.description}</span>`;
+
+                // Add benchmark and level badges
+                const benchmarkBadge = example.benchmark ?
+                    `<span class="tag" style="background: #6366f1;">${example.benchmark}</span>` : '';
+                const levelBadge = example.level ?
+                    `<span class="tag" style="background: #059669;">${example.level}</span>` : '';
+
+                document.getElementById('exampleTags').innerHTML =
+                    tagsHtml + benchmarkBadge + levelBadge +
+                    `<div style="color: var(--muted); font-size: 0.75rem; margin-top: 6px; width: 100%;">${example.description}</div>`;
 
                 // Load context - either from URL or use static value
                 if (example.loadUrl) {
                     document.getElementById('context').value = 'Loading large context...';
-                    updateContextPreview();
+                    updateContextStats();
                     try {
                         const response = await fetch(example.loadUrl);
                         if (!response.ok) throw new Error(`HTTP ${response.status}`);
                         const text = await response.text();
                         document.getElementById('context').value = text;
-                        updateContextPreview();
+                        updateContextStats();
                     } catch (err) {
                         document.getElementById('context').value = `Error loading: ${err.message}`;
-                        updateContextPreview();
+                        updateContextStats();
                     }
                 } else {
                     document.getElementById('context').value = example.context;
-                    updateContextPreview();
+                    updateContextStats();
                 }
             } else {
                 document.getElementById('exampleTags').innerHTML = '';
@@ -1210,8 +1382,12 @@ Line 7: ERROR - Invalid input received</textarea>
             btn.textContent = 'Running...';
             startTime = Date.now();
 
-            // Show progress section, hide results
+            // Switch to Output tab
+            switchTab('output');
+
+            // Show progress section expanded, hide results
             document.getElementById('progressSection').classList.remove('hidden');
+            document.getElementById('progressSection').classList.add('expanded');
             document.getElementById('resultsSection').classList.add('hidden');
             clearProgress();
 
@@ -1384,6 +1560,8 @@ Line 7: ERROR - Invalid input received</textarea>
         }
 
         function renderResults(data) {
+            // Collapse progress section and show results
+            document.getElementById('progressSection').classList.remove('expanded');
             document.getElementById('resultsSection').classList.remove('hidden');
 
             // Check for WASM usage across all steps
