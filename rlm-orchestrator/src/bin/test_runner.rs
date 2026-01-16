@@ -363,8 +363,8 @@ async fn run_test_suite(client: &Client, spec: BenchmarkSpec) -> Result<TestResu
     let mut consecutive_errors = 0;
 
     for q in &spec.queries {
-        let query_display = if q.query.len() > 55 {
-            format!("{}...", &q.query[..55])
+        let query_display = if q.query.chars().count() > 55 {
+            format!("{}...", q.query.chars().take(55).collect::<String>())
         } else {
             q.query.clone()
         };

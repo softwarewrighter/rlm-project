@@ -317,12 +317,9 @@ impl RlmOrchestrator {
             let response = self.pool.complete(&request, false).await?;
             let llm_ms = llm_start.elapsed().as_millis() as u64;
 
-            // Emit LLM complete with preview
-            let response_preview = if response.content.len() > 100 {
-                format!(
-                    "{}...",
-                    &response.content[..100.min(response.content.len())]
-                )
+            // Emit LLM complete with preview (UTF-8 safe truncation)
+            let response_preview = if response.content.chars().count() > 100 {
+                format!("{}...", response.content.chars().take(100).collect::<String>())
             } else {
                 response.content.clone()
             };
@@ -428,8 +425,8 @@ impl RlmOrchestrator {
                     }
                     Ok(ExecutionResult::Continue { output, sub_calls }) => {
                         let truncated_output = self.truncate_output(&output);
-                        let output_preview = if output.len() > 100 {
-                            format!("{}...", &output[..100.min(output.len())])
+                        let output_preview = if output.chars().count() > 100 {
+                            format!("{}...", output.chars().take(100).collect::<String>())
                         } else {
                             output.clone()
                         };
@@ -715,12 +712,14 @@ Note: The extracted ${{error_lines}} is passed TO the sub-LLM in the prompt.
     }
 
     fn build_prompt(&self, query: &str, context: &str, history: &[IterationRecord]) -> String {
-        // Only include first/last of context if it's large
-        let context_preview = if context.len() > 2000 {
+        // Only include first/last of context if it's large (UTF-8 safe)
+        let context_preview = if context.chars().count() > 2000 {
+            let first_500: String = context.chars().take(500).collect();
+            let last_500: String = context.chars().rev().take(500).collect::<Vec<_>>().into_iter().rev().collect();
             format!(
                 "[First 500 chars]\n{}\n\n[Last 500 chars]\n{}",
-                &context[..500.min(context.len())],
-                &context[context.len().saturating_sub(500)..]
+                first_500,
+                last_500
             )
         } else {
             context.to_string()

@@ -350,6 +350,7 @@ async fn stream_query(
         // Create a progress callback that sends events to the channel
         let tx_clone = tx.clone();
         let callback = Box::new(move |event: ProgressEvent| {
+            tracing::debug!("Progress event: {:?}", event);
             let stream_event = match event {
                 ProgressEvent::IterationStart { step } => StreamEvent::IterationStart { step },
                 ProgressEvent::LlmCallStart { step } => StreamEvent::LlmStart { step },
@@ -397,7 +398,10 @@ async fn stream_query(
                 }
             };
             // Use try_send to avoid blocking - drop events if channel is full
-            let _ = tx_clone.try_send(stream_event);
+            match tx_clone.try_send(stream_event) {
+                Ok(_) => tracing::debug!("Sent event to channel"),
+                Err(e) => tracing::warn!("Failed to send event: {:?}", e),
+            }
         });
 
         // Run the query with progress callback
@@ -438,9 +442,18 @@ async fn stream_query(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-/// Visualization page
-async fn visualize_page() -> Html<&'static str> {
-    Html(VISUALIZE_HTML)
+/// Visualization page (no caching to ensure fresh JS)
+async fn visualize_page() -> (axum::http::HeaderMap, Html<&'static str>) {
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(
+        axum::http::header::CACHE_CONTROL,
+        "no-cache, no-store, must-revalidate".parse().unwrap(),
+    );
+    headers.insert(
+        axum::http::header::PRAGMA,
+        "no-cache".parse().unwrap(),
+    );
+    (headers, Html(VISUALIZE_HTML))
 }
 
 const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
@@ -949,6 +962,11 @@ Line 7: ERROR - Invalid input received</textarea>
             document.getElementById('progressLog').innerHTML = '';
             document.getElementById('progressStatus').textContent = 'Connecting...';
             document.getElementById('progressStatus').className = 'progress-status active';
+            // Clear any existing wait timer
+            if (window.llmWaitTimer) {
+                clearInterval(window.llmWaitTimer);
+                window.llmWaitTimer = null;
+            }
         }
 
         // Example data for the dropdown
@@ -1216,9 +1234,22 @@ Line 7: ERROR - Invalid input received</textarea>
                     logProgress('🔄', `Starting iteration ${event.step}`, 'event-llm');
                     break;
                 case 'llm_start':
-                    logProgress('⏳', `Calling LLM...`, 'event-llm');
+                    logProgress('⏳', `Calling LLM... (large contexts may take minutes)`, 'event-llm');
+                    // Start a timer to show we're still waiting
+                    if (!window.llmWaitTimer) {
+                        window.llmWaitTimer = setInterval(() => {
+                            const elapsed = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
+                            document.getElementById('progressStatus').textContent = `Waiting for LLM... ${elapsed}s`;
+                        }, 1000);
+                    }
                     break;
                 case 'llm_complete':
+                    // Clear the wait timer
+                    if (window.llmWaitTimer) {
+                        clearInterval(window.llmWaitTimer);
+                        window.llmWaitTimer = null;
+                    }
+                    document.getElementById('progressStatus').textContent = 'Processing...';
                     logProgress('✓', `LLM responded (${event.duration_ms}ms)`, 'event-llm');
                     break;
                 case 'commands':

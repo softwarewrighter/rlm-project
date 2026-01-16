@@ -361,8 +361,8 @@ fn print_header(args: &CliArgs, file_size: usize, line_count: usize) {
         "{}  {}  {}",
         "│".blue(),
         "Query:".dimmed(),
-        if args.query.len() > 50 {
-            format!("{}...", &args.query[..47])
+        if args.query.chars().count() > 50 {
+            format!("{}...", args.query.chars().take(47).collect::<String>())
         } else {
             args.query.clone()
         }
