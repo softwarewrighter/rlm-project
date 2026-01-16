@@ -202,6 +202,8 @@ pub fn create_router(state: Arc<ApiState>) -> Router {
         .route("/debug", post(debug_query))
         .route("/stream", post(stream_query))
         .route("/visualize", get(visualize_page))
+        .route("/samples/war-and-peace", get(serve_war_and_peace))
+        .route("/samples/large-logs", get(serve_large_logs))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -215,6 +217,61 @@ async fn health_check(State(state): State<Arc<ApiState>>) -> Json<HealthResponse
         wasm_enabled: state.wasm_enabled,
         rust_wasm_enabled: state.rust_wasm_enabled,
     })
+}
+
+/// Serve War and Peace text file for large context demos
+async fn serve_war_and_peace() -> Result<String, (StatusCode, String)> {
+    // Try multiple possible locations
+    let paths = [
+        "/Users/mike/Downloads/war-and-peace-tolstoy-clean.txt",
+        "../demo/war-and-peace-needle.txt",
+        "demo/war-and-peace-needle.txt",
+    ];
+
+    for path in &paths {
+        if let Ok(content) = tokio::fs::read_to_string(path).await {
+            return Ok(content);
+        }
+    }
+
+    Err((StatusCode::NOT_FOUND, "War and Peace file not found".to_string()))
+}
+
+/// Generate large log data for demos
+async fn serve_large_logs() -> String {
+    let mut logs = String::with_capacity(500_000);
+    let error_types = ["AuthenticationFailed", "ConnectionTimeout", "RequestFailed", "ValidationError", "DatabaseError", "PermissionDenied", "RateLimited", "ServiceUnavailable"];
+    let ips = ["192.168.1.100", "10.0.0.50", "172.16.0.25", "10.0.0.75", "192.168.1.200", "172.16.0.30", "10.0.0.60", "192.168.1.105", "10.0.0.80", "172.16.0.40"];
+    let endpoints = ["/api/users", "/api/data", "/api/health", "/api/products", "/api/orders", "/api/auth", "/api/settings", "/api/batch"];
+    let methods = ["GET", "POST", "PUT", "DELETE"];
+
+    for i in 0..5000 {
+        let hour = 10 + (i / 360) % 14;
+        let minute = (i / 6) % 60;
+        let second = (i * 7) % 60;
+
+        let is_error = i % 7 == 0;
+        let ip = ips[i % ips.len()];
+        let endpoint = endpoints[i % endpoints.len()];
+        let method = methods[i % methods.len()];
+
+        if is_error {
+            let error_type = error_types[i % error_types.len()];
+            logs.push_str(&format!(
+                "2024-01-15 {:02}:{:02}:{:02} [ERROR] {} from {} - {} {} failed\n",
+                hour, minute, second, error_type, ip, method, endpoint
+            ));
+        } else {
+            let status = if i % 5 == 0 { "201 Created" } else { "200 OK" };
+            let ms = 10 + (i * 13) % 500;
+            logs.push_str(&format!(
+                "2024-01-15 {:02}:{:02}:{:02} [INFO] Request from {} - {} {} - {} - {}ms\n",
+                hour, minute, second, ip, method, endpoint, status, ms
+            ));
+        }
+    }
+
+    logs
 }
 
 /// Process a query
@@ -494,6 +551,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .tag.wasm { background: var(--wasm); color: #000; }
         .tag.basic { background: var(--accent); }
         .tag.aggregation { background: #7c3aed; }
+        .tag.large-context { background: #dc2626; color: #fff; }
 
         .results {
             display: grid;
@@ -754,15 +812,20 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
                 <label for="exampleSelect">Load Example</label>
                 <select id="exampleSelect" onchange="loadExample()">
                     <option value="">-- Select an example --</option>
-                    <optgroup label="Basic Commands">
-                        <option value="count_errors">Count ERROR lines</option>
-                        <option value="find_pattern">Find text pattern</option>
+                    <optgroup label="Large Context Demos">
+                        <option value="war_peace_family">War and Peace: Family Tree (3.2MB)</option>
+                        <option value="large_logs_errors">Large Logs: Error Ranking (5000 lines)</option>
+                        <option value="large_logs_ips">Large Logs: Unique IPs (5000 lines)</option>
                     </optgroup>
                     <optgroup label="WASM Use Cases">
                         <option value="wasm_unique_ips">Unique IP addresses (rust_wasm)</option>
                         <option value="wasm_error_ranking">Rank errors by frequency (rust_wasm)</option>
                         <option value="wasm_word_freq">Word frequency analysis (rust_wasm)</option>
                         <option value="wasm_response_times">Response time percentiles (rust_wasm)</option>
+                    </optgroup>
+                    <optgroup label="Basic Commands">
+                        <option value="count_errors">Count ERROR lines</option>
+                        <option value="find_pattern">Find text pattern</option>
                     </optgroup>
                 </select>
                 <div class="example-tags" id="exampleTags"></div>
@@ -889,107 +952,180 @@ Line 7: ERROR - Invalid input received</textarea>
 
         // Example data for the dropdown
         const examples = {
-            count_errors: {
-                query: "How many ERROR lines are there?",
-                context: `Line 1: INFO - System started
-Line 2: ERROR - Connection failed
-Line 3: INFO - Retrying connection
-Line 4: ERROR - Timeout occurred
-Line 5: WARNING - High memory usage
-Line 6: INFO - Connection established
-Line 7: ERROR - Invalid input received`,
-                tags: ['basic', 'count'],
-                description: 'Simple error counting using basic commands'
+            // Large context demos that load from server
+            war_peace_family: {
+                query: "Build a family tree for the main characters. Identify characters who appear multiple times and are related to each other (by blood or marriage). Show the relationships in a structured format.",
+                context: null,  // Will be loaded from /samples/war-and-peace
+                loadUrl: '/samples/war-and-peace',
+                tags: ['large-context', 'synthesis', 'literature'],
+                description: 'Analyzes 3.2MB of text to extract character relationships'
             },
-            find_pattern: {
-                query: "Find all lines containing 'Connection'",
-                context: `Line 1: INFO - System started
-Line 2: ERROR - Connection failed
-Line 3: INFO - Retrying connection
-Line 4: ERROR - Timeout occurred
-Line 5: WARNING - High memory usage
-Line 6: INFO - Connection established
-Line 7: ERROR - Invalid input received`,
-                tags: ['basic', 'search'],
-                description: 'Pattern search using find/regex commands'
+            large_logs_errors: {
+                query: "Rank the error types from most to least frequent. Show the count for each error type.",
+                context: null,  // Will be loaded from /samples/large-logs
+                loadUrl: '/samples/large-logs',
+                tags: ['large-context', 'wasm', 'aggregation'],
+                description: 'Analyzes 5000 log lines using rust_wasm HashMap'
             },
+            large_logs_ips: {
+                query: "How many unique IP addresses appear in these logs? List the top 10 most active IPs.",
+                context: null,  // Will be loaded from /samples/large-logs
+                loadUrl: '/samples/large-logs',
+                tags: ['large-context', 'wasm', 'aggregation'],
+                description: 'Extracts and counts unique IPs from 5000 log lines'
+            },
+            // WASM demos with moderate context (triggers RLM, not bypass)
             wasm_unique_ips: {
                 query: "How many unique IP addresses are in these logs?",
-                context: `2024-01-15 10:23:45 [INFO] Request from 192.168.1.100 - GET /api/users - 200 OK - 45ms
-2024-01-15 10:23:46 [ERROR] AuthenticationFailed from 10.0.0.50 - Invalid token
-2024-01-15 10:23:47 [INFO] Request from 192.168.1.100 - POST /api/data - 201 Created - 123ms
-2024-01-15 10:23:48 [WARN] ConnectionTimeout from 172.16.0.25 - Database slow
-2024-01-15 10:23:49 [INFO] Request from 10.0.0.50 - GET /api/health - 200 OK - 12ms
-2024-01-15 10:23:50 [ERROR] RequestFailed from 192.168.1.100 - Service unavailable
-2024-01-15 10:23:51 [INFO] Request from 172.16.0.25 - GET /api/users - 200 OK - 67ms
-2024-01-15 10:23:52 [ERROR] ValidationError from 10.0.0.75 - Missing required field
-2024-01-15 10:23:53 [INFO] Request from 10.0.0.75 - PUT /api/users/1 - 200 OK - 89ms
-2024-01-15 10:23:54 [ERROR] AuthenticationFailed from 192.168.1.200 - Expired session`,
+                context: generateLogContext(200),
                 tags: ['wasm', 'aggregation'],
                 description: 'Uses rust_wasm with HashSet to count unique IPs'
             },
             wasm_error_ranking: {
                 query: "Rank the error types from most to least frequent",
-                context: `2024-01-15 10:23:46 [AuthenticationFailed] from 10.0.0.50 - Invalid token
-2024-01-15 10:23:48 [ConnectionTimeout] from 172.16.0.25 - Database slow
-2024-01-15 10:23:50 [RequestFailed] from 192.168.1.100 - Service unavailable
-2024-01-15 10:23:52 [ValidationError] from 10.0.0.75 - Missing field
-2024-01-15 10:23:54 [AuthenticationFailed] from 192.168.1.200 - Expired session
-2024-01-15 10:23:56 [ConnectionTimeout] from 172.16.0.30 - Timeout
-2024-01-15 10:23:58 [AuthenticationFailed] from 10.0.0.60 - Bad credentials
-2024-01-15 10:24:00 [RequestFailed] from 192.168.1.105 - 503 error
-2024-01-15 10:24:02 [ConnectionTimeout] from 172.16.0.25 - Pool exhausted
-2024-01-15 10:24:04 [AuthenticationFailed] from 10.0.0.50 - Token revoked
-2024-01-15 10:24:06 [ValidationError] from 192.168.1.100 - Invalid format
-2024-01-15 10:24:08 [RequestFailed] from 10.0.0.75 - Gateway timeout`,
+                context: generateErrorLogs(150),
                 tags: ['wasm', 'aggregation', 'ranking'],
                 description: 'Uses rust_wasm with HashMap to count and sort error types'
             },
             wasm_word_freq: {
-                query: "What are the top 5 most common words in this text?",
-                context: `The quick brown fox jumps over the lazy dog. The dog was not amused by the fox.
-The fox tried again to jump over the dog but the dog moved away.
-A lazy afternoon with the quick fox and the lazy dog made for an interesting scene.
-The brown fox was quick but the dog was quicker this time.`,
+                query: "What are the top 10 most common words in this text?",
+                context: generateTextSample(),
                 tags: ['wasm', 'aggregation', 'text-analysis'],
                 description: 'Uses rust_wasm with HashMap for word frequency analysis'
             },
             wasm_response_times: {
                 query: "Calculate the p50, p95, and p99 response time percentiles",
-                context: `GET /api/users - 45ms
-POST /api/data - 123ms
-GET /api/health - 12ms
-GET /api/users - 67ms
-PUT /api/users/1 - 89ms
-GET /api/products - 234ms
-POST /api/orders - 456ms
-GET /api/users - 34ms
-DELETE /api/cache - 23ms
-GET /api/stats - 567ms
-POST /api/upload - 1234ms
-GET /api/download - 89ms
-PUT /api/settings - 45ms
-GET /api/config - 28ms
-POST /api/batch - 789ms`,
+                context: generateResponseTimes(300),
                 tags: ['wasm', 'statistics', 'percentiles'],
                 description: 'Uses rust_wasm to parse times and calculate percentiles'
+            },
+            // Basic demos (still larger than before)
+            count_errors: {
+                query: "How many ERROR lines are there?",
+                context: generateLogContext(100),
+                tags: ['basic', 'count'],
+                description: 'Error counting using basic commands'
+            },
+            find_pattern: {
+                query: "Find all lines containing 'AuthenticationFailed'",
+                context: generateLogContext(100),
+                tags: ['basic', 'search'],
+                description: 'Pattern search using find/regex commands'
             }
         };
 
-        function loadExample() {
+        // Generate log context with N lines
+        function generateLogContext(n) {
+            const lines = [];
+            const ips = ['192.168.1.100', '10.0.0.50', '172.16.0.25', '10.0.0.75', '192.168.1.200', '172.16.0.30', '10.0.0.60', '192.168.1.105'];
+            const endpoints = ['/api/users', '/api/data', '/api/health', '/api/products', '/api/orders'];
+            const errors = ['AuthenticationFailed', 'ConnectionTimeout', 'RequestFailed', 'ValidationError'];
+            for (let i = 0; i < n; i++) {
+                const h = 10 + Math.floor(i / 60) % 14;
+                const m = i % 60;
+                const s = (i * 7) % 60;
+                const ip = ips[i % ips.length];
+                const ep = endpoints[i % endpoints.length];
+                if (i % 5 === 0) {
+                    const err = errors[i % errors.length];
+                    lines.push(`2024-01-15 ${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')} [ERROR] ${err} from ${ip} - Request to ${ep} failed`);
+                } else {
+                    const ms = 10 + (i * 13) % 500;
+                    lines.push(`2024-01-15 ${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')} [INFO] Request from ${ip} - GET ${ep} - 200 OK - ${ms}ms`);
+                }
+            }
+            return lines.join('\n');
+        }
+
+        // Generate error-only logs
+        function generateErrorLogs(n) {
+            const lines = [];
+            const ips = ['192.168.1.100', '10.0.0.50', '172.16.0.25', '10.0.0.75', '192.168.1.200'];
+            const errors = ['AuthenticationFailed', 'ConnectionTimeout', 'RequestFailed', 'ValidationError', 'DatabaseError', 'RateLimited'];
+            const weights = [4, 3, 2, 2, 1, 1];  // AuthenticationFailed most common
+            const weighted = errors.flatMap((e, i) => Array(weights[i]).fill(e));
+            for (let i = 0; i < n; i++) {
+                const h = 10 + Math.floor(i / 60) % 14;
+                const m = i % 60;
+                const s = (i * 7) % 60;
+                const ip = ips[i % ips.length];
+                const err = weighted[(i * 7) % weighted.length];
+                lines.push(`2024-01-15 ${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')} [${err}] from ${ip} - Operation failed`);
+            }
+            return lines.join('\n');
+        }
+
+        // Generate text sample for word frequency
+        function generateTextSample() {
+            const sentences = [
+                'The quick brown fox jumps over the lazy dog.',
+                'A journey of a thousand miles begins with a single step.',
+                'To be or not to be, that is the question.',
+                'All that glitters is not gold.',
+                'The only thing we have to fear is fear itself.',
+                'In the beginning was the word, and the word was with God.',
+                'It was the best of times, it was the worst of times.',
+                'Call me Ishmael.',
+                'The quick fox ran across the field.',
+                'Happy families are all alike; every unhappy family is unhappy in its own way.'
+            ];
+            const result = [];
+            for (let i = 0; i < 50; i++) {
+                result.push(sentences[i % sentences.length]);
+            }
+            return result.join(' ');
+        }
+
+        // Generate response time logs
+        function generateResponseTimes(n) {
+            const lines = [];
+            const endpoints = ['/api/users', '/api/data', '/api/health', '/api/products', '/api/orders', '/api/batch', '/api/upload'];
+            const methods = ['GET', 'POST', 'PUT', 'DELETE'];
+            for (let i = 0; i < n; i++) {
+                const ep = endpoints[i % endpoints.length];
+                const method = methods[i % methods.length];
+                // Realistic distribution: mostly fast, some slow outliers
+                const base = 20 + (i * 7) % 100;
+                const ms = i % 20 === 0 ? base * 10 : (i % 7 === 0 ? base * 3 : base);
+                lines.push(`${method} ${ep} - ${ms}ms`);
+            }
+            return lines.join('\n');
+        }
+
+        async function loadExample() {
             const select = document.getElementById('exampleSelect');
             const example = examples[select.value];
             if (example) {
                 document.getElementById('query').value = example.query;
-                document.getElementById('context').value = example.context;
-                updateContextPreview();
 
-                // Show tags
+                // Show tags immediately
                 const tagsHtml = example.tags.map(tag => {
-                    const tagClass = tag === 'wasm' ? 'wasm' : (tag === 'aggregation' || tag === 'ranking' ? 'aggregation' : 'basic');
+                    let tagClass = 'basic';
+                    if (tag === 'wasm') tagClass = 'wasm';
+                    else if (tag === 'large-context') tagClass = 'large-context';
+                    else if (tag === 'aggregation' || tag === 'ranking') tagClass = 'aggregation';
                     return `<span class="tag ${tagClass}">${tag}</span>`;
                 }).join('');
                 document.getElementById('exampleTags').innerHTML = tagsHtml + `<span style="color: var(--muted); font-size: 0.75rem; margin-left: 8px;">${example.description}</span>`;
+
+                // Load context - either from URL or use static value
+                if (example.loadUrl) {
+                    document.getElementById('context').value = 'Loading large context...';
+                    updateContextPreview();
+                    try {
+                        const response = await fetch(example.loadUrl);
+                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                        const text = await response.text();
+                        document.getElementById('context').value = text;
+                        updateContextPreview();
+                    } catch (err) {
+                        document.getElementById('context').value = `Error loading: ${err.message}`;
+                        updateContextPreview();
+                    }
+                } else {
+                    document.getElementById('context').value = example.context;
+                    updateContextPreview();
+                }
             } else {
                 document.getElementById('exampleTags').innerHTML = '';
             }
