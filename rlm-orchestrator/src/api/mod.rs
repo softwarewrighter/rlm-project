@@ -818,22 +818,22 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             right: 15px;
             background: rgba(30, 41, 59, 0.95);
             border-radius: 8px;
-            padding: 8px 12px;
+            padding: 10px 14px;
             z-index: 10;
-            font-size: 0.85rem;
+            font-size: 18px;
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 6px;
         }
         .legend-item {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
             cursor: help;
         }
         .legend-dot {
-            width: 10px;
-            height: 10px;
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
             flex-shrink: 0;
         }
@@ -1352,23 +1352,23 @@ Line 7: ERROR - Invalid input received</textarea>
                         </div>
                     </div>
 
-                    <!-- Color legend -->
+                    <!-- Color legend (ordered by capability level) -->
                     <div class="progress-legend">
                         <div class="legend-item" title="Root LLM orchestration calls and responses">
                             <span class="legend-dot llm"></span>
                             <span class="legend-label">LLM</span>
                         </div>
-                        <div class="legend-item" title="WASM compilation and sandboxed execution (Level 2)">
-                            <span class="legend-dot wasm"></span>
-                            <span class="legend-label">WASM</span>
-                        </div>
-                        <div class="legend-item" title="Native CLI binary compilation and execution (Level 3)">
-                            <span class="legend-dot cli"></span>
-                            <span class="legend-label">CLI</span>
-                        </div>
-                        <div class="legend-item" title="DSL command execution - slice, lines, regex, etc. (Level 1)">
+                        <div class="legend-item" title="Level 1: DSL commands - slice, lines, regex, find, count">
                             <span class="legend-dot cmd"></span>
-                            <span class="legend-label">CMD</span>
+                            <span class="legend-label">L1 DSL</span>
+                        </div>
+                        <div class="legend-item" title="Level 2: WASM sandboxed execution - rust_wasm_mapreduce">
+                            <span class="legend-dot wasm"></span>
+                            <span class="legend-label">L2 WASM</span>
+                        </div>
+                        <div class="legend-item" title="Level 3: Native CLI binary - rust_cli_intent">
+                            <span class="legend-dot cli"></span>
+                            <span class="legend-label">L3 CLI</span>
                         </div>
                         <div class="legend-item" title="Iteration or query completed successfully">
                             <span class="legend-dot done"></span>
