@@ -740,6 +740,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             background: var(--bg);
             border-radius: 8px;
             padding: 12px;
+            padding-bottom: 180px;
             flex: 1;
             overflow-y: auto;
             font-size: 1rem;
@@ -761,6 +762,47 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .progress-log .event-cli { color: #a78bfa; }
         .progress-log .event-cmd { color: #7dd3fc; }
         .progress-log .event-done { color: var(--success); }
+        .progress-log .event-error { color: var(--error); }
+
+        /* Progress legend */
+        .progress-section {
+            position: relative;
+        }
+        .progress-legend {
+            position: absolute;
+            bottom: 90px;
+            right: 15px;
+            background: rgba(30, 41, 59, 0.95);
+            border-radius: 8px;
+            padding: 8px 12px;
+            z-index: 10;
+            font-size: 0.85rem;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: help;
+        }
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .legend-dot.llm { background: var(--highlight); }
+        .legend-dot.wasm { background: var(--wasm); }
+        .legend-dot.cli { background: #a78bfa; }
+        .legend-dot.cmd { background: #7dd3fc; }
+        .legend-dot.done { background: var(--success); }
+        .legend-dot.error { background: var(--error); }
+        .legend-label {
+            color: var(--muted);
+            white-space: nowrap;
+        }
 
         /* Results section */
         .results-section {
@@ -1175,8 +1217,8 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             <h3>⚙️ Display Settings</h3>
             <div class="setting-row">
                 <label>Font Size</label>
-                <input type="range" id="fontSizeSlider" min="12" max="24" value="16" oninput="updateFontSize(this.value)">
-                <span id="fontSizeValue" class="setting-value">16px</span>
+                <input type="range" id="fontSizeSlider" min="12" max="24" value="20" oninput="updateFontSize(this.value)">
+                <span id="fontSizeValue" class="setting-value">20px</span>
             </div>
         </div>
 
@@ -1248,6 +1290,34 @@ Line 7: ERROR - Invalid input received</textarea>
                         <div class="waiting-message">
                             <h2>Ready to run</h2>
                             <p>Click "Run RLM Query" to start processing</p>
+                        </div>
+                    </div>
+
+                    <!-- Color legend -->
+                    <div class="progress-legend">
+                        <div class="legend-item" title="Root LLM orchestration calls and responses">
+                            <span class="legend-dot llm"></span>
+                            <span class="legend-label">LLM</span>
+                        </div>
+                        <div class="legend-item" title="WASM compilation and sandboxed execution (Level 2)">
+                            <span class="legend-dot wasm"></span>
+                            <span class="legend-label">WASM</span>
+                        </div>
+                        <div class="legend-item" title="Native CLI binary compilation and execution (Level 3)">
+                            <span class="legend-dot cli"></span>
+                            <span class="legend-label">CLI</span>
+                        </div>
+                        <div class="legend-item" title="DSL command execution - slice, lines, regex, etc. (Level 1)">
+                            <span class="legend-dot cmd"></span>
+                            <span class="legend-label">CMD</span>
+                        </div>
+                        <div class="legend-item" title="Iteration or query completed successfully">
+                            <span class="legend-dot done"></span>
+                            <span class="legend-label">Done</span>
+                        </div>
+                        <div class="legend-item" title="Error occurred during processing">
+                            <span class="legend-dot error"></span>
+                            <span class="legend-label">Error</span>
                         </div>
                     </div>
                 </div>
@@ -1336,7 +1406,7 @@ Line 7: ERROR - Invalid input received</textarea>
         document.addEventListener('DOMContentLoaded', () => {
             updateContextStats();
             // Load saved font size
-            const savedFontSize = localStorage.getItem('rlmFontSize') || '16';
+            const savedFontSize = localStorage.getItem('rlmFontSize') || '20';
             updateFontSize(savedFontSize);
             document.getElementById('fontSizeSlider').value = savedFontSize;
             // Add Esc key listener to close modal and settings
