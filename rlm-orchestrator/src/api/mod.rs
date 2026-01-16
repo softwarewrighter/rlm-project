@@ -2,7 +2,7 @@
 
 use crate::orchestrator::{IterationRecord, ProgressEvent, RlmOrchestrator, RlmResult};
 use axum::{
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::StatusCode,
     response::{
         sse::{Event, KeepAlive, Sse},
@@ -204,6 +204,7 @@ pub fn create_router(state: Arc<ApiState>) -> Router {
         .route("/visualize", get(visualize_page))
         .route("/samples/war-and-peace", get(serve_war_and_peace))
         .route("/samples/large-logs", get(serve_large_logs))
+        .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10MB for large contexts
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
