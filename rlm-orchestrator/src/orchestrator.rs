@@ -658,9 +658,16 @@ impl RlmOrchestrator {
         if self.config.wasm.enabled {
             commands_section.push_str(r#"
 ### Level 2: WASM Computation (sandboxed code execution) [ENABLED]
-- {{"op": "rust_wasm_intent", "intent": "what to compute", "store": "result"}}
-- {{"op": "rust_wasm_mapreduce", "intent": "extract key-value pairs", "combiner": "count"}}
-  Use for: Counting, frequency analysis, aggregation (sandboxed, fuel-limited)
+- {{"op": "rust_wasm_mapreduce", "intent": "DESCRIPTION", "combiner": "count|unique|sum", "store": "result"}}
+  combiner options: "count" (frequency), "unique" (distinct items), "sum" (totals)
+
+IMPORTANT WASM GUIDANCE:
+- Keep the "intent" description SIMPLE and SPECIFIC
+- ALWAYS describe WHERE in the line to find the data (e.g., "after 'from '")
+- For IP addresses: "Extract the word after 'from ' from each line" (IPs follow "from " in logs)
+- For error types: "Extract the word after '[ERROR]' from each line"
+- For HTTP codes: "Extract the word after 'HTTP/1.1\"' from each line"
+- The combiner handles aggregation - just describe what to EXTRACT per line
 "#);
         }
 
@@ -702,14 +709,23 @@ impl RlmOrchestrator {
             r#"
 ## Workflow
 1. **Simple queries**: Use find/regex/lines to extract, then final
-2. **Aggregation/analysis**: Use rust_wasm_mapreduce for counting, ranking
-3. **Semantic analysis**: Extract content first, then use llm_query
+2. **Counting unique items**: Use rust_wasm_mapreduce with combiner="unique"
+3. **Counting frequencies**: Use rust_wasm_mapreduce with combiner="count"
 
-## Example: Frequency Analysis (use rust_wasm_mapreduce)
+## Examples
 
+Count unique IP addresses (in logs where IPs follow "from "):
 ```json
-{{"op": "rust_wasm_mapreduce", "intent": "Extract error type from each [ERROR] line", "combiner": "count", "store": "counts"}}
-{{"op": "final_var", "name": "counts"}}
+{{"op": "rust_wasm_mapreduce", "intent": "Extract the word after 'from ' from each line", "combiner": "unique", "store": "unique_ips"}}
+```
+Then finish with:
+```json
+{{"op": "final_var", "name": "unique_ips"}}
+```
+
+Count error type frequencies:
+```json
+{{"op": "rust_wasm_mapreduce", "intent": "Extract the word after '[ERROR]' from each line", "combiner": "count", "store": "counts"}}
 ```"#
         } else {
             r#"
@@ -747,11 +763,15 @@ Use the LOWEST level that can accomplish the task.
 - {{"op": "final_var", "name": "result"}} - Output a computed variable (PREFERRED!)
 {workflow}
 
-## Important Notes
+## CRITICAL: Command Format
+- Output ONE command per response (only the first JSON block is executed)
+- After each command, wait for its output before issuing the next command
 - Variables persist across iterations
+
+## Important Notes
 - Always use `store` to save results you need later
-- Wrap commands in ```json blocks
-- Use final_var for computed results"#,
+- Use final_var for computed results
+- If WASM fails, simplify the intent description"#,
             context_len = context_len,
             dsl_status = dsl_status,
             wasm_status = wasm_status,

@@ -24,6 +24,7 @@ pub struct ApiState {
     pub orchestrator: Arc<RlmOrchestrator>,
     pub wasm_enabled: bool,
     pub rust_wasm_enabled: bool,
+    pub root_provider_name: String,
 }
 
 /// Request to process a query
@@ -479,7 +480,7 @@ async fn stream_query(
 }
 
 /// Visualization page (no caching to ensure fresh JS)
-async fn visualize_page() -> (axum::http::HeaderMap, Html<&'static str>) {
+async fn visualize_page(State(state): State<Arc<ApiState>>) -> (axum::http::HeaderMap, Html<String>) {
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(
         axum::http::header::CACHE_CONTROL,
@@ -489,7 +490,9 @@ async fn visualize_page() -> (axum::http::HeaderMap, Html<&'static str>) {
         axum::http::header::PRAGMA,
         "no-cache".parse().unwrap(),
     );
-    (headers, Html(VISUALIZE_HTML))
+    // Fill in the root provider name
+    let html = VISUALIZE_HTML.replace("{root_provider}", &state.root_provider_name);
+    (headers, Html(html))
 }
 
 const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
@@ -503,13 +506,20 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             --bg: #1a1a2e;
             --card: #16213e;
             --accent: #0f3460;
-            --highlight: #e94560;
+            --highlight: #3b82f6;
             --text: #eee;
             --muted: #888;
-            --success: #4ade80;
-            --error: #f87171;
-            --wasm: #f59e0b;
+            --success: #2ca02c;
+            --error: #d62728;
             --progress: #3b82f6;
+            /* D3.js-style categorical palette for distinct colors */
+            --color-llm: #1f77b4;      /* Blue - root LLM */
+            --color-dsl: #17becf;      /* Cyan - L1 DSL */
+            --color-wasm: #ff7f0e;     /* Orange - L2 WASM */
+            --color-cli: #9467bd;      /* Purple - L3 CLI */
+            --color-llm4: #e377c2;     /* Pink - L4 LLM delegation */
+            --color-done: #2ca02c;     /* Green - success */
+            --color-error: #d62728;    /* Red - error */
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html, body {
@@ -637,7 +647,9 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             text-transform: uppercase;
             font-weight: 600;
         }
-        .tag.wasm { background: var(--wasm); color: #000; }
+        .tag.dsl { background: #34d399; color: #000; }
+        .tag.wasm { background: var(--color-wasm); color: #000; }
+        .tag.combined { background: #8b5cf6; color: #fff; }
         .tag.basic { background: var(--accent); }
         .tag.aggregation { background: #7c3aed; }
         .tag.large-context { background: #dc2626; color: #fff; }
@@ -663,10 +675,13 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             flex: 1;
         }
         .example-info-label {
-            font-size: 0.9rem;
+            font-size: 1rem;
             color: var(--muted);
             text-transform: uppercase;
             margin-bottom: 4px;
+            cursor: help;
+            border-bottom: 1px dotted var(--muted);
+            display: inline-block;
         }
         .example-info-value {
             font-size: 1.1rem;
@@ -693,7 +708,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             flex-shrink: 0;
         }
         .query-col {
-            width: 300px;
+            width: 100%;
             flex-shrink: 0;
         }
         label {
@@ -756,6 +771,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             padding: 15px;
             margin-bottom: 15px;
             flex-shrink: 0;
+            position: relative;
         }
         .progress-section.expanded {
             flex: 1;
@@ -775,16 +791,26 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             text-transform: uppercase;
             letter-spacing: 1px;
         }
+        .progress-query {
+            flex: 1;
+            font-size: 0.9rem;
+            color: var(--muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin: 0 15px;
+            font-style: italic;
+        }
         .progress-status {
             font-size: 1rem;
             color: var(--muted);
+            flex-shrink: 0;
         }
         .progress-status.active { color: var(--progress); }
         .progress-log {
             background: var(--bg);
             border-radius: 8px;
             padding: 12px;
-            padding-bottom: 180px;
             flex: 1;
             overflow-y: auto;
             font-size: 1rem;
@@ -801,29 +827,27 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             min-width: 60px;
         }
         .progress-log .event-icon { min-width: 20px; }
-        .progress-log .event-llm { color: var(--highlight); }
-        .progress-log .event-wasm { color: var(--wasm); }
-        .progress-log .event-cli { color: #a78bfa; }
-        .progress-log .event-cmd { color: #7dd3fc; }
-        .progress-log .event-done { color: var(--success); }
-        .progress-log .event-error { color: var(--error); }
+        .progress-log .event-llm { color: var(--color-llm); }
+        .progress-log .event-wasm { color: var(--color-wasm); }
+        .progress-log .event-cli { color: var(--color-cli); }
+        .progress-log .event-cmd { color: var(--color-dsl); }
+        .progress-log .event-done { color: var(--color-done); }
+        .progress-log .event-error { color: var(--color-error); }
 
-        /* Progress legend */
-        .progress-section {
-            position: relative;
-        }
+        /* Progress legend - absolute position at bottom-right of progress section */
         .progress-legend {
             position: absolute;
-            bottom: 90px;
-            right: 15px;
-            background: rgba(30, 41, 59, 0.95);
+            bottom: 25px;
+            right: 25px;
+            background: rgba(30, 41, 59, 0.98);
             border-radius: 8px;
             padding: 10px 14px;
-            z-index: 10;
-            font-size: 18px;
+            z-index: 100;
+            font-size: 1rem;
             display: flex;
             flex-direction: column;
             gap: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         }
         .legend-item {
             display: flex;
@@ -837,15 +861,55 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             border-radius: 50%;
             flex-shrink: 0;
         }
-        .legend-dot.llm { background: var(--highlight); }
-        .legend-dot.wasm { background: var(--wasm); }
-        .legend-dot.cli { background: #a78bfa; }
-        .legend-dot.cmd { background: #7dd3fc; }
-        .legend-dot.done { background: var(--success); }
-        .legend-dot.error { background: var(--error); }
+        .legend-dot.llm { background: var(--color-llm); }
+        .legend-dot.cmd { background: var(--color-dsl); }
+        .legend-dot.wasm { background: var(--color-wasm); }
+        .legend-dot.cli { background: var(--color-cli); }
+        .legend-dot.llm4 { background: var(--color-llm4); }
+        .legend-dot.done { background: var(--color-done); }
+        .legend-dot.error { background: var(--color-error); }
+        /* Legend text matches bullet color */
+        .legend-item.llm .legend-label { color: var(--color-llm); }
+        .legend-item.dsl .legend-label { color: var(--color-dsl); }
+        .legend-item.wasm .legend-label { color: var(--color-wasm); }
+        .legend-item.cli .legend-label { color: var(--color-cli); }
+        .legend-item.llm4 .legend-label { color: var(--color-llm4); }
+        .legend-item.done .legend-label { color: var(--color-done); }
+        .legend-item.error .legend-label { color: var(--color-error); }
         .legend-label {
-            color: var(--muted);
             white-space: nowrap;
+        }
+        /* Custom tooltips */
+        .has-tooltip {
+            position: relative;
+        }
+        .has-tooltip .tooltip {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 1rem;
+            white-space: nowrap;
+            margin-bottom: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            border: 1px solid #334155;
+            z-index: 1000;
+        }
+        .has-tooltip:hover .tooltip {
+            display: block;
+        }
+        .legend-item {
+            position: relative;
+        }
+        .legend-item .tooltip {
+            left: auto;
+            right: 0;
+            white-space: normal;
+            width: 280px;
         }
 
         /* Results section */
@@ -868,13 +932,13 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             padding: 10px 15px;
             border-radius: 8px;
         }
-        .stat.wasm-stat { border: 2px solid var(--wasm); }
+        .stat.wasm-stat { border: 2px solid var(--color-wasm); }
         .stat-value {
             font-size: 1.3rem;
             font-weight: bold;
             color: var(--highlight);
         }
-        .stat-value.wasm { color: var(--wasm); }
+        .stat-value.wasm { color: var(--color-wasm); }
         .stat-label {
             font-size: 1rem;
             color: var(--muted);
@@ -936,7 +1000,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         }
         .step.has-error { border-left-color: var(--error); }
         .step.is-final { border-left-color: var(--success); }
-        .step.has-wasm { border-left-color: var(--wasm); }
+        .step.has-wasm { border-left-color: var(--color-wasm); }
         .step-number {
             font-weight: bold;
             color: var(--highlight);
@@ -958,7 +1022,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             font-size: 1rem;
             font-weight: 600;
         }
-        .badge.wasm { background: var(--wasm); color: #000; }
+        .badge.wasm { background: var(--color-wasm); color: #000; }
 
         .detail-panel {
             background: var(--card);
@@ -976,7 +1040,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             text-transform: uppercase;
             letter-spacing: 1px;
         }
-        .detail-section h3.wasm-title { color: var(--wasm); }
+        .detail-section h3.wasm-title { color: var(--color-wasm); }
         .code-block {
             background: var(--bg);
             border-radius: 8px;
@@ -992,7 +1056,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .code-block.json { color: #7dd3fc; }
         .code-block.output { color: #a5f3fc; }
         .code-block.error { color: var(--error); }
-        .code-block.rust { color: var(--wasm); }
+        .code-block.rust { color: var(--color-wasm); }
 
         .hidden { display: none !important; }
 
@@ -1001,11 +1065,11 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             border-radius: 8px;
             padding: 10px 15px;
             margin-bottom: 15px;
-            border: 1px solid var(--wasm);
+            border: 1px solid var(--color-wasm);
             flex-shrink: 0;
         }
         .wasm-info h3 {
-            color: var(--wasm);
+            color: var(--color-wasm);
             margin-bottom: 5px;
             font-size: 1rem;
         }
@@ -1031,7 +1095,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         }
         .flow-node.query { background: var(--highlight); }
         .flow-node.final { background: #065f46; }
-        .flow-node.wasm { background: var(--wasm); color: #000; }
+        .flow-node.wasm { background: var(--color-wasm); color: #000; }
         .flow-arrow {
             color: var(--muted);
             font-size: 1rem;
@@ -1261,7 +1325,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             <h3>⚙️ Display Settings</h3>
             <div class="setting-row">
                 <label>Font Size</label>
-                <input type="range" id="fontSizeSlider" min="12" max="24" value="20" oninput="updateFontSize(this.value)">
+                <input type="range" id="fontSizeSlider" min="16" max="40" value="20" oninput="updateFontSize(this.value)">
                 <span id="fontSizeValue" class="setting-value">20px</span>
             </div>
         </div>
@@ -1279,44 +1343,77 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
                     <label for="exampleSelect">Load Example</label>
                     <select id="exampleSelect" onchange="loadExample()">
                         <option value="">-- Select an example --</option>
-                        <optgroup label="Large Context Demos">
-                            <option value="war_peace_family">War and Peace: Family Tree (3.2MB)</option>
+                        <optgroup label="Level 1: DSL (Easy - Text Operations)">
+                            <option value="count_errors" selected>Count ERROR lines</option>
+                            <option value="find_pattern">Find text pattern</option>
+                            <option value="dsl_slice_lines">Extract line range</option>
+                        </optgroup>
+                        <optgroup label="Level 2: WASM (Medium - Computation)">
+                            <option value="wasm_unique_ips">Count unique IP addresses</option>
+                            <option value="wasm_error_ranking">Rank errors by frequency</option>
+                            <option value="wasm_word_freq">Word frequency analysis</option>
+                            <option value="wasm_response_times">Response time percentiles</option>
+                        </optgroup>
+                        <optgroup label="Level 2: WASM (Large Context)">
                             <option value="large_logs_errors">Large Logs: Error Ranking (5000 lines)</option>
                             <option value="large_logs_ips">Large Logs: Unique IPs (5000 lines)</option>
                         </optgroup>
-                        <optgroup label="WASM Use Cases">
-                            <option value="wasm_unique_ips">Unique IP addresses (rust_wasm)</option>
-                            <option value="wasm_error_ranking">Rank errors by frequency (rust_wasm)</option>
-                            <option value="wasm_word_freq">Word frequency analysis (rust_wasm)</option>
-                            <option value="wasm_response_times">Response time percentiles (rust_wasm)</option>
-                        </optgroup>
-                        <optgroup label="Basic Commands">
-                            <option value="count_errors">Count ERROR lines</option>
-                            <option value="find_pattern">Find text pattern</option>
+                        <optgroup label="Combined (Advanced - Not Yet Implemented)">
+                            <option value="war_peace_family">War and Peace: Family Tree (3.2MB)</option>
                         </optgroup>
                     </select>
                     <div class="example-tags" id="exampleTags"></div>
 
                     <!-- Example info panel -->
-                    <div id="exampleInfo" class="example-info">
+                    <div id="exampleInfo" class="example-info visible">
                         <div class="example-info-row">
                             <div class="example-info-item">
-                                <div class="example-info-label">Problem Type</div>
-                                <div id="infoBenchmark" class="example-info-value benchmark">-</div>
+                                <div class="example-info-label has-tooltip">
+                                    Problem Type
+                                    <span class="tooltip">RLM Paper Problem Types</span>
+                                </div>
+                                <div id="infoBenchmark" class="example-info-value benchmark has-tooltip">
+                                    Simple NIAH
+                                    <span id="infoBenchmarkTooltip" class="tooltip">NIAH = Needle-in-a-Haystack: Find specific information in large input data</span>
+                                </div>
                             </div>
                             <div class="example-info-item">
-                                <div class="example-info-label">Capability Levels</div>
-                                <div id="infoLevel" class="example-info-value level">-</div>
+                                <div class="example-info-label has-tooltip">
+                                    Capability Level
+                                    <span class="tooltip">L1=DSL text ops, L2=WASM sandboxed, L3=CLI native binary, L4=LLM delegation</span>
+                                </div>
+                                <div id="infoLevel" class="example-info-value level has-tooltip">
+                                    Level 1 (DSL)
+                                    <span id="infoLevelTooltip" class="tooltip">DSL: slice, lines, regex, find, count, split, len - fast text operations</span>
+                                </div>
+                            </div>
+                            <div class="example-info-item">
+                                <div class="example-info-label has-tooltip">
+                                    Max Iterations
+                                    <span class="tooltip">Maximum LLM rounds before timeout. DSL tasks: 3-5, WASM: 10, Large input: 15-20</span>
+                                </div>
+                                <div id="infoMaxIter" class="example-info-value" style="color: #fbbf24;">
+                                    5
+                                </div>
+                            </div>
+                            <div class="example-info-item">
+                                <div class="example-info-label has-tooltip">
+                                    Root LLM
+                                    <span class="tooltip">The primary LLM used for orchestration and decision-making</span>
+                                </div>
+                                <div id="infoRootLlm" class="example-info-value" style="color: #1f77b4;">
+                                    {root_provider}
+                                </div>
                             </div>
                         </div>
-                        <div id="infoDesc" class="example-info-desc"></div>
+                        <div id="infoDesc" class="example-info-desc">Simple NIAH: Pattern counting. Uses regex/find commands for deterministic O(n) search.</div>
                     </div>
                 </div>
 
                 <div class="input-row">
                     <div class="query-col">
                         <label for="query">Query</label>
-                        <textarea id="query" placeholder="What do you want to know about the data?">How many ERROR lines are there?</textarea>
+                        <textarea id="query" placeholder="What do you want to know about the data?">How many ERROR lines are there? Use only DSL commands (regex, find, count, lines).</textarea>
                     </div>
                 </div>
 
@@ -1343,6 +1440,7 @@ Line 7: ERROR - Invalid input received</textarea>
                 <div id="progressSection" class="progress-section expanded">
                     <div class="progress-header">
                         <h2>Live Progress</h2>
+                        <span id="progressQuery" class="progress-query"></span>
                         <span id="progressStatus" class="progress-status">Waiting...</span>
                     </div>
                     <div id="progressLog" class="progress-log">
@@ -1351,32 +1449,42 @@ Line 7: ERROR - Invalid input received</textarea>
                             <p>Click "Run RLM Query" to start processing</p>
                         </div>
                     </div>
-
-                    <!-- Color legend (ordered by capability level) -->
+                    <!-- Color legend (positioned at bottom of visible area) -->
                     <div class="progress-legend">
-                        <div class="legend-item" title="Root LLM orchestration calls and responses">
+                        <div class="legend-item llm has-tooltip">
                             <span class="legend-dot llm"></span>
                             <span class="legend-label">LLM</span>
+                            <span class="tooltip">Root LLM: Orchestration calls to the main language model</span>
                         </div>
-                        <div class="legend-item" title="Level 1: DSL commands - slice, lines, regex, find, count">
+                        <div class="legend-item dsl has-tooltip">
                             <span class="legend-dot cmd"></span>
                             <span class="legend-label">L1 DSL</span>
+                            <span class="tooltip">Level 1 DSL: Text commands like slice, lines, regex, find, count</span>
                         </div>
-                        <div class="legend-item" title="Level 2: WASM sandboxed execution - rust_wasm_mapreduce">
+                        <div class="legend-item wasm has-tooltip">
                             <span class="legend-dot wasm"></span>
                             <span class="legend-label">L2 WASM</span>
+                            <span class="tooltip">Level 2 WASM: Sandboxed Rust code execution via WebAssembly</span>
                         </div>
-                        <div class="legend-item" title="Level 3: Native CLI binary - rust_cli_intent">
+                        <div class="legend-item cli has-tooltip">
                             <span class="legend-dot cli"></span>
                             <span class="legend-label">L3 CLI</span>
+                            <span class="tooltip">Level 3 CLI: Native Rust binary execution (no sandbox)</span>
                         </div>
-                        <div class="legend-item" title="Iteration or query completed successfully">
+                        <div class="legend-item llm4 has-tooltip">
+                            <span class="legend-dot llm4"></span>
+                            <span class="legend-label">L4 LLM</span>
+                            <span class="tooltip">Level 4 LLM: Delegated calls to sub-LLMs for chunk analysis</span>
+                        </div>
+                        <div class="legend-item done has-tooltip">
                             <span class="legend-dot done"></span>
                             <span class="legend-label">Done</span>
+                            <span class="tooltip">Query iteration or final answer completed successfully</span>
                         </div>
-                        <div class="legend-item" title="Error occurred during processing">
+                        <div class="legend-item error has-tooltip">
                             <span class="legend-dot error"></span>
                             <span class="legend-label">Error</span>
+                            <span class="tooltip">An error occurred during command execution</span>
                         </div>
                     </div>
                 </div>
@@ -1412,7 +1520,7 @@ Line 7: ERROR - Invalid input received</textarea>
                     </div>
                     <div class="stat">
                         <div class="stat-value" id="modalStatContext">-</div>
-                        <div class="stat-label">Context Chars</div>
+                        <div class="stat-label">Input Chars</div>
                     </div>
                     <div class="stat wasm-stat" id="modalStatWasm" style="display: none;">
                         <div class="stat-value wasm">-</div>
@@ -1463,11 +1571,15 @@ Line 7: ERROR - Invalid input received</textarea>
 
         // Initialize on load
         document.addEventListener('DOMContentLoaded', () => {
-            updateContextStats();
             // Load saved font size
             const savedFontSize = localStorage.getItem('rlmFontSize') || '20';
             updateFontSize(savedFontSize);
             document.getElementById('fontSizeSlider').value = savedFontSize;
+
+            // Load default example (count_errors is selected by default)
+            document.getElementById('exampleSelect').value = 'count_errors';
+            loadExample();
+
             // Add Esc key listener to close modal and settings
             document.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape') {
@@ -1585,7 +1697,7 @@ Line 7: ERROR - Invalid input received</textarea>
                 return `<div class="step${stepClass}" onclick="showModalStep(${i})">
                     <div class="step-number">Step ${step.step}</div>
                     <div class="step-meta">
-                        ${step.commands ? (isWasm ? 'rust_wasm executed' : 'Commands executed') : 'No commands'}
+                        ${step.commands ? formatCommandTypes(step.commands) : 'No commands'}
                         ${step.sub_calls > 0 ? ` • ${step.sub_calls} sub-calls` : ''}
                         ${hasError ? ' • Error' : ''}
                     </div>
@@ -1699,42 +1811,48 @@ Line 7: ERROR - Invalid input received</textarea>
 
         // Example data for the dropdown with paper benchmark categories
         const examples = {
-            // Large context demos - S-NIAH (Semantic Needle-in-a-Haystack) category
-            war_peace_family: {
-                query: "Build a family tree for the main characters. Identify characters who appear multiple times and are related to each other (by blood or marriage). Show the relationships in a structured format.",
-                context: null,
-                loadUrl: '/samples/war-and-peace',
-                tags: ['large-context', 'synthesis', 'literature'],
-                benchmark: 'S-NIAH',
-                level: 'Level 1 (DSL) + Level 2 (WASM)',
-                description: 'S-NIAH: Find scattered character mentions in 3.2MB text. Uses slice/lines to navigate, then WASM for relationship extraction.'
+            // ========================================
+            // LEVEL 1: DSL (Easy - Text Operations)
+            // ========================================
+            count_errors: {
+                query: "How many ERROR lines are there? Use only DSL commands (regex, find, count, lines).",
+                context: generateLogContext(100),
+                tags: ['dsl', 'count'],
+                benchmark: 'Simple NIAH',
+                level: 'Level 1 (DSL)',
+                maxIterations: 5,
+                description: 'Simple NIAH: Pattern counting. Uses regex/find commands for deterministic O(n) search.'
             },
-            large_logs_errors: {
-                query: "Rank the error types from most to least frequent. Show the count for each error type.",
-                context: null,
-                loadUrl: '/samples/large-logs',
-                tags: ['large-context', 'wasm', 'aggregation'],
-                benchmark: 'BrowseComp-Plus',
-                level: 'Level 2 (WASM)',
-                description: 'BrowseComp-Plus: Aggregate error types from 5000 log lines. Uses rust_wasm_mapreduce for HashMap counting.'
+            find_pattern: {
+                query: "Find all lines containing 'AuthenticationFailed'. Use only DSL commands (find, regex, lines).",
+                context: generateLogContext(100),
+                tags: ['dsl', 'search'],
+                benchmark: 'Simple NIAH',
+                level: 'Level 1 (DSL)',
+                maxIterations: 5,
+                description: 'Simple NIAH: Pattern search. Uses find command for exact string matching.'
             },
-            large_logs_ips: {
-                query: "How many unique IP addresses appear in these logs? List the top 10 most active IPs.",
-                context: null,
-                loadUrl: '/samples/large-logs',
-                tags: ['large-context', 'wasm', 'aggregation'],
-                benchmark: 'BrowseComp-Plus',
-                level: 'Level 2 (WASM)',
-                description: 'BrowseComp-Plus: Extract and rank unique IPs. Uses rust_wasm with HashSet for uniqueness, HashMap for counts.'
+            dsl_slice_lines: {
+                query: "Extract lines 10 through 20 from this data. Use only DSL commands (slice, lines).",
+                context: generateLogContext(50),
+                tags: ['dsl', 'slice'],
+                benchmark: 'Simple NIAH',
+                level: 'Level 1 (DSL)',
+                maxIterations: 3,
+                description: 'Simple NIAH: Line extraction. Uses slice/lines commands for O(1) range access.'
             },
-            // WASM demos - OOLONG category (operations over long contexts)
+
+            // ========================================
+            // LEVEL 2: WASM (Medium - Computation)
+            // ========================================
             wasm_unique_ips: {
                 query: "How many unique IP addresses are in these logs?",
                 context: generateLogContext(200),
                 tags: ['wasm', 'aggregation'],
                 benchmark: 'OOLONG',
                 level: 'Level 2 (WASM)',
-                description: 'OOLONG: Count unique items in structured data. Uses rust_wasm_intent with HashSet for O(1) uniqueness.'
+                maxIterations: 10,
+                description: 'OOLONG: Count unique items. Uses rust_wasm_intent with HashSet for O(1) uniqueness.'
             },
             wasm_error_ranking: {
                 query: "Rank the error types from most to least frequent",
@@ -1742,7 +1860,8 @@ Line 7: ERROR - Invalid input received</textarea>
                 tags: ['wasm', 'aggregation', 'ranking'],
                 benchmark: 'OOLONG',
                 level: 'Level 2 (WASM)',
-                description: 'OOLONG: Frequency ranking task. Uses rust_wasm_mapreduce for map (extract) then reduce (count+sort).'
+                maxIterations: 10,
+                description: 'OOLONG: Frequency ranking. Uses rust_wasm_mapreduce for map (extract) then reduce (count+sort).'
             },
             wasm_word_freq: {
                 query: "What are the top 10 most common words in this text?",
@@ -1750,7 +1869,8 @@ Line 7: ERROR - Invalid input received</textarea>
                 tags: ['wasm', 'aggregation', 'text-analysis'],
                 benchmark: 'OOLONG',
                 level: 'Level 2 (WASM)',
-                description: 'OOLONG: Word frequency analysis. Uses rust_wasm with HashMap for counting, then sorting by frequency.'
+                maxIterations: 10,
+                description: 'OOLONG: Word frequency analysis. Uses rust_wasm with HashMap for counting, then sorting.'
             },
             wasm_response_times: {
                 query: "Calculate the p50, p95, and p99 response time percentiles",
@@ -1758,24 +1878,46 @@ Line 7: ERROR - Invalid input received</textarea>
                 tags: ['wasm', 'statistics', 'percentiles'],
                 benchmark: 'OOLONG',
                 level: 'Level 2 (WASM)',
-                description: 'OOLONG: Statistical computation. Uses rust_wasm to parse, collect into Vec, sort, and compute percentiles.'
+                maxIterations: 10,
+                description: 'OOLONG: Statistical computation. Uses rust_wasm to parse, sort, and compute percentiles.'
             },
-            // Basic demos - Simple NIAH category
-            count_errors: {
-                query: "How many ERROR lines are there?",
-                context: generateLogContext(100),
-                tags: ['basic', 'count'],
-                benchmark: 'Simple NIAH',
-                level: 'Level 1 (DSL)',
-                description: 'Simple NIAH: Pattern counting. Uses regex/find commands for deterministic O(n) search.'
+
+            // ========================================
+            // LEVEL 2: WASM (Large Context)
+            // ========================================
+            large_logs_errors: {
+                query: "Rank the error types from most to least frequent. Show the count for each error type.",
+                context: null,
+                loadUrl: '/samples/large-logs',
+                tags: ['wasm', 'large-context', 'aggregation'],
+                benchmark: 'BrowseComp-Plus',
+                level: 'Level 2 (WASM)',
+                maxIterations: 15,
+                description: 'BrowseComp-Plus: Aggregate error types from 5000 log lines. Uses rust_wasm_mapreduce.'
             },
-            find_pattern: {
-                query: "Find all lines containing 'AuthenticationFailed'",
-                context: generateLogContext(100),
-                tags: ['basic', 'search'],
-                benchmark: 'Simple NIAH',
-                level: 'Level 1 (DSL)',
-                description: 'Simple NIAH: Pattern search. Uses find command for exact string matching.'
+            large_logs_ips: {
+                query: "How many unique IP addresses appear in these logs? List the top 10 most active IPs.",
+                context: null,
+                loadUrl: '/samples/large-logs',
+                tags: ['wasm', 'large-context', 'aggregation'],
+                benchmark: 'BrowseComp-Plus',
+                level: 'Level 2 (WASM)',
+                maxIterations: 15,
+                description: 'BrowseComp-Plus: Extract and rank unique IPs. Uses rust_wasm with HashSet/HashMap.'
+            },
+
+            // ========================================
+            // COMBINED (Advanced - Not Yet Implemented)
+            // ========================================
+            war_peace_family: {
+                query: "Build a family tree for the main characters. Identify characters who appear multiple times and are related to each other (by blood or marriage). Show the relationships in a structured format.",
+                context: null,
+                loadUrl: '/samples/war-and-peace',
+                tags: ['combined', 'large-context', 'synthesis'],
+                benchmark: 'S-NIAH',
+                level: 'Level 1 + Level 2',
+                maxIterations: 20,
+                description: 'S-NIAH: Find scattered character mentions in 3.2MB text. NOT YET IMPLEMENTED.'
             }
         };
 
@@ -1866,7 +2008,9 @@ Line 7: ERROR - Invalid input received</textarea>
                 // Show tags with benchmark and level info
                 const tagsHtml = example.tags.map(tag => {
                     let tagClass = 'basic';
-                    if (tag === 'wasm') tagClass = 'wasm';
+                    if (tag === 'dsl') tagClass = 'dsl';
+                    else if (tag === 'wasm') tagClass = 'wasm';
+                    else if (tag === 'combined') tagClass = 'combined';
                     else if (tag === 'large-context') tagClass = 'large-context';
                     else if (tag === 'aggregation' || tag === 'ranking') tagClass = 'aggregation';
                     return `<span class="tag ${tagClass}">${tag}</span>`;
@@ -1877,8 +2021,45 @@ Line 7: ERROR - Invalid input received</textarea>
                 // Show example info panel
                 const infoPanel = document.getElementById('exampleInfo');
                 infoPanel.classList.add('visible');
-                document.getElementById('infoBenchmark').textContent = example.benchmark || 'General';
-                document.getElementById('infoLevel').textContent = example.level || 'Level 1 (DSL)';
+
+                // Set benchmark with appropriate tooltip
+                const benchmark = example.benchmark || 'General';
+                const benchmarkEl = document.getElementById('infoBenchmark');
+                const tooltipEl = document.getElementById('infoBenchmarkTooltip');
+
+                // Update text (keep first text node, tooltip is separate)
+                benchmarkEl.childNodes[0].textContent = benchmark + ' ';
+
+                // Set tooltip based on benchmark type
+                const benchmarkTooltips = {
+                    'Simple NIAH': 'NIAH = Needle-in-a-Haystack: Find specific information in large input data',
+                    'S-NIAH': 'S-NIAH = Semantic Needle-in-a-Haystack: Find meaning-based patterns',
+                    'OOLONG': 'OOLONG = Long-context reasoning benchmark requiring multi-step analysis',
+                    'BrowseComp-Plus': 'BrowseComp-Plus = Web data extraction and structured analysis',
+                    'General': 'General purpose query without specific benchmark category'
+                };
+                tooltipEl.textContent = benchmarkTooltips[benchmark] || benchmark;
+
+                // Set level with appropriate tooltip
+                const level = example.level || 'Level 1 (DSL)';
+                const levelEl = document.getElementById('infoLevel');
+                const levelTooltipEl = document.getElementById('infoLevelTooltip');
+
+                // Update text (keep first text node, tooltip is separate)
+                levelEl.childNodes[0].textContent = level + ' ';
+
+                // Set tooltip based on level
+                const levelTooltips = {
+                    'Level 1 (DSL)': 'DSL: slice, lines, regex, find, count, split, len, set, get, print - fast text operations on input data',
+                    'Level 2 (WASM)': 'WASM: Sandboxed Rust code with fuel+memory limits. rust_wasm_mapreduce for statistics, sorting, aggregation',
+                    'Level 3 (CLI)': 'CLI: Full Rust stdlib access. Binary data, file I/O, network access, external libraries. Process isolation only',
+                    'Level 4 (LLM)': 'LLM Delegation: Chunk data to specialized sub-LLMs for summarization, entity extraction, semantic analysis'
+                };
+                levelTooltipEl.textContent = levelTooltips[level] || level;
+
+                // Set max iterations
+                document.getElementById('infoMaxIter').textContent = example.maxIterations || 10;
+
                 document.getElementById('infoDesc').textContent = example.description || '';
 
                 // Load context - either from URL or use static value
@@ -1931,6 +2112,10 @@ Line 7: ERROR - Invalid input received</textarea>
             document.getElementById('progressSection').classList.remove('hidden');
             document.getElementById('progressSection').classList.add('expanded');
             clearProgress();
+
+            // Show query preview in progress header
+            const queryPreview = query.length > 80 ? query.substring(0, 80) + '...' : query;
+            document.getElementById('progressQuery').textContent = '"' + queryPreview + '"';
 
             // Build the history as we receive events
             const history = [];
@@ -1996,7 +2181,7 @@ Line 7: ERROR - Invalid input received</textarea>
                     logProgress('🔄', `Starting iteration ${event.step}`, 'event-llm');
                     break;
                 case 'llm_start':
-                    logProgress('⏳', `Calling LLM... (large contexts may take minutes)`, 'event-llm');
+                    logProgress('⏳', `Calling LLM... (large input may take minutes)`, 'event-llm');
                     // Start a timer to show we're still waiting
                     if (!window.llmWaitTimer) {
                         window.llmWaitTimer = setInterval(() => {
@@ -2019,11 +2204,11 @@ Line 7: ERROR - Invalid input received</textarea>
                     logProgress('✓', `LLM responded (${event.duration_ms}ms, ${event.prompt_tokens}p + ${event.completion_tokens}c tokens)`, 'event-llm');
                     break;
                 case 'commands':
-                    const isWasm = event.commands.includes('rust_wasm');
-                    const isCli = event.commands.includes('rust_cli_intent');
-                    const label = isCli ? 'rust_cli_intent' : (isWasm ? 'rust_wasm' : 'executing...');
-                    const cssClass = isCli ? 'event-cli' : (isWasm ? 'event-wasm' : 'event-cmd');
-                    logProgress('▶', `Commands: ${label}`, cssClass);
+                    const cmdTypes = formatCommandTypes(event.commands);
+                    const isWasmCmd = event.commands.includes('rust_wasm');
+                    const isCliCmd = event.commands.includes('rust_cli_intent');
+                    const cssClass = isCliCmd ? 'event-cli' : (isWasmCmd ? 'event-wasm' : 'event-cmd');
+                    logProgress('▶', `Executing: ${cmdTypes}`, cssClass);
                     break;
                 case 'wasm_compile_start':
                     logProgress('🔧', `Compiling WASM...`, 'event-wasm');
@@ -2091,6 +2276,35 @@ Line 7: ERROR - Invalid input received</textarea>
             return commands.includes('rust_wasm') || commands.includes('wasm_wat') || commands.includes('"op": "wasm"');
         }
 
+        function getCommandTypes(commands) {
+            if (!commands) return [];
+            const types = [];
+            // DSL commands
+            if (commands.includes('"slice"') || commands.includes('"op": "slice"')) types.push('slice');
+            if (commands.includes('"lines"') || commands.includes('"op": "lines"')) types.push('lines');
+            if (commands.includes('"regex"') || commands.includes('"op": "regex"')) types.push('regex');
+            if (commands.includes('"find"') || commands.includes('"op": "find"')) types.push('find');
+            if (commands.includes('"count"') || commands.includes('"op": "count"')) types.push('count');
+            if (commands.includes('"split"') || commands.includes('"op": "split"')) types.push('split');
+            if (commands.includes('"len"') || commands.includes('"op": "len"')) types.push('len');
+            if (commands.includes('"set"') || commands.includes('"op": "set"')) types.push('set');
+            if (commands.includes('"get"') || commands.includes('"op": "get"')) types.push('get');
+            if (commands.includes('"print"') || commands.includes('"op": "print"')) types.push('print');
+            if (commands.includes('"final"') || commands.includes('"op": "final"')) types.push('final');
+            // WASM/CLI commands
+            if (commands.includes('rust_wasm') || commands.includes('"op": "wasm"')) types.push('rust_wasm');
+            if (commands.includes('rust_cli_intent')) types.push('rust_cli');
+            return types;
+        }
+
+        function formatCommandTypes(commands) {
+            const types = getCommandTypes(commands);
+            if (types.length === 0) return 'commands';
+            if (types.includes('rust_wasm')) return 'rust_wasm';
+            if (types.includes('rust_cli')) return 'rust_cli';
+            return types.join(', ');
+        }
+
         function extractRustCode(commands) {
             if (!commands) return null;
             const match = commands.match(/"code"\s*:\s*"([^"]+)"/);
@@ -2101,8 +2315,8 @@ Line 7: ERROR - Invalid input received</textarea>
         }
 
         function renderResults(data) {
-            // Collapse progress section
-            document.getElementById('progressSection').classList.remove('expanded');
+            // Keep progress section expanded (don't collapse it)
+            // The user should still be able to see the progress after dismissing the modal
 
             // Enable Show Result button and auto-show modal
             document.getElementById('showResultBtn').disabled = false;

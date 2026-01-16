@@ -256,11 +256,16 @@ fn map_line(line: &str) -> Vec<(String, String)> {
     vec![(err_type, "1".to_string())]
 }
 
-EXAMPLE - Extract IP address from each line:
+EXAMPLE - Extract IP address from log lines like "Request from 192.168.1.100":
 
 fn map_line(line: &str) -> Vec<(String, String)> {
-    let ip = word(line, 0).to_string();
-    if ip.is_empty() {
+    // IP addresses follow "from " in log lines
+    if !has(line, "from ") {
+        return Vec::new();
+    }
+    let ip = word(after(line, "from "), 0).trim().to_string();
+    // Basic validation: IP must contain dots and be reasonable length
+    if ip.is_empty() || !has(&ip, ".") || ip.len() < 7 {
         return Vec::new();
     }
     vec![(ip, "1".to_string())]
@@ -349,17 +354,22 @@ pub fn analyze(input: &str) -> String {
         .join("\n")
 }
 
-EXAMPLE - Count unique IP addresses:
+EXAMPLE - Count unique IP addresses (from logs like "Request from 192.168.1.100"):
 
 pub fn analyze(input: &str) -> String {
     use std::collections::HashMap;
 
-    let mut ip_counts: HashMap<&str, usize> = HashMap::new();
+    let mut ip_counts: HashMap<String, usize> = HashMap::new();
 
     for line in input.lines() {
-        // IP is typically first word
-        if let Some(ip) = line.split_whitespace().next() {
-            *ip_counts.entry(ip).or_insert(0) += 1;
+        // IP addresses follow "from " in log lines
+        if let Some(rest) = line.split("from ").nth(1) {
+            if let Some(ip) = rest.split_whitespace().next() {
+                // Basic validation: must contain dots
+                if ip.contains('.') && ip.len() >= 7 {
+                    *ip_counts.entry(ip.to_string()).or_insert(0) += 1;
+                }
+            }
         }
     }
 
@@ -583,7 +593,7 @@ NOT REDUCIBLE (require all data at once):
 - Median, Percentiles (need sorted data)
 - Mode (need full frequency then find max)
 
-EXAMPLE - Count unique IPs and rank top 10:
+EXAMPLE - Count unique IPs and rank top 10 (for logs like "Request from 192.168.1.100"):
 
 struct State {
     ip_counts: Vec<(String, usize)>,
@@ -596,9 +606,13 @@ fn init_state() -> State {
 }
 
 fn process_line(state: &mut State, line: &str) {
-    // Extract IP address (first word)
-    let ip = word(line, 0).to_string();
-    if ip.is_empty() {
+    // IP addresses follow "from " in log lines
+    if !has(line, "from ") {
+        return;
+    }
+    let ip = word(after(line, "from "), 0).trim().to_string();
+    // Basic validation: IP must contain dots
+    if ip.is_empty() || !has(&ip, ".") || ip.len() < 7 {
         return;
     }
 

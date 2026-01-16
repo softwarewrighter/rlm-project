@@ -44,6 +44,7 @@ async fn main() -> Result<()> {
     // Create the pool
     let mut pool = LlmPool::new(LoadBalanceStrategy::RoundRobin);
     let mut provider_count = 0;
+    let mut root_provider_name = String::from("unknown");
 
     for provider_config in &config.providers {
         let role = ProviderRole::from(provider_config.role.as_str());
@@ -59,6 +60,10 @@ async fn main() -> Result<()> {
                     role = ?role,
                     "Added Ollama provider"
                 );
+                // Track root provider name
+                if role == ProviderRole::Root || role == ProviderRole::Both {
+                    root_provider_name = format!("ollama:{}", provider_config.model);
+                }
                 pool.add_provider(Arc::new(provider), provider_config.weight, role);
                 provider_count += 1;
             }
@@ -76,6 +81,10 @@ async fn main() -> Result<()> {
                         role = ?role,
                         "Added DeepSeek provider"
                     );
+                    // Track root provider name
+                    if role == ProviderRole::Root || role == ProviderRole::Both {
+                        root_provider_name = format!("deepseek:{}", provider_config.model);
+                    }
                     pool.add_provider(Arc::new(provider), provider_config.weight, role);
                     provider_count += 1;
                 } else {
@@ -104,6 +113,10 @@ async fn main() -> Result<()> {
                         role = ?role,
                         "Added LiteLLM provider"
                     );
+                    // Track root provider name
+                    if role == ProviderRole::Root || role == ProviderRole::Both {
+                        root_provider_name = format!("litellm:{}", provider_config.model);
+                    }
                     pool.add_provider(Arc::new(provider), provider_config.weight, role);
                     provider_count += 1;
                 } else {
@@ -138,6 +151,7 @@ async fn main() -> Result<()> {
         orchestrator,
         wasm_enabled,
         rust_wasm_enabled,
+        root_provider_name,
     });
 
     // Create router
