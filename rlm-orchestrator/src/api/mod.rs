@@ -1710,10 +1710,9 @@ Line 7: ERROR - Invalid input received</textarea>
             // Switch to Output tab
             switchTab('output');
 
-            // Show progress section expanded, hide results
+            // Show progress section expanded
             document.getElementById('progressSection').classList.remove('hidden');
             document.getElementById('progressSection').classList.add('expanded');
-            document.getElementById('resultsSection').classList.add('hidden');
             clearProgress();
 
             // Build the history as we receive events
