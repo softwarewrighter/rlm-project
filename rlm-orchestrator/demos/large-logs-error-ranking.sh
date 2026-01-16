@@ -2,10 +2,10 @@
 # Large Logs Error Ranking Demo
 #
 # Analyzes 5000 log lines to rank error types by frequency.
-# Uses rust_wasm_intent to generate safe Rust code.
+# Uses rust_wasm_reduce_intent for streaming analysis of large data.
 #
 # Expected time with DeepSeek: 30-60 seconds
-# Expected iterations: 2-3
+# Expected iterations: 1-2
 
 source "$(dirname "$0")/common.sh"
 

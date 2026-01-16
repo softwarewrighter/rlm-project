@@ -613,191 +613,92 @@ The context has {context_len} characters. You interact with it using JSON comman
 
 ## Available Commands
 
-Context operations:
+### Context Operations (for extraction and search)
 - {{"op": "slice", "start": 0, "end": 1000}} - Get characters [start:end]
 - {{"op": "lines", "start": 0, "end": 100}} - Get lines [start:end]
 - {{"op": "len"}} - Get context length
 - {{"op": "count", "what": "lines"}} - Count lines/chars/words
-
-Search operations:
 - {{"op": "regex", "pattern": "class \\w+"}} - Find regex matches
 - {{"op": "find", "text": "error"}} - Find text occurrences
 
-Variables:
+### Variables
 - {{"op": "set", "name": "x", "value": "..."}} - Set variable
 - {{"op": "get", "name": "x"}} - Get variable value
-- {{"op": "print", "var": "x"}} - Print variable
 
-Sub-LM calls (for semantic analysis of EXTRACTED content):
+### Sub-LLM Calls (for semantic analysis of EXTRACTED content)
 - {{"op": "llm_query", "prompt": "Analyze this: ${{extracted_text}}", "store": "analysis"}}
   IMPORTANT: The sub-LLM has NO access to the original context!
-  You MUST first extract relevant content using find/regex/lines/slice,
-  then include that content in the prompt using variable references like ${{var}}.
+  You MUST first extract relevant content, then pass it via ${{var}}.
 
-## WASM Code Execution: Use rust_wasm_intent (MANDATORY!)
+### Analysis with Code Generation: rust_wasm_reduce_intent
 
-⚠️ CRITICAL: ALWAYS use rust_wasm_intent, NEVER use rust_wasm directly!
-The rust_wasm command causes WASM crashes. rust_wasm_intent uses a specialized
-coding LLM that generates safe code. DO NOT write Rust code yourself!
+For aggregation, counting, frequency analysis, or any computation over the data:
 
-### rust_wasm_intent: Describe WHAT You Want
+- {{"op": "rust_wasm_reduce_intent", "intent": "description of what to compute", "store": "result"}}
 
-- {{"op": "rust_wasm_intent", "intent": "Count occurrences of each error type after [ERROR] marker, sorted by frequency", "store": "counts"}}
-- {{"op": "rust_wasm_intent", "intent": "...", "on": "$myvar", "store": "result"}}
+This uses a specialized coding LLM to generate safe analysis code. Just describe WHAT you want.
 
-Write a clear description of the algorithm. The coding LLM will write the code.
-
-### EXAMPLES
+**EXAMPLES:**
 
 ```json
-{{"op": "rust_wasm_intent", "intent": "Count each unique error type after [ERROR]. Return sorted by frequency descending as 'ErrorType: count'", "store": "error_counts"}}
-{{"op": "final_var", "name": "error_counts"}}
-```
-
-```json
-{{"op": "rust_wasm_intent", "intent": "Find all numbers after 'value:' and calculate sum, min, max, average", "store": "stats"}}
-```
-
-```json
-{{"op": "rust_wasm_intent", "intent": "Group log lines by IP address and count occurrences", "store": "ip_counts"}}
-```
-
-⚠️ DO NOT use rust_wasm - it will crash! Always use rust_wasm_intent!
-
-### rust_wasm_reduce_intent: For VERY LARGE Datasets (>100KB)
-
-⚠️ Use this for LARGE contexts that would overflow WASM memory!
-
-rust_wasm_reduce_intent processes data LINE BY LINE using a streaming reduce pattern.
-It can handle arbitrarily large datasets without memory overflow.
-
-- {{"op": "rust_wasm_reduce_intent", "intent": "Count unique IP addresses and rank top 10 most active", "store": "ip_counts"}}
-- {{"op": "rust_wasm_reduce_intent", "intent": "...", "on": "$myvar", "chunk_size": 65536}}
-
-WHEN TO USE:
-- Context is very large (>100KB, thousands of lines)
-- Task involves counting, summing, or frequency analysis across entire dataset
-- rust_wasm_intent crashes with memory errors
-
-WHEN NOT TO USE (requires all data at once):
-- Computing median or percentiles (not reducible)
-- Tasks that need sorted access to all values
-
-### EXAMPLES
-
-```json
-{{"op": "rust_wasm_reduce_intent", "intent": "Count each unique error type and rank by frequency", "store": "error_counts"}}
+{{"op": "rust_wasm_reduce_intent", "intent": "Count each unique error type after [ERROR] and rank by frequency", "store": "error_counts"}}
 {{"op": "final_var", "name": "error_counts"}}
 ```
 
 ```json
 {{"op": "rust_wasm_reduce_intent", "intent": "Find all unique IP addresses and count requests per IP, show top 10", "store": "ip_stats"}}
+{{"op": "final_var", "name": "ip_stats"}}
 ```
-
----
-
-## (FALLBACK) rust_wasm - Only if rust_wasm_intent fails
-
-⚠️ Use rust_wasm_intent first! Only use rust_wasm as a last resort.
-
-The code runs in WASM with strict constraints:
-- INPUT IS ASCII-ONLY - byte slicing is safe
-- HashMap/HashSet/BTreeMap CRASH in WASM - use Vec<(String, usize)> instead
-- .contains()/.find()/.split() CRASH in WASM - use helper functions instead
-
-- {{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{...}}", "store": "result"}}
-
-Function signature: `pub fn analyze(input: &str) -> String`
-
-### SAFE to use:
-- Vec, Vec::new(), .push(), .len()
-- .lines(), .trim(), .to_string(), .is_empty()
-- format!(), .push_str(), .join()
-- .iter(), .map(), .filter(), .collect()
-- .sort_by() for sorting
-
-### FORBIDDEN (will crash):
-- HashMap, HashSet, BTreeMap → use Vec<(String, usize)>
-- .contains() → use has()
-- .find() → use after()/before()
-- .split() → use word()
-- .unwrap() → use .unwrap_or()
-
-### HELPER FUNCTIONS (already defined)
-
-- `has(s, "pat")` - Check if string contains pattern (SAFE)
-- `after(s, "pat")` - Get text after pattern
-- `before(s, "pat")` - Get text before pattern
-- `word(s, n)` - Get nth word (0-indexed)
-- `eq(a, b)` - Compare strings (use instead of ==)
-- `parse_int(s)` - Parse to i64, returns 0 on failure
-
-### EXAMPLE - Count with Vec (NOT HashMap!)
 
 ```json
-{{"op": "rust_wasm", "code": "pub fn analyze(input: &str) -> String {{ let mut counts: Vec<(String, usize)> = Vec::new(); for line in input.lines() {{ if has(line, \"[ERROR]\") {{ let key = word(after(line, \"[ERROR] \"), 0).to_string(); if !key.is_empty() {{ let mut found = false; for i in 0..counts.len() {{ if eq(&counts[i].0, &key) {{ counts[i].1 += 1; found = true; break; }} }} if !found {{ counts.push((key, 1)); }} }} }} }} counts.sort_by(|a,b| b.1.cmp(&a.1)); counts.iter().map(|(k,c)| format!(\"{{}}:{{}}\", k, c)).collect::<Vec<_>>().join(\"\\n\") }}", "store": "counts"}}
+{{"op": "rust_wasm_reduce_intent", "intent": "Calculate sum, min, max, and average of all numbers after 'value:'", "store": "stats"}}
 ```
 
-⚠️ Prefer rust_wasm_intent - it handles these constraints automatically!
+**WHAT IT CAN DO:**
+- Count occurrences, frequencies, unique values
+- Sum, min, max, mean calculations
+- Top-N rankings
+- Pattern matching and extraction across all lines
 
-Finishing:
-- {{"op": "final", "answer": "The result is..."}} - Use for simple text answers
-- {{"op": "final_var", "name": "result"}} - Use to output a computed variable (PREFERRED for rust_wasm results!)
+**LIMITATIONS (not supported):**
+- Median, percentiles (require sorted data)
+- Complex multi-pass algorithms
 
-IMPORTANT: Use final_var when your answer is stored in a variable from rust_wasm or other computation.
-Do NOT try to interpolate variables in final's answer string - use final_var instead.
+### Finishing
+- {{"op": "final", "answer": "The result is..."}} - Simple text answers
+- {{"op": "final_var", "name": "result"}} - Output a computed variable (PREFERRED!)
 
-## Variable References
-- Variables persist across iterations - no need to re-extract data you already have!
-- Use $var in the "on" parameter: {{"op": "rust_wasm", ..., "on": "$mydata"}}
-- Variable interpolation in strings (${{var}}) has limited support - prefer final_var for outputs.
+## Workflow
 
-## Workflow (MANDATORY: SEARCH FIRST!)
+1. **Simple queries**: Use find/regex/lines to extract, then final
+2. **Aggregation/analysis**: Use rust_wasm_reduce_intent, then final_var
+3. **Semantic analysis**: Extract content first, then use llm_query
 
-CRITICAL RULE: You MUST search the context BEFORE concluding anything doesn't exist.
-Never assume - always verify with find/regex commands first!
+## Example: Frequency Analysis
 
-1. SEARCH: Use find/regex with SIMPLE keywords (1-2 words). Start broad, then narrow.
-   - If searching for "Prince Andrei's secret vault" → try just "secret vault" or "password"
-   - If first search returns 0 matches, TRY DIFFERENT KEYWORDS
-   - Use the most distinctive word from the query (e.g., "vault", "password", "secret")
-
-2. Extract: Use lines/slice to get content around matches
-3. Analyze: If needed, use llm_query to analyze EXTRACTED content (pass it via ${{var}})
-4. Finish: Use final with your answer
-
-IMPORTANT:
-- Always search/extract content BEFORE using llm_query.
-- The sub-LLM in llm_query cannot see the original document - you must pass extracted text to it.
-- NEVER give up after one failed search - try at least 2-3 different search terms!
-
-## Example: Finding specific content
+Query: "Rank error types by frequency"
 
 ```json
-{{"op": "find", "text": "secret", "store": "matches"}}
+{{"op": "rust_wasm_reduce_intent", "intent": "Count each error type after [ERROR] marker and rank from most to least frequent", "store": "ranked_errors"}}
+{{"op": "final_var", "name": "ranked_errors"}}
 ```
-Then examine results and extract context:
+
+## Example: Finding Specific Content
+
+```json
+{{"op": "find", "text": "password", "store": "matches"}}
+```
+Then extract context around matches:
 ```json
 {{"op": "lines", "start": 230, "end": 240, "store": "context"}}
 {{"op": "final", "answer": "Found: ${{context}}"}}
 ```
 
-## Example: Using llm_query correctly
-
-```json
-{{"op": "find", "text": "error", "store": "error_lines"}}
-{{"op": "llm_query", "prompt": "Categorize these errors: ${{error_lines}}", "store": "analysis"}}
-{{"op": "final_var", "name": "analysis"}}
-```
-Note: The extracted ${{error_lines}} is passed TO the sub-LLM in the prompt.
-
 ## Important Notes
-- Variables store strings and PERSIST across iterations - don't re-extract data you already have!
-- The `regex` command stores matched text (one per line). Use `count` with `what: "lines"` on that variable.
-- Always use `store` to save results you need later.
-- Wrap commands in ```json blocks. Execute multiple commands per iteration.
-- For aggregation tasks (counting by category, frequency analysis), use rust_wasm with HashMap on the FULL context.
-- Prefer final_var over final with variable interpolation for computed results."#,
+- Variables persist across iterations
+- Always use `store` to save results you need later
+- Wrap commands in ```json blocks
+- Use final_var for computed results (not final with interpolation)"#,
             context_len = context_len
         )
     }
