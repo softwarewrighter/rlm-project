@@ -20,26 +20,26 @@ cache_size = 100                # Max modules in memory cache
 # rustc_path = "/path/to/rustc"      # Custom rustc path (optional, auto-detected)
 
 # DeepSeek API for root LLM (production - requires DEEPSEEK_API_KEY)
-[[providers]]
-provider_type = "deepseek"
-base_url = "https://api.deepseek.com"
-model = "deepseek-chat"
-role = "root"
-weight = 1
-
-# LiteLLM Proxy for root LLM (alternative - for usage tracking via LiteLLM dashboard)
-# Requires LITELLM_API_KEY or LITELLM_MASTER_KEY env var
 # [[providers]]
-# provider_type = "litellm"
-# base_url = "http://localhost:4000"
-# model = "deepseek-chat"  # or any model configured in LiteLLM
+# provider_type = "deepseek"
+# base_url = "https://api.deepseek.com"
+# model = "deepseek-chat"
 # role = "root"
 # weight = 1
 
-# Local Ollama for root LLM (uncomment for testing without API key)
+# LiteLLM Proxy for root LLM (for usage tracking via LiteLLM dashboard)
+# Requires LITELLM_API_KEY or LITELLM_MASTER_KEY env var
+[[providers]]
+provider_type = "litellm"
+base_url = "http://localhost:4000"
+model = "deepseek/deepseek-chat"
+role = "root"
+weight = 1
+
+# Remote Ollama on big72 for root LLM (fallback for testing)
 # [[providers]]
 # provider_type = "ollama"
-# base_url = "http://localhost:11434"
+# base_url = "http://big72.local:11434"
 # model = "qwen2.5-coder:14b"
 # role = "root"
 # weight = 1

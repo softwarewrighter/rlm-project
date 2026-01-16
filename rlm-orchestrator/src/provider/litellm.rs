@@ -168,7 +168,13 @@ impl LlmProvider for LiteLLMProvider {
         let url = format!("{}/health", self.base_url);
         let start = Instant::now();
 
-        match self.client.get(&url).send().await {
+        match self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .send()
+            .await
+        {
             Ok(response) => {
                 let latency = start.elapsed().as_millis() as u64;
                 if response.status().is_success() {
