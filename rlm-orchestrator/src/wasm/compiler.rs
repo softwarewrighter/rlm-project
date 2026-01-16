@@ -184,6 +184,8 @@ impl RustCompiler {
             (".replacen(", "Build new string manually instead of .replacen()"),
             (".strip_prefix(", "Use after() helper instead of .strip_prefix()"),
             (".strip_suffix(", "Use before() helper instead of .strip_suffix()"),
+            (".starts_with(", "Use has() helper instead of .starts_with()"),
+            (".ends_with(", "Use has() with appropriate logic instead of .ends_with()"),
         ];
 
         for (pattern, suggestion) in forbidden_string_ops {
@@ -193,6 +195,17 @@ impl RustCompiler {
                     pattern.trim_end_matches('('),
                     suggestion
                 )));
+            }
+        }
+
+        // Check for string comparison with == or != (use eq() instead)
+        let string_comparison_patterns = [
+            ("== \"", "String comparison with == crashes in WASM. Use eq(a, b) instead"),
+            ("!= \"", "String comparison with != crashes in WASM. Use !eq(a, b) instead"),
+        ];
+        for (pattern, reason) in string_comparison_patterns {
+            if code.contains(pattern) {
+                return Err(CompileError::InvalidSource(reason.to_string()));
             }
         }
 
@@ -632,6 +645,14 @@ fn word(s: &str, n: usize) -> &str {{
 }}
 
 #[allow(dead_code)]
+fn slice(s: &str, start: usize, end: usize) -> &str {{
+    if start >= s.len() {{ return ""; }}
+    let end = if end > s.len() {{ s.len() }} else {{ end }};
+    if start >= end {{ return ""; }}
+    &s[start..end]
+}}
+
+#[allow(dead_code)]
 fn parse_int(s: &str) -> i64 {{
     let s = s.trim();
     if s.is_empty() {{ return 0; }}
@@ -646,6 +667,22 @@ fn parse_int(s: &str) -> i64 {{
         }}
     }}
     if neg {{ -n }} else {{ n }}
+}}
+
+/// Safe line iterator (splits on newlines without TwoWaySearcher)
+#[allow(dead_code)]
+fn each_line(s: &str) -> impl Iterator<Item = &str> {{
+    s.as_bytes().split(|&b| b == b'\n').filter_map(|line| {{
+        let s = to_str(line);
+        // Strip trailing \r without pattern matching
+        let s = if s.as_bytes().last() == Some(&b'\r') {{
+            &s[..s.len()-1]
+        }} else {{
+            s
+        }};
+        // Skip empty lines at the end (from trailing newline)
+        if s.is_empty() {{ None }} else {{ Some(s) }}
+    }})
 }}
 
 // ============ END HELPERS ============
@@ -682,8 +719,8 @@ pub extern "C" fn reduce_chunk(ptr: *const u8, len: usize) -> i32 {{
     unsafe {{
         let chunk = std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len));
         if let Some(ref mut state) = STATE {{
-            // Process each line in the chunk
-            for line in chunk.lines() {{
+            // Process each line in the chunk (use safe each_line, not .lines())
+            for line in each_line(chunk) {{
                 process_line(state, line);
             }}
         }}
@@ -740,13 +777,22 @@ pub extern "C" fn get_result_len() -> usize {{
             }
         }
 
-        // Check for forbidden string operations
+        // Check for forbidden string operations (must match regular validation)
         let forbidden_string_ops = [
             (".contains(", "Use has() helper instead"),
             (".find(", "Use after()/before() helpers instead"),
+            (".rfind(", "Use after()/before() helpers instead"),
             (".split(", "Use word() helper instead"),
+            (".split_once(", "Use after()/before() helpers instead"),
+            (".rsplit(", "Use word() helper instead"),
             (".matches(", "Use has() helper instead"),
+            (".match_indices(", "Use custom byte iteration instead"),
             (".replace(", "Build new string manually instead"),
+            (".replacen(", "Build new string manually instead"),
+            (".strip_prefix(", "Use after() helper instead"),
+            (".strip_suffix(", "Use before() helper instead"),
+            (".starts_with(", "Use has() helper instead"),
+            (".ends_with(", "Use has() with appropriate logic instead"),
         ];
 
         for (pattern, suggestion) in forbidden_string_ops {
@@ -754,6 +800,18 @@ pub extern "C" fn get_result_len() -> usize {{
                 return Err(CompileError::InvalidSource(format!(
                     "WASM-unsafe operation '{}'. {}", pattern.trim_end_matches('('), suggestion
                 )));
+            }
+        }
+
+        // Check for string comparison with == or != (use eq() instead)
+        // Look for patterns like: == " or != " (comparison with string literals)
+        let string_comparison_patterns = [
+            ("== \"", "String comparison with == crashes in WASM. Use eq(a, b) instead"),
+            ("!= \"", "String comparison with != crashes in WASM. Use !eq(a, b) instead"),
+        ];
+        for (pattern, reason) in string_comparison_patterns {
+            if code.contains(pattern) {
+                return Err(CompileError::InvalidSource(reason.to_string()));
             }
         }
 

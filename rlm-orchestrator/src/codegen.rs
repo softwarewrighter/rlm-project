@@ -314,9 +314,17 @@ SAFE STDLIB:
 - .sort_by() for sorting
 
 FORBIDDEN (these panic in WASM):
-- .contains(), .find(), .split(), .matches() -> use helpers
-- HashMap / HashSet -> use Vec<(String, usize)>
+- .contains(), .find(), .rfind() -> use has(), after(), before()
+- .split(), .split_once(), .rsplit() -> use word() or iterate with after()
+- .matches(), .match_indices() -> use has() in a loop
+- .replace(), .replacen() -> build new string with format!()
+- .strip_prefix(), .strip_suffix() -> use after(), before()
+- .starts_with(), .ends_with() -> use has() helper
+- str == str, str != str -> use eq(a, b) for ALL string comparisons!
+- HashMap / HashSet / BTreeMap -> use Vec<(String, usize)>
 - .unwrap() -> use .unwrap_or() or .unwrap_or_default()
+
+CRITICAL: For string comparison, ALWAYS use eq(a, b), NEVER use == or !=
 
 REDUCIBLE OPERATIONS (can be computed with streaming):
 - Count, Sum, Min, Max

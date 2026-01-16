@@ -15,6 +15,8 @@ All demos use **DeepSeek** via the LiteLLM gateway for both the base LLM and cod
 2. **Set up API keys** in `~/.env`:
    ```bash
    DEEPSEEK_API_KEY=your_key_here
+   LITELLM_API_KEY=sk-local-test-key-123
+   LITELLM_MASTER_KEY=sk-local-test-key-123
    ```
 
 3. **Start the LiteLLM gateway**:
@@ -24,7 +26,13 @@ All demos use **DeepSeek** via the LiteLLM gateway for both the base LLM and cod
 
 4. **Start the RLM server** (required for demos that fetch sample data):
    ```bash
-   ./target/release/rlm-server config.toml
+   # IMPORTANT: Server needs env vars from ~/.env
+   export $(grep -E "^[A-Z]" ~/.env | xargs) && ./target/release/rlm-server config.toml
+   ```
+
+   Or use the helper script:
+   ```bash
+   ./scripts/start-server.sh
    ```
 
 ## Demos

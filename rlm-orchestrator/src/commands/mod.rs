@@ -12,8 +12,8 @@ use thiserror::Error;
 
 use crate::codegen::{CodeGenConfig, CodeGenerator};
 use crate::wasm::{
-    CompilerConfig, ModuleCache, PrebuiltHooks, ReduceInstance, RustCompiler, TemplateFramework,
-    TemplateType, WasmConfig, WasmExecutor, WasmLibrary, WasmToolLibrary,
+    CompilerConfig, ModuleCache, PrebuiltHooks, RustCompiler, TemplateFramework, TemplateType,
+    WasmConfig, WasmExecutor, WasmToolLibrary,
 };
 
 /// Safely truncate a string at a valid UTF-8 character boundary.
@@ -345,8 +345,6 @@ pub struct CommandExecutor {
     max_sub_calls: usize,
     /// WASM executor for dynamic code
     wasm_executor: Option<WasmExecutor>,
-    /// Library of pre-compiled WASM modules (legacy)
-    wasm_library: WasmLibrary,
     /// Library of pre-built WASM tools
     wasm_tool_library: Option<WasmToolLibrary>,
     /// Rust to WASM compiler (None if rustc not available)
@@ -471,7 +469,6 @@ impl CommandExecutor {
             sub_calls: 0,
             max_sub_calls,
             wasm_executor,
-            wasm_library: WasmLibrary::new(),
             wasm_tool_library,
             rust_compiler,
             wasm_cache,
@@ -661,25 +658,28 @@ impl CommandExecutor {
 
             Command::Regex { pattern, on, store } => {
                 let source = self.resolve_source(on)?.to_string();
-                // Case-insensitive regex by default - find matching LINES with line numbers
+                // Case-insensitive regex by default - find matching LINES
                 let re = regex::RegexBuilder::new(pattern)
                     .case_insensitive(true)
                     .build()?;
 
-                let mut matching_lines: Vec<String> = Vec::new();
+                let mut raw_lines: Vec<&str> = Vec::new();
+                let mut formatted_lines: Vec<String> = Vec::new();
                 for (line_num, line) in source.lines().enumerate() {
                     if re.is_match(line) {
-                        matching_lines.push(format!("L{}: {}", line_num + 1, line));
+                        raw_lines.push(line);
+                        formatted_lines.push(format!("L{}: {}", line_num + 1, line));
                     }
                 }
 
-                let count = matching_lines.len();
-                let result = matching_lines.join("\n");
+                let count = raw_lines.len();
+                // Store raw lines without prefixes (for use by reduce/other ops)
+                let result = raw_lines.join("\n");
 
-                // Always show preview (first 5 matches, truncated if needed)
+                // Always show preview with line numbers (first 5 matches, truncated if needed)
                 let preview = if count > 0 {
                     let preview_lines: Vec<&str> =
-                        matching_lines.iter().take(5).map(|s| s.as_str()).collect();
+                        formatted_lines.iter().take(5).map(|s| s.as_str()).collect();
                     let preview_text = preview_lines.join("\n");
                     let truncated = if count > 5 {
                         format!("\n... and {} more", count - 5)
@@ -724,11 +724,15 @@ impl CommandExecutor {
                 matching_lines.sort_by(|a, b| b.2.cmp(&a.2));
 
                 let count = matching_lines.len();
+                // Store raw lines without prefixes (for use by reduce/other ops)
+                let raw_lines: Vec<&str> = matching_lines.iter().map(|(_, line, _)| line.as_str()).collect();
+                let result = raw_lines.join("\n");
+
+                // Format with line numbers for preview only
                 let formatted: Vec<String> = matching_lines
                     .iter()
                     .map(|(num, line, _)| format!("L{}: {}", num, line))
                     .collect();
-                let result = formatted.join("\n");
 
                 // Always show preview (first 5 matches, truncated if needed)
                 let preview = if count > 0 {
@@ -880,7 +884,7 @@ impl CommandExecutor {
             }
 
             Command::Wasm {
-                module,
+                module: _,  // Legacy module syntax deprecated
                 tool,
                 args,
                 function,
@@ -932,25 +936,11 @@ impl CommandExecutor {
                     });
                 }
 
-                // Fall back to legacy module syntax
-                let module_name = module.clone().ok_or_else(|| {
-                    CommandError::InvalidCommand(
-                        "WASM command requires either 'module' or 'tool' parameter".to_string(),
-                    )
-                })?;
-
-                let wasm_bytes = self
-                    .wasm_library
-                    .get(&module_name)
-                    .ok_or_else(|| CommandError::WasmModuleNotFound(module_name.clone()))?;
-
-                let result = executor.execute(wasm_bytes, function, &source)?;
-
-                self.store_result(store, result.clone());
-                Ok(ExecutionResult::Continue {
-                    output: format!("WASM {}.{}: {}", module_name, function, result),
-                    sub_calls: 0,
-                })
+                // Legacy module syntax no longer supported
+                Err(CommandError::InvalidCommand(
+                    "WASM command requires 'tool' parameter. Legacy module syntax deprecated."
+                        .to_string(),
+                ))
             }
 
             Command::WasmWat {
@@ -1343,7 +1333,7 @@ impl CommandExecutor {
                 // Get source data (sanitize to ASCII)
                 let source = to_ascii(&self.resolve_source(on)?.to_string());
                 let source_len = source.len();
-                let chunk_bytes = chunk_size.unwrap_or(64 * 1024); // Default 64KB chunks
+                let chunk_bytes = chunk_size.unwrap_or(4 * 1024); // Default 4KB chunks (smaller for WASM safety)
 
                 // Initialize the reduce state
                 let exec_start = Instant::now();
@@ -1372,6 +1362,14 @@ impl CommandExecutor {
                     let chunk = &source[start..end];
                     reduce_instance.process_chunk(chunk).map_err(|e| {
                         tracing::error!("Reduce process_chunk failed at chunk {}", chunks_processed);
+                        // Save crash info to file for debugging
+                        if let Ok(mut f) = std::fs::File::create("/tmp/rlm-wasm-crash.rs") {
+                            use std::io::Write;
+                            let _ = writeln!(f, "// WASM crash at chunk {}", chunks_processed);
+                            let _ = writeln!(f, "// Error: {}", e);
+                            let _ = writeln!(f, "// Chunk preview: {:?}", &chunk[..chunk.len().min(200)]);
+                            let _ = writeln!(f, "\n{}", code);
+                        }
                         CommandError::WasmError(e)
                     })?;
 
