@@ -642,6 +642,50 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .tag.aggregation { background: #7c3aed; }
         .tag.large-context { background: #dc2626; color: #fff; }
 
+        /* Example info box */
+        .example-info {
+            background: var(--card);
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 12px;
+            display: none;
+            border-left: 4px solid var(--highlight);
+        }
+        .example-info.visible {
+            display: block;
+        }
+        .example-info-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 10px;
+        }
+        .example-info-item {
+            flex: 1;
+        }
+        .example-info-label {
+            font-size: 0.9rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        .example-info-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        .example-info-value.benchmark {
+            color: #818cf8;
+        }
+        .example-info-value.level {
+            color: #34d399;
+        }
+        .example-info-desc {
+            color: var(--text);
+            line-height: 1.5;
+            margin-top: 8px;
+            padding-top: 10px;
+            border-top: 1px solid var(--accent);
+        }
+
         .input-row {
             display: flex;
             gap: 15px;
@@ -1252,6 +1296,21 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
                         </optgroup>
                     </select>
                     <div class="example-tags" id="exampleTags"></div>
+
+                    <!-- Example info panel -->
+                    <div id="exampleInfo" class="example-info">
+                        <div class="example-info-row">
+                            <div class="example-info-item">
+                                <div class="example-info-label">Problem Type</div>
+                                <div id="infoBenchmark" class="example-info-value benchmark">-</div>
+                            </div>
+                            <div class="example-info-item">
+                                <div class="example-info-label">Capability Levels</div>
+                                <div id="infoLevel" class="example-info-value level">-</div>
+                            </div>
+                        </div>
+                        <div id="infoDesc" class="example-info-desc"></div>
+                    </div>
                 </div>
 
                 <div class="input-row">
@@ -1813,15 +1872,14 @@ Line 7: ERROR - Invalid input received</textarea>
                     return `<span class="tag ${tagClass}">${tag}</span>`;
                 }).join('');
 
-                // Add benchmark and level badges
-                const benchmarkBadge = example.benchmark ?
-                    `<span class="tag" style="background: #6366f1;">${example.benchmark}</span>` : '';
-                const levelBadge = example.level ?
-                    `<span class="tag" style="background: #059669;">${example.level}</span>` : '';
+                document.getElementById('exampleTags').innerHTML = tagsHtml;
 
-                document.getElementById('exampleTags').innerHTML =
-                    tagsHtml + benchmarkBadge + levelBadge +
-                    `<div style="color: var(--muted); font-size: 1rem; margin-top: 6px; width: 100%;">${example.description}</div>`;
+                // Show example info panel
+                const infoPanel = document.getElementById('exampleInfo');
+                infoPanel.classList.add('visible');
+                document.getElementById('infoBenchmark').textContent = example.benchmark || 'General';
+                document.getElementById('infoLevel').textContent = example.level || 'Level 1 (DSL)';
+                document.getElementById('infoDesc').textContent = example.description || '';
 
                 // Load context - either from URL or use static value
                 if (example.loadUrl) {
@@ -1843,6 +1901,7 @@ Line 7: ERROR - Invalid input received</textarea>
                 }
             } else {
                 document.getElementById('exampleTags').innerHTML = '';
+                document.getElementById('exampleInfo').classList.remove('visible');
             }
         }
 
