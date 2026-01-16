@@ -997,6 +997,22 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .modal-overlay.visible .modal {
             transform: scale(1);
         }
+        .modal-large {
+            max-width: 1000px;
+            max-height: 90vh;
+        }
+        .modal-large .results {
+            grid-template-columns: 1fr 1fr;
+        }
+        .modal-large .answer-box {
+            margin-bottom: 15px;
+        }
+        .modal-large .summary-bar {
+            margin-bottom: 15px;
+        }
+        .modal-large .flow-diagram {
+            margin-bottom: 15px;
+        }
         .modal-header {
             display: flex;
             justify-content: space-between;
@@ -1097,8 +1113,8 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         <div class="header">
             <h1><span>🔄</span> RLM Visualizer</h1>
             <div>
-                <button id="showResultBtn" class="btn-secondary" onclick="showResultModal()" disabled>Show Result</button>
                 <button id="runBtn" onclick="runQuery()">Run RLM Query</button>
+                <button id="showResultBtn" class="btn-secondary" onclick="showResultModal()" disabled>Show Result</button>
             </div>
         </div>
 
@@ -1174,74 +1190,74 @@ Line 7: ERROR - Invalid input received</textarea>
                     </div>
                 </div>
 
-                <!-- Results section (shown after completion) -->
-                <div id="resultsSection" class="results-section hidden">
-                    <div class="summary-bar">
-                        <div class="stat">
-                            <div class="stat-value" id="statIterations">-</div>
-                            <div class="stat-label">Iterations</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value" id="statSubCalls">-</div>
-                            <div class="stat-label">Sub-LM Calls</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value" id="statContext">-</div>
-                            <div class="stat-label">Context Chars</div>
-                        </div>
-                        <div class="stat wasm-stat" id="statWasm" style="display: none;">
-                            <div class="stat-value wasm">-</div>
-                            <div class="stat-label">WASM Steps</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value" id="statTokens">-</div>
-                            <div class="stat-label">Tokens</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value" id="statDuration">-</div>
-                            <div class="stat-label">Duration</div>
-                        </div>
-                    </div>
-
-                    <div id="wasmInfo" class="wasm-info hidden">
-                        <h3>🔧 WASM Execution Used</h3>
-                        <p></p>
-                    </div>
-
-                    <div id="flowDiagram" class="flow-diagram"></div>
-
-                    <div id="answerBox" class="answer-box">
-                        <h3>Final Answer</h3>
-                        <div id="answerText"></div>
-                    </div>
-
-                    <div class="results">
-                        <div class="timeline">
-                            <h2>Timeline</h2>
-                            <div id="timeline"></div>
-                        </div>
-
-                        <div class="detail-panel">
-                            <div id="detailContent">
-                                <p style="color: var(--muted);">Click on a step to see details</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <!-- Results now shown in modal popup -->
             </div>
         </div>
     </div>
 
     <!-- Result Modal -->
     <div id="resultModal" class="modal-overlay" onclick="hideResultModal(event)">
-        <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal modal-large" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <h2 id="modalTitle">✅ Result</h2>
                 <button class="modal-close" onclick="hideResultModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <div id="modalResult" class="modal-result"></div>
-                <div id="modalStats" class="modal-stats"></div>
+                <!-- Answer -->
+                <div id="modalAnswerBox" class="answer-box">
+                    <h3>Final Answer</h3>
+                    <div id="modalAnswerText"></div>
+                </div>
+
+                <!-- Stats bar -->
+                <div id="modalSummaryBar" class="summary-bar">
+                    <div class="stat">
+                        <div class="stat-value" id="modalStatIterations">-</div>
+                        <div class="stat-label">Iterations</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value" id="modalStatSubCalls">-</div>
+                        <div class="stat-label">Sub-LM Calls</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value" id="modalStatContext">-</div>
+                        <div class="stat-label">Context Chars</div>
+                    </div>
+                    <div class="stat wasm-stat" id="modalStatWasm" style="display: none;">
+                        <div class="stat-value wasm">-</div>
+                        <div class="stat-label">WASM Steps</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value" id="modalStatTokens">-</div>
+                        <div class="stat-label">Tokens</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value" id="modalStatDuration">-</div>
+                        <div class="stat-label">Duration</div>
+                    </div>
+                </div>
+
+                <!-- WASM info -->
+                <div id="modalWasmInfo" class="wasm-info hidden">
+                    <h3>🔧 WASM Execution Used</h3>
+                    <p></p>
+                </div>
+
+                <!-- Flow diagram -->
+                <div id="modalFlowDiagram" class="flow-diagram"></div>
+
+                <!-- Timeline and details -->
+                <div class="results">
+                    <div class="timeline">
+                        <h2>Timeline</h2>
+                        <div id="modalTimeline"></div>
+                    </div>
+                    <div class="detail-panel">
+                        <div id="modalDetailContent">
+                            <p style="color: var(--muted);">Click on a step to see details</p>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button onclick="hideResultModal()">Close</button>
@@ -1267,13 +1283,12 @@ Line 7: ERROR - Invalid input received</textarea>
         function showResultModal() {
             if (!currentData) return;
 
+            const data = currentData;
             const modal = document.getElementById('resultModal');
             const title = document.getElementById('modalTitle');
-            const result = document.getElementById('modalResult');
-            const stats = document.getElementById('modalStats');
 
             // Set title based on success/failure
-            if (currentData.success) {
+            if (data.success) {
                 title.textContent = '✅ Result';
                 title.className = '';
             } else {
@@ -1281,19 +1296,139 @@ Line 7: ERROR - Invalid input received</textarea>
                 title.className = 'error';
             }
 
-            // Set result content
-            result.textContent = currentData.success ? currentData.answer : (currentData.error || 'Failed');
+            // Answer box
+            const answerBox = document.getElementById('modalAnswerBox');
+            answerBox.className = 'answer-box' + (data.success ? '' : ' error');
+            document.getElementById('modalAnswerText').textContent = data.success ? data.answer : (data.error || 'Failed');
 
-            // Set stats
-            const totalTokens = (currentData.total_prompt_tokens || 0) + (currentData.total_completion_tokens || 0);
-            const durationSec = currentData.total_duration_ms ? (currentData.total_duration_ms / 1000).toFixed(1) + 's' : '-';
-            stats.innerHTML = `
-                <div class="modal-stat"><span class="modal-stat-value">${currentData.iterations}</span> <span class="modal-stat-label">iterations</span></div>
-                <div class="modal-stat"><span class="modal-stat-value">${totalTokens.toLocaleString()}</span> <span class="modal-stat-label">tokens</span></div>
-                <div class="modal-stat"><span class="modal-stat-value">${durationSec}</span> <span class="modal-stat-label">duration</span></div>
-            `;
+            // Check for WASM usage
+            const wasmSteps = data.history.filter(s => hasWasm(s.commands));
+            const usedWasm = wasmSteps.length > 0;
+
+            // Stats
+            document.getElementById('modalStatIterations').textContent = data.iterations;
+            document.getElementById('modalStatSubCalls').textContent = data.total_sub_calls;
+            document.getElementById('modalStatContext').textContent = data.context_length.toLocaleString();
+
+            const wasmStatEl = document.getElementById('modalStatWasm');
+            if (wasmStatEl) {
+                wasmStatEl.querySelector('.stat-value').textContent = wasmSteps.length;
+                wasmStatEl.style.display = usedWasm ? 'block' : 'none';
+            }
+
+            const totalTokens = (data.total_prompt_tokens || 0) + (data.total_completion_tokens || 0);
+            document.getElementById('modalStatTokens').textContent = totalTokens.toLocaleString();
+            document.getElementById('modalStatTokens').title = `${(data.total_prompt_tokens || 0).toLocaleString()} prompt + ${(data.total_completion_tokens || 0).toLocaleString()} completion`;
+
+            if (data.total_duration_ms) {
+                const durationSec = (data.total_duration_ms / 1000).toFixed(1);
+                document.getElementById('modalStatDuration').textContent = durationSec + 's';
+            }
+
+            // WASM info
+            const wasmInfoEl = document.getElementById('modalWasmInfo');
+            if (wasmInfoEl) {
+                if (usedWasm) {
+                    wasmInfoEl.classList.remove('hidden');
+                    wasmInfoEl.querySelector('p').textContent =
+                        `This query used rust_wasm in ${wasmSteps.length} step(s) to perform custom analysis.`;
+                } else {
+                    wasmInfoEl.classList.add('hidden');
+                }
+            }
+
+            // Flow diagram
+            const flow = document.getElementById('modalFlowDiagram');
+            flow.innerHTML = '<div class="flow-node query">Query</div>';
+            data.history.forEach((step, i) => {
+                flow.innerHTML += '<span class="flow-arrow">→</span>';
+                const isFinal = step.output.startsWith('FINAL:');
+                const isWasm = hasWasm(step.commands);
+                let nodeClass = isWasm ? ' wasm' : (isFinal ? ' final' : '');
+                let icon = step.error ? '⚠️' : (isWasm ? '🔧' : '');
+                flow.innerHTML += `<div class="flow-node${nodeClass}">${icon}Step ${step.step}</div>`;
+            });
+            if (data.success) {
+                flow.innerHTML += '<span class="flow-arrow">→</span><div class="flow-node final">Answer</div>';
+            }
+
+            // Timeline
+            const timeline = document.getElementById('modalTimeline');
+            timeline.innerHTML = data.history.map((step, i) => {
+                const hasError = !!step.error;
+                const isFinal = step.output.startsWith('FINAL:');
+                const isWasm = hasWasm(step.commands);
+                let stepClass = hasError ? ' has-error' : (isWasm ? ' has-wasm' : (isFinal ? ' is-final' : ''));
+
+                let badges = '';
+                if (isWasm) {
+                    badges = '<div class="step-badges"><span class="badge wasm">WASM</span></div>';
+                }
+
+                return `<div class="step${stepClass}" onclick="showModalStep(${i})">
+                    <div class="step-number">Step ${step.step}</div>
+                    <div class="step-meta">
+                        ${step.commands ? (isWasm ? 'rust_wasm executed' : 'Commands executed') : 'No commands'}
+                        ${step.sub_calls > 0 ? ` • ${step.sub_calls} sub-calls` : ''}
+                        ${hasError ? ' • Error' : ''}
+                    </div>
+                    ${badges}
+                </div>`;
+            }).join('');
+
+            // Show first step
+            if (data.history.length > 0) {
+                showModalStep(0);
+            }
 
             modal.classList.add('visible');
+        }
+
+        function showModalStep(index) {
+            const step = currentData.history[index];
+
+            // Update active state in modal timeline
+            document.querySelectorAll('#modalTimeline .step').forEach((el, i) => {
+                el.classList.toggle('active', i === index);
+            });
+
+            // Render detail
+            let html = '';
+            const isWasm = hasWasm(step.commands);
+            const rustCode = extractRustCode(step.commands);
+
+            if (isWasm && rustCode) {
+                html += `<div class="detail-section">
+                    <h3 class="wasm-title">🔧 Rust Code (rust_wasm)</h3>
+                    <pre class="code-block rust">${escapeHtml(rustCode)}</pre>
+                </div>`;
+            }
+
+            html += `<div class="detail-section">
+                <h3>LLM Response</h3>
+                <pre>${escapeHtml(step.llm_response)}</pre>
+            </div>`;
+
+            if (step.commands) {
+                html += `<div class="detail-section">
+                    <h3>Commands</h3>
+                    <pre class="code-block">${escapeHtml(step.commands)}</pre>
+                </div>`;
+            }
+
+            html += `<div class="detail-section">
+                <h3>Output</h3>
+                <pre>${escapeHtml(step.output)}</pre>
+            </div>`;
+
+            if (step.error) {
+                html += `<div class="detail-section">
+                    <h3 style="color: var(--error)">Error</h3>
+                    <pre style="color: var(--error)">${escapeHtml(step.error)}</pre>
+                </div>`;
+            }
+
+            document.getElementById('modalDetailContent').innerHTML = html;
         }
 
         function hideResultModal(event) {
@@ -1750,163 +1885,17 @@ Line 7: ERROR - Invalid input received</textarea>
         }
 
         function renderResults(data) {
-            // Collapse progress section and show results
+            // Collapse progress section
             document.getElementById('progressSection').classList.remove('expanded');
-            document.getElementById('resultsSection').classList.remove('hidden');
 
             // Enable Show Result button and auto-show modal
             document.getElementById('showResultBtn').disabled = false;
             showResultModal();
-
-            // Check for WASM usage across all steps
-            const wasmSteps = data.history.filter(s => hasWasm(s.commands));
-            const usedWasm = wasmSteps.length > 0;
-
-            // Stats
-            document.getElementById('statIterations').textContent = data.iterations;
-            document.getElementById('statSubCalls').textContent = data.total_sub_calls;
-            document.getElementById('statContext').textContent = data.context_length.toLocaleString();
-
-            // Update WASM stat
-            const wasmStatEl = document.getElementById('statWasm');
-            if (wasmStatEl) {
-                wasmStatEl.querySelector('.stat-value').textContent = wasmSteps.length;
-                wasmStatEl.style.display = usedWasm ? 'block' : 'none';
-            }
-
-            // Update total tokens
-            const totalTokens = (data.total_prompt_tokens || 0) + (data.total_completion_tokens || 0);
-            document.getElementById('statTokens').textContent = totalTokens.toLocaleString();
-            document.getElementById('statTokens').title = `${(data.total_prompt_tokens || 0).toLocaleString()} prompt + ${(data.total_completion_tokens || 0).toLocaleString()} completion`;
-
-            // Update duration
-            if (data.total_duration_ms) {
-                const durationSec = (data.total_duration_ms / 1000).toFixed(1);
-                document.getElementById('statDuration').textContent = durationSec + 's';
-            }
-
-            // Show WASM info box if WASM was used
-            const wasmInfoEl = document.getElementById('wasmInfo');
-            if (wasmInfoEl) {
-                if (usedWasm) {
-                    wasmInfoEl.classList.remove('hidden');
-                    wasmInfoEl.querySelector('p').textContent =
-                        `This query used rust_wasm in ${wasmSteps.length} step(s) to perform custom analysis. ` +
-                        `WASM enables complex operations like aggregation, sorting, and statistical calculations that aren't possible with basic text commands.`;
-                } else {
-                    wasmInfoEl.classList.add('hidden');
-                }
-            }
-
-            // Answer
-            const answerBox = document.getElementById('answerBox');
-            answerBox.className = 'answer-box' + (data.success ? '' : ' error');
-            document.getElementById('answerText').textContent = data.success ? data.answer : (data.error || 'Failed');
-
-            // Flow diagram
-            const flow = document.getElementById('flowDiagram');
-            flow.innerHTML = '<div class="flow-node query">Query</div>';
-            data.history.forEach((step, i) => {
-                flow.innerHTML += '<span class="flow-arrow">→</span>';
-                const isFinal = step.output.startsWith('FINAL:');
-                const isWasm = hasWasm(step.commands);
-                let nodeClass = isWasm ? ' wasm' : (isFinal ? ' final' : '');
-                let icon = step.error ? '⚠️' : (isWasm ? '🔧' : '');
-                flow.innerHTML += `<div class="flow-node${nodeClass}">${icon}Step ${step.step}</div>`;
-            });
-            if (data.success) {
-                flow.innerHTML += '<span class="flow-arrow">→</span><div class="flow-node final">Answer</div>';
-            }
-
-            // Timeline
-            const timeline = document.getElementById('timeline');
-            timeline.innerHTML = data.history.map((step, i) => {
-                const hasError = !!step.error;
-                const isFinal = step.output.startsWith('FINAL:');
-                const isWasm = hasWasm(step.commands);
-                let stepClass = hasError ? ' has-error' : (isWasm ? ' has-wasm' : (isFinal ? ' is-final' : ''));
-
-                let badges = '';
-                if (isWasm) {
-                    badges = '<div class="step-badges"><span class="badge wasm">WASM</span></div>';
-                }
-
-                return `<div class="step${stepClass}" onclick="showStep(${i})">
-                    <div class="step-number">Step ${step.step}</div>
-                    <div class="step-meta">
-                        ${step.commands ? (isWasm ? 'rust_wasm executed' : 'Commands executed') : 'No commands'}
-                        ${step.sub_calls > 0 ? ` • ${step.sub_calls} sub-calls` : ''}
-                        ${hasError ? ' • Error' : ''}
-                    </div>
-                    ${badges}
-                </div>`;
-            }).join('');
-
-            // Show first step
-            if (data.history.length > 0) {
-                showStep(0);
-            }
         }
 
+        // Keep showStep for backward compatibility (not used anymore)
         function showStep(index) {
-            const step = currentData.history[index];
-
-            // Update active state
-            document.querySelectorAll('.step').forEach((el, i) => {
-                el.classList.toggle('active', i === index);
-            });
-
-            // Render detail
-            let html = '';
-            const isWasm = hasWasm(step.commands);
-            const rustCode = extractRustCode(step.commands);
-
-            // Show Rust code separately if this is a WASM step
-            if (isWasm && rustCode) {
-                html += `<div class="detail-section">
-                    <h3 class="wasm-title">🔧 Rust Code (rust_wasm)</h3>
-                    <pre class="code-block rust">${escapeHtml(rustCode)}</pre>
-                </div>`;
-            }
-
-            if (step.commands) {
-                html += `<div class="detail-section">
-                    <h3>${isWasm ? 'Command JSON' : 'Commands (JSON)'}</h3>
-                    <pre class="code-block json">${escapeHtml(formatJson(step.commands))}</pre>
-                </div>`;
-            }
-
-            if (step.output) {
-                html += `<div class="detail-section">
-                    <h3>Output</h3>
-                    <pre class="code-block output">${escapeHtml(step.output)}</pre>
-                </div>`;
-            }
-
-            if (step.error) {
-                html += `<div class="detail-section">
-                    <h3>Error</h3>
-                    <pre class="code-block error">${escapeHtml(step.error)}</pre>
-                </div>`;
-            }
-
-            if (step.sub_calls > 0) {
-                html += `<div class="detail-section">
-                    <h3>Sub-LM Calls</h3>
-                    <p>${step.sub_calls} call(s) made to sub-LM</p>
-                </div>`;
-            }
-
-            // Show token info if available
-            if (step.prompt_tokens || step.completion_tokens) {
-                const total = (step.prompt_tokens || 0) + (step.completion_tokens || 0);
-                html += `<div class="detail-section">
-                    <h3>Tokens</h3>
-                    <p>${step.prompt_tokens || 0} prompt + ${step.completion_tokens || 0} completion = ${total} total</p>
-                </div>`;
-            }
-
-            document.getElementById('detailContent').innerHTML = html || '<p style="color: var(--muted);">No data for this step</p>';
+            showModalStep(index);
         }
 
         function formatJson(str) {
