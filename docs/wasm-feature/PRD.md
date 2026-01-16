@@ -281,3 +281,191 @@ Extend `rust_wasm` to accept multiple named inputs that map to function paramete
 - **Phase 2**: WASM invocation with multiple args (~2 days)
 - **Phase 3**: System prompt updates and examples (~1 day)
 - **Phase 4**: Testing and documentation (~2 days)
+
+## Code Generation Approaches Architecture
+
+This section documents all approaches considered for LLM-generated code execution.
+
+### Capability Levels Architecture
+
+RLM defines three capability levels for code execution, each with different tradeoffs between security and capability:
+
+| Level | Name | Sandbox | Capabilities | Use Case |
+|-------|------|---------|--------------|----------|
+| 1 | DSL Operations | Full | Built-in find/regex/slice/count | Simple filtering, search |
+| 2 | Sandboxed WASM | Full/Controlled | Map-reduce with controlled libs | Aggregation, counting |
+| 3 | Native CLI/DLL | Process/None | Full Rust std library | Complex analysis, large data |
+
+**Level 1: DSL Operations** (Most Secure)
+- Built-in commands: find, regex, lines, slice, count
+- No code generation - fixed command set
+- Fully sandboxed - operates only on provided context
+- Best for: Simple pattern matching, extraction, filtering
+
+**Level 2: Sandboxed WASM** (Balanced)
+- LLM generates code that runs in WASM sandbox
+- Memory and execution limits enforced
+- Option: Node.js WASM container with controlled library access
+- Best for: Map-reduce patterns, frequency counting, aggregation
+- Limitations: No HashMap, no complex string operations in wasmtime
+
+**Level 3: Native CLI/DLL** (Maximum Capability)
+- LLM generates full Rust code compiled to native binary
+- Full std library: HashMap, contains, split, regex
+- Process isolation only (CLI) or none (DLL)
+- Future: Docker/LXC, seccomp, unprivileged user for sandboxing
+- Best for: Complex analysis, large datasets, operations that fail in WASM
+
+**Selection Guidance**:
+1. Start with Level 1 (DSL) if the query can be answered with filtering/extraction
+2. Use Level 2 (WASM) for aggregation on medium datasets (<100KB) with simple patterns
+3. Fall back to Level 3 (CLI) for large datasets or when WASM fails
+
+### 1. WASM-Based Approaches (Implemented)
+
+#### 1.1 rust_wasm (Basic WASM)
+
+**Command**: `{"op": "rust_wasm", "code": "...", "store": "result"}`
+
+**Pros**:
+- Sandboxed execution (no filesystem, network, process access)
+- Memory limits enforced
+- Fuel-based execution limits
+
+**Cons**:
+- WASM memory model causes crashes with complex string operations
+- TwoWaySearcher (used by contains, find, split) panics in WASM
+- HashMap/HashSet also cause panics
+- Requires custom byte-level helpers to avoid panics
+
+**Status**: Implemented but unreliable for complex operations
+
+#### 1.2 rust_wasm_reduce_intent (Streaming WASM)
+
+**Command**: `{"op": "rust_wasm_reduce_intent", "intent": "...", "store": "result"}`
+
+**Pros**:
+- Streaming pattern handles large datasets
+- State persists across chunks
+- Same sandbox protections as WASM
+
+**Cons**:
+- Same WASM limitations as rust_wasm
+- State growing in WASM memory can cause crashes
+- Complex aggregation still problematic
+
+**Status**: Implemented but unreliable for large datasets
+
+#### 1.3 rust_wasm_mapreduce (Stateless WASM Map + Native Reduce)
+
+**Command**: `{"op": "rust_wasm_mapreduce", "intent": "...", "combiner": "count", "store": "result"}`
+
+**Pros**:
+- WASM is completely stateless (just maps lines to key-value pairs)
+- All aggregation happens in native Rust (HashMap, sorting)
+- More reliable than pure WASM approaches
+
+**Cons**:
+- Still subject to WASM string operation crashes
+- Limited to map-reduce patterns
+
+**Status**: Implemented, more reliable but still has WASM issues
+
+### 2. Native CLI Binary Approach (Implemented)
+
+#### 2.1 rust_cli_intent
+
+**Command**: `{"op": "rust_cli_intent", "intent": "...", "store": "result"}`
+
+**How It Works**:
+1. Coding LLM generates Rust code with full std library access
+2. Code compiled to native binary (cached by code hash)
+3. Binary reads from stdin, writes to stdout
+4. Process isolation provides sandboxing
+
+**Pros**:
+- Full Rust std library (HashMap, contains, split, etc.)
+- No WASM memory limitations
+- No TwoWaySearcher panics
+- Faster execution for large datasets
+- Binary caching for repeated queries
+
+**Cons**:
+- Less sandboxed than WASM (process isolation only)
+- Relies on code validation to block dangerous operations
+
+**Security**:
+- Code validation blocks: std::fs::remove, std::fs::write, std::net, std::process::Command, unsafe blocks, extern crate
+- Future: Docker/LXC containers, seccomp/landlock, unprivileged user execution
+
+**Status**: Implemented, preferred for large datasets
+
+### 3. Future Approaches (Considered but Not Yet Implemented)
+
+#### 3.1 Dynamic cdylib (In-Process)
+
+**Concept**: Compile Rust to a shared library (.so/.dylib), load dynamically, call in-process
+
+**Pros**:
+- No subprocess overhead
+- Can share memory directly
+- Potentially faster than CLI
+
+**Cons**:
+- Less isolation than separate process
+- Crashes in loaded code crash the host
+- More complex to implement safely
+
+**Status**: Considered for future optimization
+
+#### 3.2 Node.js WASM Container
+
+**Concept**: Run WASM in a Node.js container with JavaScript glue code
+
+**Pros**:
+- V8's WASM runtime may have fewer limitations than wasmtime
+- JavaScript can provide polyfills for problematic operations
+- Container provides sandboxing
+
+**Cons**:
+- Requires Node.js dependency
+- More complex architecture
+- Still limited by WASM memory model
+
+**Status**: Considered for future investigation
+
+### 4. Capability Matrix
+
+| Approach | HashMap | contains/split | Large Data | Sandbox | Speed |
+|----------|---------|----------------|------------|---------|-------|
+| rust_wasm | No | No (panics) | Limited | Full WASM | Medium |
+| rust_wasm_reduce | No | No (panics) | Better | Full WASM | Medium |
+| rust_wasm_mapreduce | Native | No (panics) | Good | Partial | Medium |
+| rust_cli_intent | Yes | Yes | Excellent | Process | Fast |
+| cdylib (future) | Yes | Yes | Excellent | None | Fastest |
+| Node WASM (future) | Maybe | Maybe | Unknown | Container | Medium |
+
+### 5. Recommendation
+
+For production use:
+1. **Small datasets (<100KB)**: Use rust_wasm_mapreduce with prefiltering
+2. **Large datasets**: Use rust_cli_intent
+3. **Security-critical**: Add Docker/seccomp sandboxing to CLI approach
+
+### 6. Future Work: llm_chunk_analyze
+
+**Concept**: For tasks requiring semantic understanding (not just computation), delegate to an LLM that processes chunks.
+
+**Use Cases**:
+- Categorization that requires reading/understanding
+- Fuzzy matching that can't be done computationally
+- Summarization of sections
+
+**Architecture**:
+```json
+{"op": "llm_chunk_analyze", "chunk_size": 4096, "prompt": "Categorize each log entry...", "store": "categories"}
+```
+
+Each chunk sent to LLM with task prompt, results aggregated.
+
+**Status**: Future feature for non-computational analysis

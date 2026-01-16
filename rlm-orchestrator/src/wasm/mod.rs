@@ -418,6 +418,153 @@ impl ReduceInstance {
     }
 }
 
+/// A WASM instance for stateless map operations
+///
+/// Maps each line to key-value pairs (WASM is stateless, aggregation in native Rust)
+pub struct MapInstance {
+    store: Store<()>,
+    instance: Instance,
+}
+
+impl MapInstance {
+    /// Map a single line to key-value pairs
+    ///
+    /// Returns pairs as Vec<(key, value)> for aggregation in native Rust.
+    pub fn map_line(&mut self, line: &str) -> Result<Vec<(String, String)>, WasmError> {
+        // Get memory and functions
+        let memory = self
+            .instance
+            .get_memory(&mut self.store, "memory")
+            .ok_or_else(|| WasmError::ExecutionError("No memory export".to_string()))?;
+
+        let alloc = self
+            .instance
+            .get_typed_func::<i32, i32>(&mut self.store, "alloc")
+            .map_err(|e| WasmError::FunctionNotFound(format!("alloc: {}", e)))?;
+
+        let map_one = self
+            .instance
+            .get_typed_func::<(i32, i32), i32>(&mut self.store, "map_one")
+            .map_err(|e| WasmError::FunctionNotFound(format!("map_one: {}", e)))?;
+
+        let get_result_ptr = self
+            .instance
+            .get_typed_func::<(), i32>(&mut self.store, "get_result_ptr")
+            .map_err(|e| WasmError::FunctionNotFound(format!("get_result_ptr: {}", e)))?;
+
+        let get_result_len = self
+            .instance
+            .get_typed_func::<(), i32>(&mut self.store, "get_result_len")
+            .map_err(|e| WasmError::FunctionNotFound(format!("get_result_len: {}", e)))?;
+
+        // Allocate memory for line
+        let line_bytes = line.as_bytes();
+        let ptr = alloc
+            .call(&mut self.store, line_bytes.len() as i32)
+            .map_err(|e| {
+                if e.to_string().contains("fuel") {
+                    WasmError::OutOfFuel
+                } else {
+                    WasmError::ExecutionError(e.to_string())
+                }
+            })?;
+
+        // Copy line to WASM memory
+        memory
+            .write(&mut self.store, ptr as usize, line_bytes)
+            .map_err(|e| WasmError::ExecutionError(format!("Memory write failed: {}", e)))?;
+
+        // Map the line
+        let _result = map_one
+            .call(&mut self.store, (ptr, line_bytes.len() as i32))
+            .map_err(|e| {
+                if e.to_string().contains("fuel") {
+                    WasmError::OutOfFuel
+                } else {
+                    WasmError::ExecutionError(e.to_string())
+                }
+            })?;
+
+        // Get result
+        let result_ptr = get_result_ptr
+            .call(&mut self.store, ())
+            .map_err(|e| WasmError::ExecutionError(e.to_string()))?
+            as usize;
+        let result_len = get_result_len
+            .call(&mut self.store, ())
+            .map_err(|e| WasmError::ExecutionError(e.to_string()))?
+            as usize;
+
+        // Read result from memory
+        if result_len == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut result_bytes = vec![0u8; result_len];
+        memory
+            .read(&self.store, result_ptr, &mut result_bytes)
+            .map_err(|e| WasmError::ExecutionError(format!("Memory read failed: {}", e)))?;
+
+        let result_str = String::from_utf8(result_bytes)
+            .map_err(|e| WasmError::ExecutionError(format!("Invalid UTF-8 result: {}", e)))?;
+
+        // Parse "key\tvalue\nkey2\tvalue2..." format
+        let mut pairs = Vec::new();
+        for line in result_str.lines() {
+            if let Some(tab_pos) = line.find('\t') {
+                let key = line[..tab_pos].to_string();
+                let value = line[tab_pos + 1..].to_string();
+                pairs.push((key, value));
+            }
+        }
+
+        Ok(pairs)
+    }
+
+    /// Get remaining fuel in this instance
+    pub fn remaining_fuel(&self) -> u64 {
+        self.store.get_fuel().unwrap_or(0)
+    }
+}
+
+impl WasmExecutor {
+    /// Create a map instance for stateless line-by-line processing
+    ///
+    /// The WASM module should export:
+    /// - `alloc(size: i32) -> i32`: allocate memory for input
+    /// - `map_one(ptr: i32, len: i32) -> i32`: map a line to key-value pairs
+    /// - `get_result_ptr() -> i32`: get pointer to result
+    /// - `get_result_len() -> i32`: get length of result
+    pub fn create_map_instance(
+        &self,
+        wasm_bytes: &[u8],
+    ) -> Result<MapInstance, WasmError> {
+        // Create a store with fuel limit
+        let mut store = Store::new(&self.engine, ());
+        store
+            .set_fuel(self.config.fuel_limit)
+            .map_err(|e| WasmError::ExecutionError(e.to_string()))?;
+
+        // Compile the module
+        let module = Module::new(&self.engine, wasm_bytes)
+            .map_err(|e| WasmError::CompileError(e.to_string()))?;
+
+        // Create instance
+        let instance = Instance::new(&mut store, &module, &[])
+            .map_err(|e| WasmError::ExecutionError(e.to_string()))?;
+
+        // Verify required exports exist
+        instance
+            .get_typed_func::<i32, i32>(&mut store, "alloc")
+            .map_err(|e| WasmError::FunctionNotFound(format!("alloc: {}", e)))?;
+        instance
+            .get_typed_func::<(i32, i32), i32>(&mut store, "map_one")
+            .map_err(|e| WasmError::FunctionNotFound(format!("map_one: {}", e)))?;
+
+        Ok(MapInstance { store, instance })
+    }
+}
+
 /// Pre-compiled WASM modules for common operations
 pub struct WasmLibrary {
     modules: HashMap<String, Vec<u8>>,

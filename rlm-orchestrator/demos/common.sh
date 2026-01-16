@@ -36,7 +36,7 @@ LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"
 LITELLM_MODEL="${LITELLM_MODEL:-deepseek/deepseek-chat}"
 
 # Code generation LLM settings (also via LiteLLM)
-# Uses deepseek-coder for rust_wasm_intent code generation
+# Uses deepseek-coder for rust_cli_intent code generation
 CODEGEN_MODEL="${CODEGEN_MODEL:-deepseek/deepseek-coder}"
 
 # Function to fetch sample data from the server

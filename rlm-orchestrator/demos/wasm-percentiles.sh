@@ -1,8 +1,8 @@
 #!/bin/bash
-# WASM Percentiles Demo
+# CLI Percentiles Demo
 #
 # Calculates response time percentiles (p50, p95, p99) from log data.
-# Uses rust_wasm to parse times, sort, and compute percentiles.
+# Uses rust_cli_intent to parse times, sort, and compute percentiles.
 #
 # Expected time with DeepSeek: 20-40 seconds
 # Expected iterations: 2-3
@@ -10,11 +10,11 @@
 source "$(dirname "$0")/common.sh"
 
 echo "============================================"
-echo "WASM Percentiles Demo"
+echo "CLI Percentiles Demo"
 echo "============================================"
 echo ""
 echo "This demo calculates p50, p95, and p99 response time"
-echo "percentiles using WASM for sorting and computation."
+echo "percentiles using native CLI code generation."
 echo ""
 
 # Generate response time log data

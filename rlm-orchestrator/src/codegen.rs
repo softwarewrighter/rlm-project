@@ -119,6 +119,61 @@ impl CodeGenerator {
         Ok(code)
     }
 
+    /// Generate Rust code for stateless map pattern
+    ///
+    /// This generates:
+    /// - fn map_line(line: &str) -> Vec<(String, String)>
+    ///
+    /// The map function is STATELESS - it processes each line independently
+    /// and returns zero or more (key, value) pairs. Aggregation happens in native Rust.
+    pub async fn generate_map(&self, intent: &str) -> Result<String, CodeGenError> {
+        let provider_guard = self.provider.read().await;
+        let provider = provider_guard
+            .as_ref()
+            .ok_or(CodeGenError::NotConfigured)?;
+
+        let system_prompt = Self::build_map_system_prompt();
+        let request = LlmRequest::new(system_prompt, intent)
+            .with_temperature(self.config.temperature)
+            .with_max_tokens(1024);
+
+        let response = match provider {
+            ProviderWrapper::Ollama(p) => p.complete(&request).await?,
+            ProviderWrapper::LiteLLM(p) => p.complete(&request).await?,
+        };
+
+        // Extract the map code from the response
+        let code = Self::extract_map_code(&response.content)?;
+        Ok(code)
+    }
+
+    /// Generate Rust code for native CLI binary
+    ///
+    /// Unlike WASM code, CLI code can use the full Rust standard library
+    /// including HashMap, contains, split, etc.
+    ///
+    /// This generates: fn analyze(input: &str) -> String
+    pub async fn generate_cli(&self, intent: &str) -> Result<String, CodeGenError> {
+        let provider_guard = self.provider.read().await;
+        let provider = provider_guard
+            .as_ref()
+            .ok_or(CodeGenError::NotConfigured)?;
+
+        let system_prompt = Self::build_cli_system_prompt();
+        let request = LlmRequest::new(system_prompt, intent)
+            .with_temperature(self.config.temperature)
+            .with_max_tokens(2048);
+
+        let response = match provider {
+            ProviderWrapper::Ollama(p) => p.complete(&request).await?,
+            ProviderWrapper::LiteLLM(p) => p.complete(&request).await?,
+        };
+
+        // Extract the CLI code from the response
+        let code = Self::extract_code(&response.content)?;
+        Ok(code)
+    }
+
     /// Generate Rust code for streaming reduce pattern
     ///
     /// This generates:
@@ -145,6 +200,197 @@ impl CodeGenerator {
         // Extract the reduce code from the response
         let code = Self::extract_reduce_code(&response.content)?;
         Ok(code)
+    }
+
+    /// Build the system prompt for stateless map code generation
+    fn build_map_system_prompt() -> &'static str {
+        r#"You are a Rust code generator for STATELESS MAP operations. Your code processes ONE LINE at a time and emits key-value pairs. NO STATE is kept between lines - aggregation happens elsewhere.
+
+STATELESS MAP PATTERN:
+- fn map_line(line: &str) -> Vec<(String, String)>
+- Returns empty Vec if line should be skipped
+- Returns one or more (key, value) pairs if line matches
+- NO STATE - each line is processed independently
+- Aggregation (counting, summing) happens in native Rust after mapping
+
+OUTPUT RULES:
+1. Output ONLY Rust code - no explanations, no markdown
+2. Must define: fn map_line(line: &str) -> Vec<(String, String)>
+3. Return Vec::new() for lines to skip
+4. Return vec![(key, value)] for lines to include
+
+ENVIRONMENT CONSTRAINTS:
+- Code compiles to WebAssembly (WASM) with limited memory
+- Input is ASCII-only text
+- TwoWaySearcher PANICS in WASM - use helpers instead
+
+SAFE HELPERS (already defined):
+- has(s, "pat") -> bool        Check if string contains pattern
+- after(s, "pat") -> &str      Get text after first occurrence
+- before(s, "pat") -> &str     Get text before first occurrence
+- word(s, n) -> &str           Get nth whitespace-separated word (0-indexed)
+- slice(s, start, end) -> &str Get substring by byte position
+- parse_int(s) -> i64          Parse integer (returns 0 on failure)
+- eq(a, b) -> bool             Compare strings for equality
+
+SAFE STDLIB:
+- Vec, Vec::new(), vec![], .push()
+- .trim(), .to_string(), .is_empty(), .len()
+- format!()
+
+FORBIDDEN (these panic in WASM):
+- .contains(), .find(), .rfind() -> use has(), after(), before()
+- .split(), .split_once() -> use word() or iterate with after()
+- == for string comparison -> use eq() instead
+
+EXAMPLE - Extract error type from [ERROR] lines:
+
+fn map_line(line: &str) -> Vec<(String, String)> {
+    if !has(line, "[ERROR]") {
+        return Vec::new();
+    }
+    let err_type = word(after(line, "[ERROR]"), 0).trim().to_string();
+    if err_type.is_empty() {
+        return Vec::new();
+    }
+    vec![(err_type, "1".to_string())]
+}
+
+EXAMPLE - Extract IP address from each line:
+
+fn map_line(line: &str) -> Vec<(String, String)> {
+    let ip = word(line, 0).to_string();
+    if ip.is_empty() {
+        return Vec::new();
+    }
+    vec![(ip, "1".to_string())]
+}
+
+EXAMPLE - Extract HTTP status code from log lines:
+
+fn map_line(line: &str) -> Vec<(String, String)> {
+    if !has(line, "HTTP/") {
+        return Vec::new();
+    }
+    let status = word(after(line, "HTTP/1.1\""), 0).trim().to_string();
+    if status.is_empty() {
+        return Vec::new();
+    }
+    vec![(status, "1".to_string())]
+}
+
+Now generate stateless map code for the following intent. Output ONLY the fn map_line function:"#
+    }
+
+    /// Build the system prompt for CLI binary code generation
+    ///
+    /// Unlike WASM, CLI binaries can use the full Rust standard library
+    fn build_cli_system_prompt() -> &'static str {
+        r#"You are a Rust code generator for a CLI text processing tool. Your code runs as a native binary with FULL access to Rust's standard library.
+
+EXECUTION CONTEXT:
+- Code compiles to a native binary (NOT WASM)
+- Reads from stdin, writes to stdout
+- Full Rust std library available (HashMap, contains, split, etc.)
+- Code runs sandboxed by process isolation, not WASM
+
+OUTPUT RULES:
+1. Output ONLY Rust code - no explanations, no markdown
+2. Start directly with: pub fn analyze(input: &str) -> String {
+
+AVAILABLE LIBRARIES AND METHODS:
+- Full std library: HashMap, HashSet, BTreeMap, Vec
+- All string methods: .contains(), .split(), .find(), .replace()
+- Iterators: .lines(), .chars(), .bytes()
+- Formatting: format!(), println!() (though output goes to stdout)
+- Error handling: .unwrap(), .expect(), Result types
+
+HELPER FUNCTIONS (already defined):
+- has(s, "pat") -> bool        Check if string contains pattern (alias for .contains())
+- count(s, "pat") -> usize     Count occurrences
+- after(s, "pat") -> &str      Get text after first occurrence
+- before(s, "pat") -> &str     Get text before first occurrence
+- word(s, n) -> &str           Get nth whitespace-separated word
+- slice(s, start, end) -> &str Get substring by byte position
+- parse_int(s) -> i64          Parse integer (returns 0 on failure)
+
+SECURITY RESTRICTIONS (these will be rejected):
+- No std::fs::remove (file deletion)
+- No std::fs::write (file writing)
+- No std::net (network access)
+- No std::process::Command (spawning processes)
+- No unsafe blocks
+- No external crates
+
+EXAMPLE - Count error types using HashMap:
+
+pub fn analyze(input: &str) -> String {
+    use std::collections::HashMap;
+
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+
+    for line in input.lines() {
+        if line.contains("[ERROR]") {
+            // Extract error type - first word after [ERROR]
+            if let Some(rest) = line.split("[ERROR]").nth(1) {
+                let err_type = rest.trim().split_whitespace().next().unwrap_or("Unknown");
+                *counts.entry(err_type).or_insert(0) += 1;
+            }
+        }
+    }
+
+    // Sort by count descending
+    let mut sorted: Vec<_> = counts.iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(a.1));
+
+    sorted.iter()
+        .map(|(k, v)| format!("{}: {}", k, v))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+EXAMPLE - Count unique IP addresses:
+
+pub fn analyze(input: &str) -> String {
+    use std::collections::HashMap;
+
+    let mut ip_counts: HashMap<&str, usize> = HashMap::new();
+
+    for line in input.lines() {
+        // IP is typically first word
+        if let Some(ip) = line.split_whitespace().next() {
+            *ip_counts.entry(ip).or_insert(0) += 1;
+        }
+    }
+
+    let mut sorted: Vec<_> = ip_counts.iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(a.1));
+
+    let mut result = format!("Unique IPs: {}\n\nTop 10:\n", sorted.len());
+    for (i, (ip, count)) in sorted.iter().take(10).enumerate() {
+        result.push_str(&format!("{}. {} ({} requests)\n", i + 1, ip, count));
+    }
+    result
+}
+
+EXAMPLE - Sum numeric values after a label:
+
+pub fn analyze(input: &str) -> String {
+    let mut sum: i64 = 0;
+
+    for line in input.lines() {
+        if let Some(idx) = line.find("value:") {
+            let rest = &line[idx + 6..];
+            if let Some(num_str) = rest.trim().split_whitespace().next() {
+                sum += num_str.parse::<i64>().unwrap_or(0);
+            }
+        }
+    }
+
+    sum.to_string()
+}
+
+Now generate code for the following intent. Output ONLY the Rust function, starting with `pub fn analyze`:"#
     }
 
     /// Build the system prompt for the coding LLM
@@ -511,6 +757,61 @@ Now generate streaming reduce code for the following intent. Output ONLY the str
             }
         }
         None
+    }
+
+    /// Extract map code from LLM response
+    ///
+    /// Looks for: fn map_line
+    fn extract_map_code(response: &str) -> Result<String, CodeGenError> {
+        let response = response.trim();
+
+        // Try to extract from markdown code block first
+        let code = if let Some(start) = response.find("```rust") {
+            let code_start = start + 7;
+            if let Some(end) = response[code_start..].find("```") {
+                response[code_start..code_start + end].trim()
+            } else {
+                response
+            }
+        } else if let Some(start) = response.find("```") {
+            let code_start = start + 3;
+            let code_start = if let Some(newline) = response[code_start..].find('\n') {
+                code_start + newline + 1
+            } else {
+                code_start
+            };
+            if let Some(end) = response[code_start..].find("```") {
+                response[code_start..code_start + end].trim()
+            } else {
+                response
+            }
+        } else {
+            response
+        };
+
+        // Validate that map_line function is present
+        if !code.contains("fn map_line") {
+            return Err(CodeGenError::InvalidCode(
+                "Missing 'fn map_line' function".to_string(),
+            ));
+        }
+
+        // Find the function and extract it
+        if let Some(fn_start) = code.find("fn map_line") {
+            let fn_code = &code[fn_start..];
+            if let Some(end) = Self::find_function_end(fn_code) {
+                return Ok(fn_code[..end].to_string());
+            }
+        }
+
+        Err(CodeGenError::InvalidCode(format!(
+            "Could not extract valid map code from response: {}",
+            if code.len() > 200 {
+                format!("{}...", &code[..200])
+            } else {
+                code.to_string()
+            }
+        )))
     }
 
     /// Extract reduce code from LLM response

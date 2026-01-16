@@ -2,7 +2,7 @@
 # Large Logs Error Ranking Demo
 #
 # Analyzes 5000 log lines to rank error types by frequency.
-# Uses rust_wasm_reduce_intent for streaming analysis of large data.
+# Uses rust_cli_intent for native binary code generation.
 #
 # Expected time with DeepSeek: 30-60 seconds
 # Expected iterations: 1-2
@@ -14,7 +14,7 @@ echo "Large Logs Error Ranking Demo"
 echo "============================================"
 echo ""
 echo "This demo analyzes 5000 log lines and ranks error types"
-echo "from most to least frequent using WASM code generation."
+echo "from most to least frequent using native CLI code generation."
 echo ""
 
 # Create temp file for context

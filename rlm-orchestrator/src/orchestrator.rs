@@ -630,43 +630,42 @@ The context has {context_len} characters. You interact with it using JSON comman
   IMPORTANT: The sub-LLM has NO access to the original context!
   You MUST first extract relevant content, then pass it via ${{var}}.
 
-### Analysis with Code Generation: rust_wasm_reduce_intent
+### Analysis with Code Generation: rust_cli_intent (PREFERRED)
 
-For aggregation, counting, frequency analysis, or any computation over the data:
+For counting, frequency analysis, aggregation, and complex data processing:
 
-- {{"op": "rust_wasm_reduce_intent", "intent": "description of what to compute", "store": "result"}}
+- {{"op": "rust_cli_intent", "intent": "what to compute", "store": "result"}}
 
-This uses a specialized coding LLM to generate safe analysis code. Just describe WHAT you want.
+This compiles Rust to a native binary with full std library (HashMap, contains, split).
+Reliable and fast for any dataset size.
 
-**EXAMPLES:**
+**EXAMPLES - Use rust_cli_intent for frequency counting:**
 
-Filter first, then reduce (recommended pattern):
 ```json
-{{"op": "find", "text": "[ERROR]", "store": "error_lines"}}
-{{"op": "rust_wasm_reduce_intent", "intent": "Count each unique error type and rank by frequency", "on": "error_lines", "store": "error_counts"}}
+{{"op": "rust_cli_intent", "intent": "Count each error type (word after [ERROR]) and rank by frequency", "store": "error_counts"}}
 {{"op": "final_var", "name": "error_counts"}}
 ```
 
 ```json
-{{"op": "regex", "pattern": "from \\d+\\.\\d+\\.\\d+\\.\\d+", "store": "ip_lines"}}
-{{"op": "rust_wasm_reduce_intent", "intent": "Extract IP after 'from ', count requests per IP, show top 10", "on": "ip_lines", "store": "ip_stats"}}
+{{"op": "rust_cli_intent", "intent": "Extract all IP addresses and count occurrences, show top 10", "store": "ip_stats"}}
 {{"op": "final_var", "name": "ip_stats"}}
 ```
 
 ```json
-{{"op": "regex", "pattern": "value: \\d+", "store": "value_lines"}}
-{{"op": "rust_wasm_reduce_intent", "intent": "Extract number after 'value:', calculate sum, min, max, average", "on": "value_lines", "store": "stats"}}
+{{"op": "rust_cli_intent", "intent": "Sum all numeric values after 'value:'", "store": "total"}}
+{{"op": "final_var", "name": "total"}}
 ```
 
 **WHAT IT CAN DO:**
 - Count occurrences, frequencies, unique values
-- Sum, min, max, mean calculations
+- Sum, min, max values
 - Top-N rankings
-- Pattern matching and extraction across all lines
+- Complex string parsing
+- Any analysis expressible in Rust
 
 **LIMITATIONS (not supported):**
-- Median, percentiles (require sorted data)
-- Complex multi-pass algorithms
+- Median, percentiles (could be added)
+- Multi-document correlation (use variables)
 
 ### Finishing
 - {{"op": "final", "answer": "The result is..."}} - Simple text answers
@@ -675,24 +674,15 @@ Filter first, then reduce (recommended pattern):
 ## Workflow
 
 1. **Simple queries**: Use find/regex/lines to extract, then final
-2. **Aggregation/analysis**: FILTER first with find/regex, THEN use rust_wasm_reduce_intent on filtered data
+2. **Aggregation/analysis**: Use rust_cli_intent for counting, ranking, aggregation
 3. **Semantic analysis**: Extract content first, then use llm_query
-
-**IMPORTANT**: For rust_wasm_reduce_intent, ALWAYS filter first to reduce data size:
-
-```json
-{{"op": "find", "text": "[ERROR]", "store": "error_lines"}}
-{{"op": "rust_wasm_reduce_intent", "intent": "Count each error type and rank by frequency", "on": "error_lines", "store": "ranked_errors"}}
-{{"op": "final_var", "name": "ranked_errors"}}
-```
 
 ## Example: Error Frequency Analysis
 
 Query: "Rank error types by frequency"
 
 ```json
-{{"op": "find", "text": "[ERROR]", "store": "error_lines"}}
-{{"op": "rust_wasm_reduce_intent", "intent": "Extract word after [ERROR], count each type, rank most to least frequent", "on": "error_lines", "store": "ranked_errors"}}
+{{"op": "rust_cli_intent", "intent": "Count each error type (word after [ERROR]) and rank by frequency descending", "store": "ranked_errors"}}
 {{"op": "final_var", "name": "ranked_errors"}}
 ```
 
@@ -701,8 +691,7 @@ Query: "Rank error types by frequency"
 Query: "Find unique IPs and count requests"
 
 ```json
-{{"op": "regex", "pattern": "from \\d+\\.\\d+\\.\\d+\\.\\d+", "store": "ip_lines"}}
-{{"op": "rust_wasm_reduce_intent", "intent": "Extract IP address after 'from ', count each, rank top 10", "on": "ip_lines", "store": "ip_stats"}}
+{{"op": "rust_cli_intent", "intent": "Extract all IP addresses, count occurrences, and show top 10 most frequent", "store": "ip_stats"}}
 {{"op": "final_var", "name": "ip_stats"}}
 ```
 

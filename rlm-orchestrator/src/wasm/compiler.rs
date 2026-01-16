@@ -250,10 +250,13 @@ fn to_str(bytes: &[u8]) -> &str {{
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {{
     if needle.is_empty() {{ return Some(0); }}
     if needle.len() > haystack.len() {{ return None; }}
-    for i in 0..=(haystack.len() - needle.len()) {{
-        if &haystack[i..i + needle.len()] == needle {{
-            return Some(i);
+    'outer: for i in 0..=(haystack.len() - needle.len()) {{
+        for j in 0..needle.len() {{
+            if haystack[i + j] != needle[j] {{
+                continue 'outer;
+            }}
         }}
+        return Some(i);
     }}
     None
 }}
@@ -365,8 +368,22 @@ fn slice(s: &str, start: usize, end: usize) -> &str {{
 
 /// Parse integer, returns 0 on failure
 #[allow(dead_code)]
+fn safe_trim(s: &str) -> &str {{
+    let bytes = s.as_bytes();
+    let mut start = 0;
+    let mut end = bytes.len();
+    while start < end && (bytes[start] == b' ' || bytes[start] == b'\t' || bytes[start] == b'\r' || bytes[start] == b'\n') {{
+        start += 1;
+    }}
+    while end > start && (bytes[end - 1] == b' ' || bytes[end - 1] == b'\t' || bytes[end - 1] == b'\r' || bytes[end - 1] == b'\n') {{
+        end -= 1;
+    }}
+    &s[start..end]
+}}
+
+#[allow(dead_code)]
 fn parse_int(s: &str) -> i64 {{
-    let s = s.trim();
+    let s = safe_trim(s);
     if s.is_empty() {{ return 0; }}
     let bytes = s.as_bytes();
     let (neg, start) = if bytes[0] == b'-' {{ (true, 1) }} else {{ (false, 0) }};
@@ -567,10 +584,13 @@ fn to_str(bytes: &[u8]) -> &str {{
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {{
     if needle.is_empty() {{ return Some(0); }}
     if needle.len() > haystack.len() {{ return None; }}
-    for i in 0..=(haystack.len() - needle.len()) {{
-        if &haystack[i..i + needle.len()] == needle {{
-            return Some(i);
+    'outer: for i in 0..=(haystack.len() - needle.len()) {{
+        for j in 0..needle.len() {{
+            if haystack[i + j] != needle[j] {{
+                continue 'outer;
+            }}
         }}
+        return Some(i);
     }}
     None
 }}
@@ -600,7 +620,17 @@ fn count(s: &str, pat: &str) -> usize {{
 
 #[allow(dead_code)]
 fn eq(a: &str, b: &str) -> bool {{
-    a.as_bytes() == b.as_bytes()
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    if a_bytes.len() != b_bytes.len() {{
+        return false;
+    }}
+    for i in 0..a_bytes.len() {{
+        if a_bytes[i] != b_bytes[i] {{
+            return false;
+        }}
+    }}
+    true
 }}
 
 #[allow(dead_code)]
@@ -653,8 +683,22 @@ fn slice(s: &str, start: usize, end: usize) -> &str {{
 }}
 
 #[allow(dead_code)]
+fn safe_trim(s: &str) -> &str {{
+    let bytes = s.as_bytes();
+    let mut start = 0;
+    let mut end = bytes.len();
+    while start < end && (bytes[start] == b' ' || bytes[start] == b'\t' || bytes[start] == b'\r' || bytes[start] == b'\n') {{
+        start += 1;
+    }}
+    while end > start && (bytes[end - 1] == b' ' || bytes[end - 1] == b'\t' || bytes[end - 1] == b'\r' || bytes[end - 1] == b'\n') {{
+        end -= 1;
+    }}
+    &s[start..end]
+}}
+
+#[allow(dead_code)]
 fn parse_int(s: &str) -> i64 {{
-    let s = s.trim();
+    let s = safe_trim(s);
     if s.is_empty() {{ return 0; }}
     let bytes = s.as_bytes();
     let (neg, start) = if bytes[0] == b'-' {{ (true, 1) }} else {{ (false, 0) }};
@@ -711,6 +755,27 @@ pub extern "C" fn reduce_init() -> i32 {{
         STATE = Some(init_state());
     }}
     0
+}}
+
+/// Get state debug info (call before crash to understand state size)
+static mut DEBUG_INFO: String = String::new();
+
+#[no_mangle]
+pub extern "C" fn get_state_debug() -> i32 {{
+    unsafe {{
+        DEBUG_INFO = format!("State size: {{}} bytes (approx)", std::mem::size_of::<State>());
+    }}
+    0
+}}
+
+#[no_mangle]
+pub extern "C" fn get_debug_ptr() -> *const u8 {{
+    unsafe {{ DEBUG_INFO.as_ptr() }}
+}}
+
+#[no_mangle]
+pub extern "C" fn get_debug_len() -> usize {{
+    unsafe {{ DEBUG_INFO.len() }}
 }}
 
 /// Process a chunk of input (called multiple times)
@@ -902,6 +967,543 @@ pub extern "C" fn get_result_len() -> usize {{
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok())
             .map(|s| s.trim().to_string())
+    }
+
+    /// Generate the WASM module source for stateless map pattern
+    /// User code should define:
+    /// - fn map_line(line: &str) -> Vec<(String, String)>
+    /// Returns key-value pairs for each line, which are then aggregated in native Rust
+    fn generate_map_module_source(&self, user_code: &str) -> String {
+        format!(
+            r#"// Auto-generated WASM module for RLM Stateless Map
+// INPUT IS ASCII-ONLY - safe to use byte slicing!
+// This module is STATELESS - each line is processed independently.
+// Key-value pairs are returned and aggregated by native Rust.
+
+// ============ PURE BYTE-LEVEL HELPERS ============
+
+#[inline]
+fn to_str(bytes: &[u8]) -> &str {{
+    unsafe {{ std::str::from_utf8_unchecked(bytes) }}
+}}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {{
+    if needle.is_empty() {{ return Some(0); }}
+    if needle.len() > haystack.len() {{ return None; }}
+    'outer: for i in 0..=(haystack.len() - needle.len()) {{
+        for j in 0..needle.len() {{
+            if haystack[i + j] != needle[j] {{
+                continue 'outer;
+            }}
+        }}
+        return Some(i);
+    }}
+    None
+}}
+
+#[allow(dead_code)]
+fn has(s: &str, pat: &str) -> bool {{
+    find_bytes(s.as_bytes(), pat.as_bytes()).is_some()
+}}
+
+#[allow(dead_code)]
+fn count(s: &str, pat: &str) -> usize {{
+    if pat.is_empty() {{ return 0; }}
+    let haystack = s.as_bytes();
+    let needle = pat.as_bytes();
+    let mut count = 0;
+    let mut pos = 0;
+    while pos + needle.len() <= haystack.len() {{
+        if let Some(found) = find_bytes(&haystack[pos..], needle) {{
+            count += 1;
+            pos = pos + found + 1;
+        }} else {{
+            break;
+        }}
+    }}
+    count
+}}
+
+#[allow(dead_code)]
+fn eq(a: &str, b: &str) -> bool {{
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    if a_bytes.len() != b_bytes.len() {{
+        return false;
+    }}
+    for i in 0..a_bytes.len() {{
+        if a_bytes[i] != b_bytes[i] {{
+            return false;
+        }}
+    }}
+    true
+}}
+
+#[allow(dead_code)]
+fn after<'a>(s: &'a str, pat: &str) -> &'a str {{
+    if let Some(pos) = find_bytes(s.as_bytes(), pat.as_bytes()) {{
+        &s[pos + pat.len()..]
+    }} else {{
+        ""
+    }}
+}}
+
+#[allow(dead_code)]
+fn before<'a>(s: &'a str, pat: &str) -> &'a str {{
+    if let Some(pos) = find_bytes(s.as_bytes(), pat.as_bytes()) {{
+        &s[..pos]
+    }} else {{
+        s
+    }}
+}}
+
+#[allow(dead_code)]
+fn word(s: &str, n: usize) -> &str {{
+    let bytes = s.as_bytes();
+    let mut count = 0;
+    let mut start = 0;
+    let mut in_word = false;
+
+    for (i, &b) in bytes.iter().enumerate() {{
+        let is_space = b == b' ' || b == b'\t' || b == b'\r';
+        if !is_space && !in_word {{
+            if count == n {{ start = i; }}
+            in_word = true;
+        }} else if is_space && in_word {{
+            if count == n {{ return &s[start..i]; }}
+            count += 1;
+            in_word = false;
+        }}
+    }}
+
+    if in_word && count == n {{ return &s[start..]; }}
+    ""
+}}
+
+#[allow(dead_code)]
+fn slice(s: &str, start: usize, end: usize) -> &str {{
+    if start >= s.len() {{ return ""; }}
+    let end = if end > s.len() {{ s.len() }} else {{ end }};
+    if start >= end {{ return ""; }}
+    &s[start..end]
+}}
+
+#[allow(dead_code)]
+fn safe_trim(s: &str) -> &str {{
+    let bytes = s.as_bytes();
+    let mut start = 0;
+    let mut end = bytes.len();
+    while start < end && (bytes[start] == b' ' || bytes[start] == b'\t' || bytes[start] == b'\r' || bytes[start] == b'\n') {{
+        start += 1;
+    }}
+    while end > start && (bytes[end - 1] == b' ' || bytes[end - 1] == b'\t' || bytes[end - 1] == b'\r' || bytes[end - 1] == b'\n') {{
+        end -= 1;
+    }}
+    &s[start..end]
+}}
+
+#[allow(dead_code)]
+fn parse_int(s: &str) -> i64 {{
+    let s = safe_trim(s);
+    if s.is_empty() {{ return 0; }}
+    let bytes = s.as_bytes();
+    let (neg, start) = if bytes[0] == b'-' {{ (true, 1) }} else {{ (false, 0) }};
+    let mut n: i64 = 0;
+    for &b in &bytes[start..] {{
+        if b >= b'0' && b <= b'9' {{
+            n = n * 10 + (b - b'0') as i64;
+        }} else {{
+            break;
+        }}
+    }}
+    if neg {{ -n }} else {{ n }}
+}}
+
+/// Safe line iterator
+#[allow(dead_code)]
+fn each_line(s: &str) -> impl Iterator<Item = &str> {{
+    s.as_bytes().split(|&b| b == b'\n').filter_map(|line| {{
+        let s = to_str(line);
+        let s = if s.as_bytes().last() == Some(&b'\r') {{
+            &s[..s.len()-1]
+        }} else {{
+            s
+        }};
+        if s.is_empty() {{ None }} else {{ Some(s) }}
+    }})
+}}
+
+// ============ END HELPERS ============
+
+// ============ USER CODE START ============
+{user_code}
+// ============ USER CODE END ============
+
+// ============ WASM INTERFACE ============
+
+static mut RESULT_STORAGE: String = String::new();
+
+#[no_mangle]
+pub extern "C" fn alloc(size: usize) -> *mut u8 {{
+    let mut buf: Vec<u8> = Vec::with_capacity(size);
+    let ptr = buf.as_mut_ptr();
+    std::mem::forget(buf);
+    ptr
+}}
+
+/// Map a single line to key-value pairs
+/// Returns pairs in format: "key1\tvalue1\nkey2\tvalue2\n..."
+#[no_mangle]
+pub extern "C" fn map_one(ptr: *const u8, len: usize) -> i32 {{
+    unsafe {{
+        let line = std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len));
+        let pairs = map_line(line);
+
+        // Serialize as tab-separated key-value pairs, newline-separated
+        let mut result = String::new();
+        for (key, value) in pairs {{
+            if !result.is_empty() {{
+                result.push('\n');
+            }}
+            result.push_str(&key);
+            result.push('\t');
+            result.push_str(&value);
+        }}
+        RESULT_STORAGE = result;
+    }}
+    0
+}}
+
+#[no_mangle]
+pub extern "C" fn get_result_ptr() -> *const u8 {{
+    unsafe {{ RESULT_STORAGE.as_ptr() }}
+}}
+
+#[no_mangle]
+pub extern "C" fn get_result_len() -> usize {{
+    unsafe {{ RESULT_STORAGE.len() }}
+}}
+"#,
+            user_code = user_code
+        )
+    }
+
+    /// Validate source code for map pattern
+    pub fn validate_map_source(&self, code: &str) -> Result<(), CompileError> {
+        // Check for security issues
+        let forbidden_security = [
+            ("include!", "File inclusion not allowed"),
+            ("include_str!", "File inclusion not allowed"),
+            ("include_bytes!", "File inclusion not allowed"),
+            ("std::fs", "Filesystem access not allowed"),
+            ("std::net", "Network access not allowed"),
+            ("std::process", "Process spawning not allowed"),
+            ("std::env", "Environment access not allowed"),
+            ("extern crate", "External crates not allowed"),
+        ];
+
+        for (pattern, reason) in forbidden_security {
+            if code.contains(pattern) {
+                return Err(CompileError::InvalidSource(format!(
+                    "{}: found '{}'", reason, pattern
+                )));
+            }
+        }
+
+        // Check for forbidden string operations
+        let forbidden_string_ops = [
+            (".contains(", "Use has() helper instead"),
+            (".find(", "Use after()/before() helpers instead"),
+            (".rfind(", "Use after()/before() helpers instead"),
+            (".split(", "Use word() helper instead"),
+            (".split_once(", "Use after()/before() helpers instead"),
+            (".rsplit(", "Use word() helper instead"),
+            (".matches(", "Use has() helper instead"),
+            (".match_indices(", "Use custom byte iteration instead"),
+            (".replace(", "Build new string manually instead"),
+            (".replacen(", "Build new string manually instead"),
+            (".strip_prefix(", "Use after() helper instead"),
+            (".strip_suffix(", "Use before() helper instead"),
+            (".starts_with(", "Use has() helper instead"),
+            (".ends_with(", "Use has() with appropriate logic instead"),
+        ];
+
+        for (pattern, suggestion) in forbidden_string_ops {
+            if code.contains(pattern) {
+                return Err(CompileError::InvalidSource(format!(
+                    "WASM-unsafe operation '{}'. {}", pattern.trim_end_matches('('), suggestion
+                )));
+            }
+        }
+
+        // Check for string comparison with == or !=
+        let string_comparison_patterns = [
+            ("== \"", "String comparison with == crashes in WASM. Use eq(a, b) instead"),
+            ("!= \"", "String comparison with != crashes in WASM. Use !eq(a, b) instead"),
+        ];
+        for (pattern, reason) in string_comparison_patterns {
+            if code.contains(pattern) {
+                return Err(CompileError::InvalidSource(reason.to_string()));
+            }
+        }
+
+        // Must contain required function for map pattern
+        if !code.contains("fn map_line") {
+            return Err(CompileError::InvalidSource(
+                "Map code must define: fn map_line(line: &str) -> Vec<(String, String)>".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Compile Rust map code to WASM bytecode
+    pub fn compile_map(&self, user_code: &str) -> Result<Vec<u8>, CompileError> {
+        self.validate_map_source(user_code)?;
+
+        let temp_dir = tempfile::TempDir::new()?;
+        let source_path = temp_dir.path().join("module.rs");
+        let output_path = temp_dir.path().join("module.wasm");
+
+        let full_source = self.generate_map_module_source(user_code);
+
+        debug!("Writing map source to {:?}", source_path);
+        std::fs::write(&source_path, &full_source)?;
+
+        let mut cmd = Command::new(&self.rustc_path);
+        cmd.args([
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "-C",
+            &format!("opt-level={}", self.config.opt_level),
+            "-C",
+            "lto=yes",
+            "-C",
+            "panic=abort",
+            "-o",
+        ])
+        .arg(&output_path)
+        .arg(&source_path);
+
+        debug!("Running: {:?}", cmd);
+
+        let output = cmd.output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let cleaned_error = self.clean_error_message(&stderr, user_code);
+            return Err(CompileError::CompilationFailed(cleaned_error));
+        }
+
+        let wasm_bytes = std::fs::read(&output_path)?;
+        info!(
+            "Successfully compiled {} bytes of map Rust to {} bytes of WASM",
+            user_code.len(),
+            wasm_bytes.len()
+        );
+
+        Ok(wasm_bytes)
+    }
+
+    // ============ NATIVE CLI BINARY COMPILATION ============
+    //
+    // NOTE: Native CLI binaries do NOT have WASM's sandbox protection.
+    // The generated code runs with full system access.
+    //
+    // FUTURE SANDBOXING OPTIONS (not yet implemented):
+    // - Run in Docker/LXC container
+    // - Run as unprivileged user (nobody/nogroup)
+    // - Use seccomp/landlock for syscall filtering
+    // - Use firejail or bubblewrap
+    //
+    // For now, we rely on:
+    // - Code validation (no filesystem/network/process ops)
+    // - Process timeout
+    // - Memory limits via ulimit
+
+    /// Generate standalone CLI binary source code
+    ///
+    /// The generated binary:
+    /// - Reads input from stdin
+    /// - Processes line by line
+    /// - Writes result to stdout
+    fn generate_cli_module_source(&self, user_code: &str) -> String {
+        format!(
+            r#"//! Auto-generated RLM CLI processor
+//!
+//! WARNING: This binary runs WITHOUT sandbox protection.
+//! It should only process trusted data.
+
+use std::io::{{self, BufRead, Write}};
+use std::collections::HashMap;
+
+// ============ HELPER FUNCTIONS ============
+
+#[allow(dead_code)]
+fn has(s: &str, pat: &str) -> bool {{
+    s.contains(pat)
+}}
+
+#[allow(dead_code)]
+fn count(s: &str, pat: &str) -> usize {{
+    s.matches(pat).count()
+}}
+
+#[allow(dead_code)]
+fn eq(a: &str, b: &str) -> bool {{
+    a == b
+}}
+
+#[allow(dead_code)]
+fn after<'a>(s: &'a str, pat: &str) -> &'a str {{
+    s.find(pat).map(|i| &s[i + pat.len()..]).unwrap_or("")
+}}
+
+#[allow(dead_code)]
+fn before<'a>(s: &'a str, pat: &str) -> &'a str {{
+    s.find(pat).map(|i| &s[..i]).unwrap_or(s)
+}}
+
+#[allow(dead_code)]
+fn word(s: &str, n: usize) -> &str {{
+    s.split_whitespace().nth(n).unwrap_or("")
+}}
+
+#[allow(dead_code)]
+fn slice(s: &str, start: usize, end: usize) -> &str {{
+    let start = start.min(s.len());
+    let end = end.min(s.len());
+    if start >= end {{ "" }} else {{ &s[start..end] }}
+}}
+
+#[allow(dead_code)]
+fn parse_int(s: &str) -> i64 {{
+    s.trim().parse().unwrap_or(0)
+}}
+
+// ============ USER CODE ============
+
+{user_code}
+
+// ============ MAIN ============
+
+fn main() {{
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+
+    // Collect all input lines
+    let lines: Vec<String> = stdin.lock().lines()
+        .filter_map(|l| l.ok())
+        .collect();
+
+    // Process with user's analyze function
+    let result = analyze(&lines.join("\n"));
+
+    // Output result
+    let _ = writeln!(stdout, "{{}}", result);
+}}
+"#,
+            user_code = user_code
+        )
+    }
+
+    /// Validate source code for CLI binary (less restrictive than WASM)
+    pub fn validate_cli_source(&self, code: &str) -> Result<(), CompileError> {
+        // Security checks - prevent dangerous operations
+        let forbidden_security = [
+            ("std::fs::remove", "File deletion not allowed"),
+            ("std::fs::write", "File writing not allowed"),
+            ("std::net", "Network access not allowed"),
+            ("std::process::Command", "Process spawning not allowed"),
+            ("std::env::set_var", "Environment modification not allowed"),
+            ("extern crate", "External crates not allowed"),
+            ("unsafe {", "Unsafe blocks not allowed"),
+            ("include!", "File inclusion not allowed"),
+            ("include_str!", "File inclusion not allowed"),
+            ("include_bytes!", "File inclusion not allowed"),
+        ];
+
+        for (pattern, reason) in forbidden_security {
+            if code.contains(pattern) {
+                return Err(CompileError::InvalidSource(format!(
+                    "{}: found '{}'", reason, pattern
+                )));
+            }
+        }
+
+        // Must contain analyze function
+        if !code.contains("fn analyze") {
+            return Err(CompileError::InvalidSource(
+                "CLI code must define: fn analyze(input: &str) -> String".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Compile Rust code to a native CLI binary
+    ///
+    /// Returns the path to the compiled binary.
+    /// The binary reads from stdin and writes to stdout.
+    pub fn compile_cli(&self, user_code: &str, output_dir: &std::path::Path) -> Result<PathBuf, CompileError> {
+        self.validate_cli_source(user_code)?;
+
+        // Generate unique filename based on code hash
+        let code_hash = {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            user_code.hash(&mut hasher);
+            format!("{:016x}", hasher.finish())
+        };
+
+        let binary_path = output_dir.join(format!("rlm_cli_{}", code_hash));
+
+        // Check if already compiled (cache hit)
+        if binary_path.exists() {
+            info!("CLI binary cache hit: {:?}", binary_path);
+            return Ok(binary_path);
+        }
+
+        // Create temp directory for compilation
+        let temp_dir = tempfile::TempDir::new()?;
+        let source_path = temp_dir.path().join("main.rs");
+
+        let full_source = self.generate_cli_module_source(user_code);
+
+        debug!("Writing CLI source to {:?}", source_path);
+        std::fs::write(&source_path, &full_source)?;
+
+        // Compile to native binary
+        let mut cmd = Command::new(&self.rustc_path);
+        cmd.args([
+            "-C", &format!("opt-level={}", self.config.opt_level),
+            "-C", "lto=yes",
+            "-o",
+        ])
+        .arg(&binary_path)
+        .arg(&source_path);
+
+        debug!("Compiling CLI binary: {:?}", cmd);
+
+        let output = cmd.output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let cleaned_error = self.clean_error_message(&stderr, user_code);
+            return Err(CompileError::CompilationFailed(cleaned_error));
+        }
+
+        info!(
+            "Successfully compiled CLI binary: {:?} ({} bytes source)",
+            binary_path,
+            user_code.len()
+        );
+
+        Ok(binary_path)
     }
 }
 

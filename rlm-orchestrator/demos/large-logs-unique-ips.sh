@@ -2,7 +2,7 @@
 # Large Logs Unique IPs Demo
 #
 # Analyzes 5000 log lines to count and rank unique IP addresses.
-# Uses rust_wasm_reduce_intent for streaming analysis of large data.
+# Uses rust_cli_intent for native binary code generation.
 #
 # Expected time with DeepSeek: 30-60 seconds
 # Expected iterations: 1-2
@@ -14,7 +14,7 @@ echo "Large Logs Unique IPs Demo"
 echo "============================================"
 echo ""
 echo "This demo analyzes 5000 log lines to find unique IPs"
-echo "and rank the top 10 most active using WASM code generation."
+echo "and rank the top 10 most active using native CLI code generation."
 echo ""
 
 # Create temp file for context

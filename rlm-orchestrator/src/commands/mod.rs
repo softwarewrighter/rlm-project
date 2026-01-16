@@ -301,6 +301,69 @@ pub enum Command {
         #[serde(default)]
         chunk_size: Option<usize>,
     },
+
+    /// Two-LLM stateless map-reduce for large datasets: {"op": "rust_wasm_mapreduce", "intent": "count error types...", "combiner": "count"}
+    ///
+    /// A more scalable alternative to rust_wasm_reduce_intent. Uses a true map-reduce pattern:
+    /// 1. Map (WASM): Each line is transformed to zero or more (key, value) pairs - NO STATE in WASM
+    /// 2. Shuffle (Native Rust): Pairs are grouped by key using native HashMap
+    /// 3. Reduce (Native Rust): Values for each key are combined (sum, count, max, min, list)
+    ///
+    /// This is more reliable than rust_wasm_reduce_intent because:
+    /// - WASM is completely stateless (no growing state between chunks)
+    /// - All aggregation happens in native Rust (not WASM)
+    /// - HashMap operations use native Rust (not WASM)
+    ///
+    /// Example: {"op": "rust_wasm_mapreduce", "intent": "Extract error type from each [ERROR] line", "combiner": "count", "store": "error_counts"}
+    #[serde(alias = "rust_wasm_mapreduce")]
+    RustWasmMapReduce {
+        /// Natural language description of what key-value pairs to emit for each line
+        intent: String,
+        /// How to combine values for each key: "count", "sum", "max", "min", "list", "first", "last"
+        combiner: String,
+        /// Variable to use as input (default: context)
+        #[serde(default)]
+        on: Option<String>,
+        /// Store result in variable
+        #[serde(default)]
+        store: Option<String>,
+        /// Sort output by value descending (default: true for count/sum)
+        #[serde(default)]
+        sort_desc: Option<bool>,
+        /// Limit output to top N results (default: all)
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+
+    /// Native CLI binary for large dataset analysis: {"op": "rust_cli_intent", "intent": "count error types..."}
+    ///
+    /// Compiles Rust to a native binary (not WASM) for maximum compatibility and performance.
+    /// The binary reads from stdin and writes to stdout.
+    ///
+    /// SECURITY NOTE: Native binaries run WITHOUT sandbox protection.
+    /// Code validation prevents dangerous operations, but this is less secure than WASM.
+    /// Future: Add sandboxing via Docker/LXC/seccomp.
+    ///
+    /// Advantages over WASM:
+    /// - Full Rust standard library (HashMap, regex, all string ops)
+    /// - No memory limits
+    /// - No TwoWaySearcher/memcmp crashes
+    /// - Faster execution for large datasets
+    ///
+    /// Example: {"op": "rust_cli_intent", "intent": "Count each error type and rank by frequency", "store": "error_counts"}
+    RustCliIntent {
+        /// Natural language description of what to compute
+        intent: String,
+        /// Variable to use as input (default: context)
+        #[serde(default)]
+        on: Option<String>,
+        /// Store result in variable
+        #[serde(default)]
+        store: Option<String>,
+        /// Timeout in seconds (default: 30)
+        #[serde(default)]
+        timeout_secs: Option<u64>,
+    },
 }
 
 fn default_wasm_function() -> String {
@@ -357,6 +420,8 @@ pub struct CommandExecutor {
     last_wasm_run_time_ms: u64,
     /// Code generator for two-LLM architecture (None if not configured)
     code_generator: Option<CodeGenerator>,
+    /// Directory for CLI binary cache
+    cli_binary_cache_dir: std::path::PathBuf,
 }
 
 impl CommandExecutor {
@@ -461,6 +526,17 @@ impl CommandExecutor {
             None
         };
 
+        // Initialize CLI binary cache directory
+        let cli_binary_cache_dir = if let Some(ref dir) = wasm_config.cache_dir {
+            std::path::PathBuf::from(dir).join("cli_binaries")
+        } else {
+            std::env::temp_dir().join("rlm_cli_cache")
+        };
+        // Create the directory if it doesn't exist
+        if let Err(e) = std::fs::create_dir_all(&cli_binary_cache_dir) {
+            tracing::warn!("Failed to create CLI cache dir {:?}: {}", cli_binary_cache_dir, e);
+        }
+
         Self {
             variables: HashMap::new(),
             context,
@@ -475,6 +551,7 @@ impl CommandExecutor {
             last_compile_time_ms: 0,
             last_wasm_run_time_ms: 0,
             code_generator,
+            cli_binary_cache_dir,
         }
     }
 
@@ -1408,6 +1485,359 @@ impl CommandExecutor {
                         chunks_processed,
                         source_len / 1024,
                         self.last_wasm_run_time_ms,
+                        preview
+                    ),
+                    sub_calls: 0,
+                })
+            }
+
+            Command::RustWasmMapReduce {
+                intent,
+                combiner,
+                on,
+                store,
+                sort_desc,
+                limit,
+            } => {
+                // Reset timing
+                self.last_compile_time_ms = 0;
+                self.last_wasm_run_time_ms = 0;
+
+                // Check if code generator is configured
+                let generator = self
+                    .code_generator
+                    .as_ref()
+                    .ok_or_else(|| CommandError::CodeGenNotConfigured)?;
+
+                // Check if Rust compiler is available
+                let compiler = self.rust_compiler.as_ref().ok_or_else(|| {
+                    CommandError::RustCompilerUnavailable(
+                        "rustc not found. Install Rust: https://rustup.rs".to_string(),
+                    )
+                })?;
+
+                // Check if WASM executor is available
+                let executor = self.wasm_executor.as_ref().ok_or_else(|| {
+                    CommandError::WasmError(crate::wasm::WasmError::CompileError(
+                        "WASM runtime not available".to_string(),
+                    ))
+                })?;
+
+                // Generate map code using the coding LLM
+                tracing::info!("Generating stateless map code for intent: {}", intent);
+                let codegen_start = Instant::now();
+
+                // Use block_in_place to call async code from sync context
+                let handle = tokio::runtime::Handle::try_current()
+                    .map_err(|e| CommandError::CodeGenError(format!("No tokio runtime: {}", e)))?;
+
+                let generator_ref = generator;
+                let intent_clone = intent.clone();
+                let code = tokio::task::block_in_place(|| {
+                    handle.block_on(async { generator_ref.generate_map(&intent_clone).await })
+                })
+                .map_err(|e| CommandError::CodeGenError(e.to_string()))?;
+
+                let codegen_ms = codegen_start.elapsed().as_millis() as u64;
+                tracing::info!(
+                    "Map code generation took {}ms, generated {} bytes",
+                    codegen_ms,
+                    code.len()
+                );
+                tracing::debug!("Generated map code:\n{}", code);
+
+                // Compile the map code to WASM
+                let wasm_bytes = if let Some(cached) = self.wasm_cache.get(&code) {
+                    tracing::debug!("Cache hit for generated map code");
+                    cached
+                } else {
+                    tracing::debug!("Compiling map code ({} bytes)", code.len());
+                    let compile_start = Instant::now();
+                    let compiled = compiler
+                        .compile_map(&code)
+                        .map_err(|e| {
+                            tracing::error!("Map compilation failed for code:\n{}", code);
+                            CommandError::RustCompileError(e.to_string())
+                        })?;
+                    self.last_compile_time_ms = compile_start.elapsed().as_millis() as u64;
+                    tracing::info!("Map compilation took {}ms", self.last_compile_time_ms);
+
+                    // Cache the result
+                    self.wasm_cache.put(&code, compiled.clone());
+                    compiled
+                };
+
+                // Create map instance
+                let mut map_instance = executor
+                    .create_map_instance(&wasm_bytes)
+                    .map_err(|e| {
+                        tracing::error!("Failed to create map instance");
+                        CommandError::WasmError(e)
+                    })?;
+
+                // Get source data (sanitize to ASCII)
+                let source = to_ascii(&self.resolve_source(on)?.to_string());
+
+                // MAP PHASE: Process each line, collect key-value pairs
+                let exec_start = Instant::now();
+                let mut all_pairs: Vec<(String, String)> = Vec::new();
+                let mut lines_processed = 0usize;
+
+                for line in source.lines() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+
+                    let pairs = map_instance.map_line(line).map_err(|e| {
+                        tracing::error!("Map failed at line {}", lines_processed);
+                        // Save crash info
+                        if let Ok(mut f) = std::fs::File::create("/tmp/rlm-wasm-map-crash.rs") {
+                            use std::io::Write;
+                            let _ = writeln!(f, "// WASM map crash at line {}", lines_processed);
+                            let _ = writeln!(f, "// Error: {}", e);
+                            let _ = writeln!(f, "// Line: {:?}", &line[..line.len().min(200)]);
+                            let _ = writeln!(f, "\n{}", code);
+                        }
+                        CommandError::WasmError(e)
+                    })?;
+
+                    all_pairs.extend(pairs);
+                    lines_processed += 1;
+                }
+
+                let map_ms = exec_start.elapsed().as_millis() as u64;
+                tracing::info!(
+                    "Map phase: {} lines -> {} pairs in {}ms",
+                    lines_processed,
+                    all_pairs.len(),
+                    map_ms
+                );
+
+                // SHUFFLE PHASE: Group by key using native HashMap
+                let shuffle_start = Instant::now();
+                let mut grouped: HashMap<String, Vec<String>> = HashMap::new();
+                for (key, value) in all_pairs {
+                    grouped.entry(key).or_default().push(value);
+                }
+                let shuffle_ms = shuffle_start.elapsed().as_millis() as u64;
+                tracing::info!("Shuffle phase: {} unique keys in {}ms", grouped.len(), shuffle_ms);
+
+                // REDUCE PHASE: Combine values for each key
+                let reduce_start = Instant::now();
+                let mut results: Vec<(String, String)> = Vec::new();
+
+                for (key, values) in grouped {
+                    let combined = match combiner.to_lowercase().as_str() {
+                        "count" => values.len().to_string(),
+                        "sum" => {
+                            let sum: i64 = values.iter()
+                                .filter_map(|v| v.parse::<i64>().ok())
+                                .sum();
+                            sum.to_string()
+                        }
+                        "max" => {
+                            values.iter()
+                                .filter_map(|v| v.parse::<i64>().ok())
+                                .max()
+                                .map(|v| v.to_string())
+                                .unwrap_or_default()
+                        }
+                        "min" => {
+                            values.iter()
+                                .filter_map(|v| v.parse::<i64>().ok())
+                                .min()
+                                .map(|v| v.to_string())
+                                .unwrap_or_default()
+                        }
+                        "first" => values.first().cloned().unwrap_or_default(),
+                        "last" => values.last().cloned().unwrap_or_default(),
+                        "list" => values.join(", "),
+                        _ => values.len().to_string(), // Default to count
+                    };
+                    results.push((key, combined));
+                }
+
+                // Sort by value (descending) for count/sum combiners
+                let should_sort = sort_desc.unwrap_or(matches!(combiner.to_lowercase().as_str(), "count" | "sum"));
+                if should_sort {
+                    results.sort_by(|a, b| {
+                        let a_num: i64 = a.1.parse().unwrap_or(0);
+                        let b_num: i64 = b.1.parse().unwrap_or(0);
+                        b_num.cmp(&a_num)
+                    });
+                }
+
+                // Apply limit if specified
+                if let Some(n) = limit {
+                    results.truncate(*n);
+                }
+
+                let reduce_ms = reduce_start.elapsed().as_millis() as u64;
+                self.last_wasm_run_time_ms = map_ms + shuffle_ms + reduce_ms;
+
+                // Format result
+                let result: String = results.iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                self.store_result(store, result.clone());
+
+                // Return concise output
+                let preview = if result.len() > 100 {
+                    format!("{}...", truncate_to_char_boundary(&result, 97))
+                } else {
+                    result.clone()
+                };
+                Ok(ExecutionResult::Continue {
+                    output: format!(
+                        "rust_wasm_mapreduce (codegen: {}ms, compile: {}ms, map: {}ms, shuffle: {}ms, reduce: {}ms, {} lines -> {} keys): {}",
+                        codegen_ms,
+                        self.last_compile_time_ms,
+                        map_ms,
+                        shuffle_ms,
+                        reduce_ms,
+                        lines_processed,
+                        results.len(),
+                        preview
+                    ),
+                    sub_calls: 0,
+                })
+            }
+
+            Command::RustCliIntent {
+                intent,
+                on,
+                store,
+                timeout_secs,
+            } => {
+                // Reset timing
+                self.last_compile_time_ms = 0;
+                self.last_wasm_run_time_ms = 0;
+
+                // Check if code generator is configured
+                let generator = self
+                    .code_generator
+                    .as_ref()
+                    .ok_or_else(|| CommandError::CodeGenNotConfigured)?;
+
+                // Check if Rust compiler is available
+                let compiler = self.rust_compiler.as_ref().ok_or_else(|| {
+                    CommandError::RustCompilerUnavailable(
+                        "rustc not found. Install Rust: https://rustup.rs".to_string(),
+                    )
+                })?;
+
+                // Generate CLI code using the coding LLM
+                tracing::info!("Generating CLI code for intent: {}", intent);
+                let codegen_start = Instant::now();
+
+                // Use block_in_place to call async code from sync context
+                let handle = tokio::runtime::Handle::try_current()
+                    .map_err(|e| CommandError::CodeGenError(format!("No tokio runtime: {}", e)))?;
+
+                let generator_ref = generator;
+                let intent_clone = intent.clone();
+                let code = tokio::task::block_in_place(|| {
+                    handle.block_on(async { generator_ref.generate_cli(&intent_clone).await })
+                })
+                .map_err(|e| CommandError::CodeGenError(e.to_string()))?;
+
+                let codegen_ms = codegen_start.elapsed().as_millis() as u64;
+                tracing::info!(
+                    "CLI code generation took {}ms, generated {} bytes",
+                    codegen_ms,
+                    code.len()
+                );
+                tracing::debug!("Generated CLI code:\n{}", code);
+
+                // Compile the CLI binary
+                let compile_start = Instant::now();
+                let binary_path = compiler
+                    .compile_cli(&code, &self.cli_binary_cache_dir)
+                    .map_err(|e| {
+                        tracing::error!("CLI compilation failed for code:\n{}", code);
+                        CommandError::RustCompileError(e.to_string())
+                    })?;
+                self.last_compile_time_ms = compile_start.elapsed().as_millis() as u64;
+                tracing::info!(
+                    "CLI compilation took {}ms (binary: {:?})",
+                    self.last_compile_time_ms,
+                    binary_path
+                );
+
+                // Get source data
+                let source = self.resolve_source(on)?.to_string();
+                let source_len = source.len();
+
+                // Execute the binary with stdin piped
+                let exec_start = Instant::now();
+                let timeout = std::time::Duration::from_secs(timeout_secs.unwrap_or(30));
+
+                let mut child = std::process::Command::new(&binary_path)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .map_err(|e| {
+                        CommandError::CodeGenError(format!("Failed to spawn CLI binary: {}", e))
+                    })?;
+
+                // Write input to stdin
+                if let Some(mut stdin) = child.stdin.take() {
+                    use std::io::Write;
+                    stdin.write_all(source.as_bytes()).map_err(|e| {
+                        CommandError::CodeGenError(format!("Failed to write to stdin: {}", e))
+                    })?;
+                    // stdin is dropped here, closing it
+                }
+
+                // Wait for completion with timeout
+                let output = match child.wait_with_output() {
+                    Ok(output) => {
+                        if exec_start.elapsed() > timeout {
+                            return Err(CommandError::CodeGenError(
+                                "CLI binary execution timed out".to_string(),
+                            ));
+                        }
+                        output
+                    }
+                    Err(e) => {
+                        return Err(CommandError::CodeGenError(format!(
+                            "CLI binary execution failed: {}",
+                            e
+                        )));
+                    }
+                };
+
+                let exec_ms = exec_start.elapsed().as_millis() as u64;
+                self.last_wasm_run_time_ms = exec_ms; // Reuse this field for CLI exec time
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::error!("CLI binary failed: {}", stderr);
+                    return Err(CommandError::CodeGenError(format!(
+                        "CLI binary exited with error: {}",
+                        stderr
+                    )));
+                }
+
+                let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                self.store_result(store, result.clone());
+
+                // Return concise output
+                let preview = if result.len() > 100 {
+                    format!("{}...", truncate_to_char_boundary(&result, 97))
+                } else {
+                    result.clone()
+                };
+                Ok(ExecutionResult::Continue {
+                    output: format!(
+                        "rust_cli_intent (codegen: {}ms, compile: {}ms, exec: {}ms, {} bytes processed): {}",
+                        codegen_ms,
+                        self.last_compile_time_ms,
+                        exec_ms,
+                        source_len,
                         preview
                     ),
                     sub_calls: 0,
