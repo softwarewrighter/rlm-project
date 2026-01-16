@@ -1098,6 +1098,57 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             background: #1a4a7a;
         }
 
+        /* Settings panel */
+        .settings-btn {
+            background: var(--accent);
+            padding: 10px 15px;
+            margin-right: 10px;
+            font-size: 1.2rem;
+        }
+        .settings-btn:hover {
+            background: #1a4a7a;
+        }
+        .settings-panel {
+            position: absolute;
+            top: 60px;
+            right: 30px;
+            background: var(--card);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            z-index: 100;
+            display: none;
+            min-width: 280px;
+        }
+        .settings-panel.visible {
+            display: block;
+        }
+        .settings-panel h3 {
+            margin-bottom: 15px;
+            color: var(--highlight);
+            font-size: 1.1rem;
+        }
+        .setting-row {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+        .setting-row label {
+            flex: 1;
+            color: var(--text);
+        }
+        .setting-row input[type="range"] {
+            flex: 2;
+            accent-color: var(--highlight);
+        }
+        .setting-value {
+            min-width: 50px;
+            text-align: right;
+            color: var(--highlight);
+            font-weight: bold;
+        }
+
         @media (max-width: 900px) {
             .results { grid-template-columns: 1fr; }
             .input-row { flex-direction: column; }
@@ -1113,8 +1164,19 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         <div class="header">
             <h1><span>🔄</span> RLM Visualizer</h1>
             <div>
+                <button class="settings-btn" onclick="toggleSettings()" title="Settings">⚙️</button>
                 <button id="runBtn" onclick="runQuery()">Run RLM Query</button>
                 <button id="showResultBtn" class="btn-secondary" onclick="showResultModal()" disabled>Show Result</button>
+            </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div id="settingsPanel" class="settings-panel">
+            <h3>⚙️ Display Settings</h3>
+            <div class="setting-row">
+                <label>Font Size</label>
+                <input type="range" id="fontSizeSlider" min="12" max="24" value="16" oninput="updateFontSize(this.value)">
+                <span id="fontSizeValue" class="setting-value">16px</span>
             </div>
         </div>
 
@@ -1273,11 +1335,37 @@ Line 7: ERROR - Invalid input received</textarea>
         // Initialize on load
         document.addEventListener('DOMContentLoaded', () => {
             updateContextStats();
-            // Add Esc key listener to close modal
+            // Load saved font size
+            const savedFontSize = localStorage.getItem('rlmFontSize') || '16';
+            updateFontSize(savedFontSize);
+            document.getElementById('fontSizeSlider').value = savedFontSize;
+            // Add Esc key listener to close modal and settings
             document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') hideResultModal();
+                if (e.key === 'Escape') {
+                    hideResultModal();
+                    document.getElementById('settingsPanel').classList.remove('visible');
+                }
+            });
+            // Close settings when clicking outside
+            document.addEventListener('click', (e) => {
+                const panel = document.getElementById('settingsPanel');
+                const btn = e.target.closest('.settings-btn');
+                if (!btn && !panel.contains(e.target)) {
+                    panel.classList.remove('visible');
+                }
             });
         });
+
+        // Settings functions
+        function toggleSettings() {
+            document.getElementById('settingsPanel').classList.toggle('visible');
+        }
+
+        function updateFontSize(size) {
+            document.documentElement.style.fontSize = size + 'px';
+            document.getElementById('fontSizeValue').textContent = size + 'px';
+            localStorage.setItem('rlmFontSize', size);
+        }
 
         // Modal functions
         function showResultModal() {
