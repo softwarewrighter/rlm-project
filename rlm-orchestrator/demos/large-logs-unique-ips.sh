@@ -2,7 +2,7 @@
 # Large Logs Unique IPs Demo
 #
 # Analyzes 5000 log lines to count and rank unique IP addresses.
-# Uses rust_wasm with HashSet/HashMap for efficient deduplication.
+# Uses rust_wasm_intent to generate safe Rust code.
 #
 # Expected time with DeepSeek: 30-60 seconds
 # Expected iterations: 2-3
@@ -14,7 +14,7 @@ echo "Large Logs Unique IPs Demo"
 echo "============================================"
 echo ""
 echo "This demo analyzes 5000 log lines to find unique IPs"
-echo "and rank the top 10 most active using WASM HashSet."
+echo "and rank the top 10 most active using WASM code generation."
 echo ""
 
 # Create temp file for context

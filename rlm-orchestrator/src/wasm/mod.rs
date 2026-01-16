@@ -205,6 +205,217 @@ impl WasmExecutor {
     pub fn remaining_fuel(&self, store: &Store<()>) -> u64 {
         store.get_fuel().unwrap_or(0)
     }
+
+    /// Create a reduce instance for streaming data processing
+    ///
+    /// The WASM module should export:
+    /// - `alloc(size: i32) -> i32`: allocate memory for input
+    /// - `reduce_init()`: initialize the state
+    /// - `reduce_chunk(ptr: i32, len: i32)`: process a chunk of data
+    /// - `reduce_finalize()`: finalize and produce the result
+    /// - `get_result_ptr() -> i32`: get pointer to result
+    /// - `get_result_len() -> i32`: get length of result
+    pub fn create_reduce_instance(
+        &self,
+        wasm_bytes: &[u8],
+    ) -> Result<ReduceInstance, WasmError> {
+        // Create a store with fuel limit
+        let mut store = Store::new(&self.engine, ());
+        store
+            .set_fuel(self.config.fuel_limit)
+            .map_err(|e| WasmError::ExecutionError(e.to_string()))?;
+
+        // Compile the module
+        let module = Module::new(&self.engine, wasm_bytes)
+            .map_err(|e| WasmError::CompileError(e.to_string()))?;
+
+        // Create instance
+        let instance = Instance::new(&mut store, &module, &[])
+            .map_err(|e| WasmError::ExecutionError(e.to_string()))?;
+
+        // Verify required exports exist
+        // Note: reduce functions return i32 (0 for success)
+        instance
+            .get_typed_func::<i32, i32>(&mut store, "alloc")
+            .map_err(|e| WasmError::FunctionNotFound(format!("alloc: {}", e)))?;
+        instance
+            .get_typed_func::<(), i32>(&mut store, "reduce_init")
+            .map_err(|e| WasmError::FunctionNotFound(format!("reduce_init: {}", e)))?;
+        instance
+            .get_typed_func::<(i32, i32), i32>(&mut store, "reduce_chunk")
+            .map_err(|e| WasmError::FunctionNotFound(format!("reduce_chunk: {}", e)))?;
+        instance
+            .get_typed_func::<(), i32>(&mut store, "reduce_finalize")
+            .map_err(|e| WasmError::FunctionNotFound(format!("reduce_finalize: {}", e)))?;
+
+        Ok(ReduceInstance {
+            store,
+            instance,
+            initialized: false,
+        })
+    }
+}
+
+/// A WASM instance for streaming reduce operations
+///
+/// Holds state across multiple chunk processing calls.
+pub struct ReduceInstance {
+    store: Store<()>,
+    instance: Instance,
+    initialized: bool,
+}
+
+impl ReduceInstance {
+    /// Initialize the reduce state
+    ///
+    /// Must be called once before processing any chunks.
+    pub fn init(&mut self) -> Result<(), WasmError> {
+        if self.initialized {
+            return Err(WasmError::ExecutionError(
+                "Reduce instance already initialized".to_string(),
+            ));
+        }
+
+        let reduce_init = self
+            .instance
+            .get_typed_func::<(), i32>(&mut self.store, "reduce_init")
+            .map_err(|e| WasmError::FunctionNotFound(format!("reduce_init: {}", e)))?;
+
+        let _result = reduce_init.call(&mut self.store, ()).map_err(|e| {
+            if e.to_string().contains("fuel") {
+                WasmError::OutOfFuel
+            } else {
+                WasmError::ExecutionError(e.to_string())
+            }
+        })?;
+
+        self.initialized = true;
+        Ok(())
+    }
+
+    /// Process a chunk of data
+    ///
+    /// The chunk will be split into lines and each line processed by the reducer.
+    /// Can be called multiple times to process large datasets in pieces.
+    pub fn process_chunk(&mut self, chunk: &str) -> Result<(), WasmError> {
+        if !self.initialized {
+            return Err(WasmError::ExecutionError(
+                "Reduce instance not initialized - call init() first".to_string(),
+            ));
+        }
+
+        // Get memory and functions
+        let memory = self
+            .instance
+            .get_memory(&mut self.store, "memory")
+            .ok_or_else(|| WasmError::ExecutionError("No memory export".to_string()))?;
+
+        let alloc = self
+            .instance
+            .get_typed_func::<i32, i32>(&mut self.store, "alloc")
+            .map_err(|e| WasmError::FunctionNotFound(format!("alloc: {}", e)))?;
+
+        let reduce_chunk = self
+            .instance
+            .get_typed_func::<(i32, i32), i32>(&mut self.store, "reduce_chunk")
+            .map_err(|e| WasmError::FunctionNotFound(format!("reduce_chunk: {}", e)))?;
+
+        // Allocate memory for chunk
+        let chunk_bytes = chunk.as_bytes();
+        let ptr = alloc
+            .call(&mut self.store, chunk_bytes.len() as i32)
+            .map_err(|e| {
+                if e.to_string().contains("fuel") {
+                    WasmError::OutOfFuel
+                } else {
+                    WasmError::ExecutionError(e.to_string())
+                }
+            })?;
+
+        // Copy chunk to WASM memory
+        memory
+            .write(&mut self.store, ptr as usize, chunk_bytes)
+            .map_err(|e| WasmError::ExecutionError(format!("Memory write failed: {}", e)))?;
+
+        // Process the chunk
+        let _result = reduce_chunk
+            .call(&mut self.store, (ptr, chunk_bytes.len() as i32))
+            .map_err(|e| {
+                if e.to_string().contains("fuel") {
+                    WasmError::OutOfFuel
+                } else {
+                    WasmError::ExecutionError(e.to_string())
+                }
+            })?;
+
+        Ok(())
+    }
+
+    /// Finalize the reduce operation and get the result
+    ///
+    /// After calling this, the instance should not be used for further processing.
+    pub fn finalize(&mut self) -> Result<String, WasmError> {
+        if !self.initialized {
+            return Err(WasmError::ExecutionError(
+                "Reduce instance not initialized - call init() first".to_string(),
+            ));
+        }
+
+        // Get required functions
+        let reduce_finalize = self
+            .instance
+            .get_typed_func::<(), i32>(&mut self.store, "reduce_finalize")
+            .map_err(|e| WasmError::FunctionNotFound(format!("reduce_finalize: {}", e)))?;
+
+        let get_result_ptr = self
+            .instance
+            .get_typed_func::<(), i32>(&mut self.store, "get_result_ptr")
+            .map_err(|e| WasmError::FunctionNotFound(format!("get_result_ptr: {}", e)))?;
+
+        let get_result_len = self
+            .instance
+            .get_typed_func::<(), i32>(&mut self.store, "get_result_len")
+            .map_err(|e| WasmError::FunctionNotFound(format!("get_result_len: {}", e)))?;
+
+        // Finalize the reduce
+        let _result = reduce_finalize.call(&mut self.store, ()).map_err(|e| {
+            if e.to_string().contains("fuel") {
+                WasmError::OutOfFuel
+            } else {
+                WasmError::ExecutionError(e.to_string())
+            }
+        })?;
+
+        // Get memory to read result
+        let memory = self
+            .instance
+            .get_memory(&mut self.store, "memory")
+            .ok_or_else(|| WasmError::ExecutionError("No memory export".to_string()))?;
+
+        // Get result
+        let result_ptr = get_result_ptr
+            .call(&mut self.store, ())
+            .map_err(|e| WasmError::ExecutionError(e.to_string()))?
+            as usize;
+        let result_len = get_result_len
+            .call(&mut self.store, ())
+            .map_err(|e| WasmError::ExecutionError(e.to_string()))?
+            as usize;
+
+        // Read result from memory
+        let mut result_bytes = vec![0u8; result_len];
+        memory
+            .read(&self.store, result_ptr, &mut result_bytes)
+            .map_err(|e| WasmError::ExecutionError(format!("Memory read failed: {}", e)))?;
+
+        String::from_utf8(result_bytes)
+            .map_err(|e| WasmError::ExecutionError(format!("Invalid UTF-8 result: {}", e)))
+    }
+
+    /// Get remaining fuel in this instance
+    pub fn remaining_fuel(&self) -> u64 {
+        self.store.get_fuel().unwrap_or(0)
+    }
 }
 
 /// Pre-compiled WASM modules for common operations
@@ -352,6 +563,7 @@ impl Default for WasmLibrary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wasm::compiler::{CompilerConfig, RustCompiler};
 
     #[test]
     fn test_wasm_executor_creation() {
@@ -388,5 +600,84 @@ mod tests {
         let result = executor.execute(module, "count_lines", context);
         assert!(result.is_ok(), "Execution failed: {:?}", result);
         assert_eq!(result.unwrap(), "3");
+    }
+
+    #[test]
+    fn test_reduce_execution() {
+        // This test requires the compiler to produce reduce WASM
+        // We'll use a pre-compiled approach or skip if compiler unavailable
+        let config = CompilerConfig::default();
+        let compiler = match RustCompiler::new(config) {
+            Ok(c) => c,
+            Err(_) => {
+                println!("Skipping reduce test: rustc not available");
+                return;
+            }
+        };
+
+        let reduce_code = r#"
+struct State {
+    line_count: usize,
+    error_count: usize,
+}
+
+fn init_state() -> State {
+    State {
+        line_count: 0,
+        error_count: 0,
+    }
+}
+
+fn process_line(state: &mut State, line: &str) {
+    state.line_count += 1;
+    if has(line, "ERROR") {
+        state.error_count += 1;
+    }
+}
+
+fn finalize(state: &State) -> String {
+    format!("Lines: {}, Errors: {}", state.line_count, state.error_count)
+}
+        "#;
+
+        let wasm_bytes = match compiler.compile_reduce(reduce_code) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                panic!("Failed to compile reduce code: {}", e);
+            }
+        };
+
+        // Create executor and reduce instance
+        let exec_config = WasmConfig::default();
+        let executor = WasmExecutor::new(exec_config).unwrap();
+        let mut reduce_instance = executor
+            .create_reduce_instance(&wasm_bytes)
+            .expect("Failed to create reduce instance");
+
+        // Initialize
+        reduce_instance.init().expect("Failed to init reduce");
+
+        // Process some lines
+        let test_data = "INFO: Starting up\nERROR: Something went wrong\nINFO: Continuing\nERROR: Another error\n";
+        reduce_instance
+            .process_chunk(test_data)
+            .expect("Failed to process chunk");
+
+        // Finalize and get result
+        let result = reduce_instance
+            .finalize()
+            .expect("Failed to finalize reduce");
+
+        assert!(
+            result.contains("Lines: 4"),
+            "Expected 4 lines, got: {}",
+            result
+        );
+        assert!(
+            result.contains("Errors: 2"),
+            "Expected 2 errors, got: {}",
+            result
+        );
+        println!("Reduce result: {}", result);
     }
 }

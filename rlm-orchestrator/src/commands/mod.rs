@@ -12,8 +12,8 @@ use thiserror::Error;
 
 use crate::codegen::{CodeGenConfig, CodeGenerator};
 use crate::wasm::{
-    CompilerConfig, ModuleCache, PrebuiltHooks, RustCompiler, TemplateFramework, TemplateType,
-    WasmConfig, WasmExecutor, WasmLibrary, WasmToolLibrary,
+    CompilerConfig, ModuleCache, PrebuiltHooks, ReduceInstance, RustCompiler, TemplateFramework,
+    TemplateType, WasmConfig, WasmExecutor, WasmLibrary, WasmToolLibrary,
 };
 
 /// Safely truncate a string at a valid UTF-8 character boundary.
@@ -273,6 +273,33 @@ pub enum Command {
         /// Store result in variable
         #[serde(default)]
         store: Option<String>,
+    },
+
+    /// Two-LLM streaming reduce for large datasets: {"op": "rust_wasm_reduce_intent", "intent": "count unique IPs..."}
+    ///
+    /// Like rust_wasm_intent but uses a streaming reduce pattern to handle arbitrarily
+    /// large datasets. The coding LLM generates a State struct and reduce functions
+    /// (init_state, process_line, finalize) that are applied line-by-line.
+    ///
+    /// Use this for large datasets that would overflow WASM memory if processed all at once.
+    /// The orchestrator handles chunking the data and calling the reducer for each line.
+    ///
+    /// Limitations: Algorithms that require all data at once (median, percentiles) cannot
+    /// be computed using reduce. Use rust_wasm_intent for those (with smaller datasets).
+    ///
+    /// Example: {"op": "rust_wasm_reduce_intent", "intent": "Count unique IP addresses and rank top 10 most active", "store": "ip_counts"}
+    RustWasmReduceIntent {
+        /// Natural language description of what to compute via reduce
+        intent: String,
+        /// Variable to use as input (default: context)
+        #[serde(default)]
+        on: Option<String>,
+        /// Store result in variable
+        #[serde(default)]
+        store: Option<String>,
+        /// Chunk size in bytes (default: 64KB for efficient processing)
+        #[serde(default)]
+        chunk_size: Option<usize>,
     },
 }
 
@@ -1226,6 +1253,164 @@ impl CommandExecutor {
                     output: format!(
                         "rust_wasm_intent (codegen: {}ms, compile: {}ms, run: {}ms): {}",
                         codegen_ms, self.last_compile_time_ms, self.last_wasm_run_time_ms, preview
+                    ),
+                    sub_calls: 0,
+                })
+            }
+
+            Command::RustWasmReduceIntent {
+                intent,
+                on,
+                store,
+                chunk_size,
+            } => {
+                // Reset timing
+                self.last_compile_time_ms = 0;
+                self.last_wasm_run_time_ms = 0;
+
+                // Check if code generator is configured
+                let generator = self
+                    .code_generator
+                    .as_ref()
+                    .ok_or_else(|| CommandError::CodeGenNotConfigured)?;
+
+                // Check if Rust compiler is available
+                let compiler = self.rust_compiler.as_ref().ok_or_else(|| {
+                    CommandError::RustCompilerUnavailable(
+                        "rustc not found. Install Rust: https://rustup.rs".to_string(),
+                    )
+                })?;
+
+                // Check if WASM executor is available
+                let executor = self.wasm_executor.as_ref().ok_or_else(|| {
+                    CommandError::WasmError(crate::wasm::WasmError::CompileError(
+                        "WASM runtime not available".to_string(),
+                    ))
+                })?;
+
+                // Generate reduce code using the coding LLM
+                tracing::info!("Generating reduce code for intent: {}", intent);
+                let codegen_start = Instant::now();
+
+                // Use block_in_place to call async code from sync context
+                let handle = tokio::runtime::Handle::try_current()
+                    .map_err(|e| CommandError::CodeGenError(format!("No tokio runtime: {}", e)))?;
+
+                let generator_ref = generator;
+                let intent_clone = intent.clone();
+                let code = tokio::task::block_in_place(|| {
+                    handle.block_on(async { generator_ref.generate_reduce(&intent_clone).await })
+                })
+                .map_err(|e| CommandError::CodeGenError(e.to_string()))?;
+
+                let codegen_ms = codegen_start.elapsed().as_millis() as u64;
+                tracing::info!(
+                    "Reduce code generation took {}ms, generated {} bytes",
+                    codegen_ms,
+                    code.len()
+                );
+                tracing::debug!("Generated reduce code:\n{}", code);
+
+                // Compile the reduce code to WASM
+                let wasm_bytes = if let Some(cached) = self.wasm_cache.get(&code) {
+                    tracing::debug!("Cache hit for generated reduce code");
+                    cached
+                } else {
+                    tracing::debug!("Compiling reduce code ({} bytes)", code.len());
+                    let compile_start = Instant::now();
+                    let compiled = compiler
+                        .compile_reduce(&code)
+                        .map_err(|e| {
+                            tracing::error!("Reduce compilation failed for code:\n{}", code);
+                            CommandError::RustCompileError(e.to_string())
+                        })?;
+                    self.last_compile_time_ms = compile_start.elapsed().as_millis() as u64;
+                    tracing::info!("Reduce compilation took {}ms", self.last_compile_time_ms);
+
+                    // Cache the result
+                    self.wasm_cache.put(&code, compiled.clone());
+                    compiled
+                };
+
+                // Create reduce instance
+                let mut reduce_instance = executor
+                    .create_reduce_instance(&wasm_bytes)
+                    .map_err(|e| {
+                        tracing::error!("Failed to create reduce instance");
+                        CommandError::WasmError(e)
+                    })?;
+
+                // Get source data (sanitize to ASCII)
+                let source = to_ascii(&self.resolve_source(on)?.to_string());
+                let source_len = source.len();
+                let chunk_bytes = chunk_size.unwrap_or(64 * 1024); // Default 64KB chunks
+
+                // Initialize the reduce state
+                let exec_start = Instant::now();
+                reduce_instance.init().map_err(|e| {
+                    tracing::error!("Reduce init failed");
+                    CommandError::WasmError(e)
+                })?;
+
+                // Process data in chunks
+                let mut bytes_processed = 0usize;
+                let mut chunks_processed = 0usize;
+
+                // Split on line boundaries within chunk size
+                let mut start = 0;
+                while start < source.len() {
+                    // Find a good chunk boundary (at a newline)
+                    let mut end = std::cmp::min(start + chunk_bytes, source.len());
+
+                    // If not at the end, try to find a newline to split at
+                    if end < source.len() {
+                        if let Some(newline_pos) = source[start..end].rfind('\n') {
+                            end = start + newline_pos + 1; // Include the newline
+                        }
+                    }
+
+                    let chunk = &source[start..end];
+                    reduce_instance.process_chunk(chunk).map_err(|e| {
+                        tracing::error!("Reduce process_chunk failed at chunk {}", chunks_processed);
+                        CommandError::WasmError(e)
+                    })?;
+
+                    bytes_processed += chunk.len();
+                    chunks_processed += 1;
+                    start = end;
+                }
+
+                // Finalize and get result
+                let result = reduce_instance.finalize().map_err(|e| {
+                    tracing::error!("Reduce finalize failed");
+                    CommandError::WasmError(e)
+                })?;
+
+                self.last_wasm_run_time_ms = exec_start.elapsed().as_millis() as u64;
+                tracing::info!(
+                    "Reduce execution: {} chunks, {} bytes in {}ms",
+                    chunks_processed,
+                    bytes_processed,
+                    self.last_wasm_run_time_ms
+                );
+
+                self.store_result(store, result.clone());
+
+                // Return concise output
+                let preview = if result.len() > 100 {
+                    format!("{}...", truncate_to_char_boundary(&result, 97))
+                } else {
+                    result.clone()
+                };
+                Ok(ExecutionResult::Continue {
+                    output: format!(
+                        "rust_wasm_reduce (codegen: {}ms, compile: {}ms, reduce {} chunks/{}KB in {}ms): {}",
+                        codegen_ms,
+                        self.last_compile_time_ms,
+                        chunks_processed,
+                        source_len / 1024,
+                        self.last_wasm_run_time_ms,
+                        preview
                     ),
                     sub_calls: 0,
                 })

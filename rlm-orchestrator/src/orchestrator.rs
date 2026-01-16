@@ -664,6 +664,36 @@ Write a clear description of the algorithm. The coding LLM will write the code.
 
 ⚠️ DO NOT use rust_wasm - it will crash! Always use rust_wasm_intent!
 
+### rust_wasm_reduce_intent: For VERY LARGE Datasets (>100KB)
+
+⚠️ Use this for LARGE contexts that would overflow WASM memory!
+
+rust_wasm_reduce_intent processes data LINE BY LINE using a streaming reduce pattern.
+It can handle arbitrarily large datasets without memory overflow.
+
+- {{"op": "rust_wasm_reduce_intent", "intent": "Count unique IP addresses and rank top 10 most active", "store": "ip_counts"}}
+- {{"op": "rust_wasm_reduce_intent", "intent": "...", "on": "$myvar", "chunk_size": 65536}}
+
+WHEN TO USE:
+- Context is very large (>100KB, thousands of lines)
+- Task involves counting, summing, or frequency analysis across entire dataset
+- rust_wasm_intent crashes with memory errors
+
+WHEN NOT TO USE (requires all data at once):
+- Computing median or percentiles (not reducible)
+- Tasks that need sorted access to all values
+
+### EXAMPLES
+
+```json
+{{"op": "rust_wasm_reduce_intent", "intent": "Count each unique error type and rank by frequency", "store": "error_counts"}}
+{{"op": "final_var", "name": "error_counts"}}
+```
+
+```json
+{{"op": "rust_wasm_reduce_intent", "intent": "Find all unique IP addresses and count requests per IP, show top 10", "store": "ip_stats"}}
+```
+
 ---
 
 ## (FALLBACK) rust_wasm - Only if rust_wasm_intent fails

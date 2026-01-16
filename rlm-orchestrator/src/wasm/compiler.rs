@@ -529,6 +529,313 @@ pub extern "C" fn get_result_len() -> usize {{
         }
     }
 
+    /// Generate the WASM module source for streaming reduce pattern
+    /// User code should define:
+    /// - State struct
+    /// - fn init_state() -> State
+    /// - fn process_line(state: &mut State, line: &str)
+    /// - fn finalize(state: &State) -> String
+    fn generate_reduce_module_source(&self, user_code: &str) -> String {
+        format!(
+            r#"// Auto-generated WASM module for RLM Streaming Reduce
+// INPUT IS ASCII-ONLY - safe to use byte slicing!
+// This module processes input in chunks to avoid memory issues.
+
+// ============ PURE BYTE-LEVEL HELPERS ============
+// These avoid Rust's TwoWaySearcher which can panic in WASM.
+
+/// Convert byte slice to &str (safe because input is ASCII)
+#[inline]
+fn to_str(bytes: &[u8]) -> &str {{
+    unsafe {{ std::str::from_utf8_unchecked(bytes) }}
+}}
+
+/// Find pattern in bytes using simple byte-by-byte comparison.
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {{
+    if needle.is_empty() {{ return Some(0); }}
+    if needle.len() > haystack.len() {{ return None; }}
+    for i in 0..=(haystack.len() - needle.len()) {{
+        if &haystack[i..i + needle.len()] == needle {{
+            return Some(i);
+        }}
+    }}
+    None
+}}
+
+#[allow(dead_code)]
+fn has(s: &str, pat: &str) -> bool {{
+    find_bytes(s.as_bytes(), pat.as_bytes()).is_some()
+}}
+
+#[allow(dead_code)]
+fn count(s: &str, pat: &str) -> usize {{
+    if pat.is_empty() {{ return 0; }}
+    let haystack = s.as_bytes();
+    let needle = pat.as_bytes();
+    let mut count = 0;
+    let mut pos = 0;
+    while pos + needle.len() <= haystack.len() {{
+        if let Some(found) = find_bytes(&haystack[pos..], needle) {{
+            count += 1;
+            pos = pos + found + 1;
+        }} else {{
+            break;
+        }}
+    }}
+    count
+}}
+
+#[allow(dead_code)]
+fn eq(a: &str, b: &str) -> bool {{
+    a.as_bytes() == b.as_bytes()
+}}
+
+#[allow(dead_code)]
+fn after<'a>(s: &'a str, pat: &str) -> &'a str {{
+    if let Some(pos) = find_bytes(s.as_bytes(), pat.as_bytes()) {{
+        &s[pos + pat.len()..]
+    }} else {{
+        ""
+    }}
+}}
+
+#[allow(dead_code)]
+fn before<'a>(s: &'a str, pat: &str) -> &'a str {{
+    if let Some(pos) = find_bytes(s.as_bytes(), pat.as_bytes()) {{
+        &s[..pos]
+    }} else {{
+        s
+    }}
+}}
+
+#[allow(dead_code)]
+fn word(s: &str, n: usize) -> &str {{
+    let bytes = s.as_bytes();
+    let mut count = 0;
+    let mut start = 0;
+    let mut in_word = false;
+
+    for (i, &b) in bytes.iter().enumerate() {{
+        let is_space = b == b' ' || b == b'\t' || b == b'\r';
+        if !is_space && !in_word {{
+            if count == n {{ start = i; }}
+            in_word = true;
+        }} else if is_space && in_word {{
+            if count == n {{ return &s[start..i]; }}
+            count += 1;
+            in_word = false;
+        }}
+    }}
+
+    if in_word && count == n {{ return &s[start..]; }}
+    ""
+}}
+
+#[allow(dead_code)]
+fn parse_int(s: &str) -> i64 {{
+    let s = s.trim();
+    if s.is_empty() {{ return 0; }}
+    let bytes = s.as_bytes();
+    let (neg, start) = if bytes[0] == b'-' {{ (true, 1) }} else {{ (false, 0) }};
+    let mut n: i64 = 0;
+    for &b in &bytes[start..] {{
+        if b >= b'0' && b <= b'9' {{
+            n = n * 10 + (b - b'0') as i64;
+        }} else {{
+            break;
+        }}
+    }}
+    if neg {{ -n }} else {{ n }}
+}}
+
+// ============ END HELPERS ============
+
+// ============ USER CODE START ============
+{user_code}
+// ============ USER CODE END ============
+
+// ============ WASM INTERFACE ============
+
+static mut STATE: Option<State> = None;
+static mut RESULT_STORAGE: String = String::new();
+
+#[no_mangle]
+pub extern "C" fn alloc(size: usize) -> *mut u8 {{
+    let mut buf: Vec<u8> = Vec::with_capacity(size);
+    let ptr = buf.as_mut_ptr();
+    std::mem::forget(buf);
+    ptr
+}}
+
+/// Initialize/reset state for a new reduce operation
+#[no_mangle]
+pub extern "C" fn reduce_init() -> i32 {{
+    unsafe {{
+        STATE = Some(init_state());
+    }}
+    0
+}}
+
+/// Process a chunk of input (called multiple times)
+#[no_mangle]
+pub extern "C" fn reduce_chunk(ptr: *const u8, len: usize) -> i32 {{
+    unsafe {{
+        let chunk = std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len));
+        if let Some(ref mut state) = STATE {{
+            // Process each line in the chunk
+            for line in chunk.lines() {{
+                process_line(state, line);
+            }}
+        }}
+    }}
+    0
+}}
+
+/// Finalize and return the result
+#[no_mangle]
+pub extern "C" fn reduce_finalize() -> i32 {{
+    unsafe {{
+        if let Some(ref state) = STATE {{
+            RESULT_STORAGE = finalize(state);
+        }} else {{
+            RESULT_STORAGE = "Error: State not initialized".to_string();
+        }}
+    }}
+    0
+}}
+
+#[no_mangle]
+pub extern "C" fn get_result_ptr() -> *const u8 {{
+    unsafe {{ RESULT_STORAGE.as_ptr() }}
+}}
+
+#[no_mangle]
+pub extern "C" fn get_result_len() -> usize {{
+    unsafe {{ RESULT_STORAGE.len() }}
+}}
+"#,
+            user_code = user_code
+        )
+    }
+
+    /// Validate source code for reduce pattern
+    pub fn validate_reduce_source(&self, code: &str) -> Result<(), CompileError> {
+        // Check for security issues (same as regular validation)
+        let forbidden_security = [
+            ("include!", "File inclusion not allowed"),
+            ("include_str!", "File inclusion not allowed"),
+            ("include_bytes!", "File inclusion not allowed"),
+            ("std::fs", "Filesystem access not allowed"),
+            ("std::net", "Network access not allowed"),
+            ("std::process", "Process spawning not allowed"),
+            ("std::env", "Environment access not allowed"),
+            ("extern crate", "External crates not allowed"),
+        ];
+
+        for (pattern, reason) in forbidden_security {
+            if code.contains(pattern) {
+                return Err(CompileError::InvalidSource(format!(
+                    "{}: found '{}'", reason, pattern
+                )));
+            }
+        }
+
+        // Check for forbidden string operations
+        let forbidden_string_ops = [
+            (".contains(", "Use has() helper instead"),
+            (".find(", "Use after()/before() helpers instead"),
+            (".split(", "Use word() helper instead"),
+            (".matches(", "Use has() helper instead"),
+            (".replace(", "Build new string manually instead"),
+        ];
+
+        for (pattern, suggestion) in forbidden_string_ops {
+            if code.contains(pattern) {
+                return Err(CompileError::InvalidSource(format!(
+                    "WASM-unsafe operation '{}'. {}", pattern.trim_end_matches('('), suggestion
+                )));
+            }
+        }
+
+        // Must contain required functions for reduce pattern
+        if !code.contains("struct State") {
+            return Err(CompileError::InvalidSource(
+                "Reduce code must define: struct State".to_string(),
+            ));
+        }
+        if !code.contains("fn init_state") {
+            return Err(CompileError::InvalidSource(
+                "Reduce code must define: fn init_state() -> State".to_string(),
+            ));
+        }
+        if !code.contains("fn process_line") {
+            return Err(CompileError::InvalidSource(
+                "Reduce code must define: fn process_line(state: &mut State, line: &str)".to_string(),
+            ));
+        }
+        if !code.contains("fn finalize") {
+            return Err(CompileError::InvalidSource(
+                "Reduce code must define: fn finalize(state: &State) -> String".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Compile Rust reduce code to WASM bytecode
+    pub fn compile_reduce(&self, user_code: &str) -> Result<Vec<u8>, CompileError> {
+        // Validate source first
+        self.validate_reduce_source(user_code)?;
+
+        // Create temp directory for compilation
+        let temp_dir = tempfile::TempDir::new()?;
+        let source_path = temp_dir.path().join("module.rs");
+        let output_path = temp_dir.path().join("module.wasm");
+
+        // Generate full source
+        let full_source = self.generate_reduce_module_source(user_code);
+
+        debug!("Writing reduce source to {:?}", source_path);
+        std::fs::write(&source_path, &full_source)?;
+
+        // Build rustc command
+        let mut cmd = Command::new(&self.rustc_path);
+        cmd.args([
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "-C",
+            &format!("opt-level={}", self.config.opt_level),
+            "-C",
+            "lto=yes",
+            "-C",
+            "panic=abort",
+            "-o",
+        ])
+        .arg(&output_path)
+        .arg(&source_path);
+
+        debug!("Running: {:?}", cmd);
+
+        let output = cmd.output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let cleaned_error = self.clean_error_message(&stderr, user_code);
+            return Err(CompileError::CompilationFailed(cleaned_error));
+        }
+
+        let wasm_bytes = std::fs::read(&output_path)?;
+        info!(
+            "Successfully compiled {} bytes of reduce Rust to {} bytes of WASM",
+            user_code.len(),
+            wasm_bytes.len()
+        );
+
+        Ok(wasm_bytes)
+    }
+
     /// Get the rustc version
     pub fn version(&self) -> Option<String> {
         Command::new(&self.rustc_path)
@@ -651,6 +958,84 @@ mod tests {
                     println!("Compilation failed: {}", e);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_compile_reduce() {
+        let config = CompilerConfig::default();
+        if let Ok(compiler) = RustCompiler::new(config) {
+            // Test the streaming reduce pattern
+            let reduce_code = r#"
+struct State {
+    line_count: usize,
+    error_count: usize,
+}
+
+fn init_state() -> State {
+    State {
+        line_count: 0,
+        error_count: 0,
+    }
+}
+
+fn process_line(state: &mut State, line: &str) {
+    state.line_count += 1;
+    if has(line, "[ERROR]") {
+        state.error_count += 1;
+    }
+}
+
+fn finalize(state: &State) -> String {
+    format!("Lines: {}, Errors: {}", state.line_count, state.error_count)
+}
+            "#;
+
+            let result = compiler.compile_reduce(reduce_code);
+            match result {
+                Ok(wasm) => {
+                    println!("Compiled reduce code to {} bytes", wasm.len());
+                    assert!(!wasm.is_empty());
+                }
+                Err(e) => {
+                    panic!("Reduce compilation failed: {}", e);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_validate_reduce_source() {
+        let config = CompilerConfig::default();
+        if let Ok(compiler) = RustCompiler::new(config) {
+            // Valid reduce code
+            let valid_code = r#"
+struct State { count: usize }
+fn init_state() -> State { State { count: 0 } }
+fn process_line(state: &mut State, line: &str) { state.count += 1; }
+fn finalize(state: &State) -> String { state.count.to_string() }
+            "#;
+            assert!(compiler.validate_reduce_source(valid_code).is_ok());
+
+            // Missing struct State
+            let missing_state = r#"
+fn init_state() -> State { State { count: 0 } }
+fn process_line(state: &mut State, line: &str) { state.count += 1; }
+fn finalize(state: &State) -> String { state.count.to_string() }
+            "#;
+            let result = compiler.validate_reduce_source(missing_state);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("State"));
+
+            // Missing init_state
+            let missing_init = r#"
+struct State { count: usize }
+fn process_line(state: &mut State, line: &str) { state.count += 1; }
+fn finalize(state: &State) -> String { state.count.to_string() }
+            "#;
+            let result = compiler.validate_reduce_source(missing_init);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("init_state"));
         }
     }
 }

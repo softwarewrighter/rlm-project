@@ -119,6 +119,34 @@ impl CodeGenerator {
         Ok(code)
     }
 
+    /// Generate Rust code for streaming reduce pattern
+    ///
+    /// This generates:
+    /// - A State struct to hold accumulated data
+    /// - init_state() -> State to initialize
+    /// - process_line(state: &mut State, line: &str) to process each line
+    /// - finalize(state: &State) -> String to produce final result
+    pub async fn generate_reduce(&self, intent: &str) -> Result<String, CodeGenError> {
+        let provider_guard = self.provider.read().await;
+        let provider = provider_guard
+            .as_ref()
+            .ok_or(CodeGenError::NotConfigured)?;
+
+        let system_prompt = Self::build_reduce_system_prompt();
+        let request = LlmRequest::new(system_prompt, intent)
+            .with_temperature(self.config.temperature)
+            .with_max_tokens(2048);
+
+        let response = match provider {
+            ProviderWrapper::Ollama(p) => p.complete(&request).await?,
+            ProviderWrapper::LiteLLM(p) => p.complete(&request).await?,
+        };
+
+        // Extract the reduce code from the response
+        let code = Self::extract_reduce_code(&response.content)?;
+        Ok(code)
+    }
+
     /// Build the system prompt for the coding LLM
     fn build_system_prompt() -> &'static str {
         r#"You are a Rust code generator. Your code runs in a WASM sandbox with these constraints:
@@ -244,6 +272,155 @@ pub fn analyze(input: &str) -> String {
 Now generate code for the following intent. Output ONLY the Rust function, starting with `pub fn analyze`:"#
     }
 
+    /// Build the system prompt for streaming reduce code generation
+    fn build_reduce_system_prompt() -> &'static str {
+        r#"You are a Rust code generator for STREAMING REDUCE operations. Your code processes data LINE BY LINE to handle arbitrarily large datasets without running out of memory.
+
+STREAMING REDUCE PATTERN:
+Instead of processing all data at once, you generate code that:
+1. Defines a State struct to hold accumulated values
+2. Initializes the state with init_state()
+3. Processes each line with process_line() - accumulating into state
+4. Produces final result with finalize()
+
+OUTPUT RULES:
+1. Output ONLY Rust code - no explanations, no markdown
+2. Must define: struct State { ... }
+3. Must define: fn init_state() -> State
+4. Must define: fn process_line(state: &mut State, line: &str)
+5. Must define: fn finalize(state: &State) -> String
+
+ENVIRONMENT CONSTRAINTS (same as non-streaming):
+- Code compiles to WebAssembly (WASM) with limited memory
+- Input is ASCII-only text (no unicode handling needed)
+- TwoWaySearcher PANICS in WASM - use helpers instead
+- HashMap/HashSet panic in WASM - use Vec<(String, T)> instead
+
+SAFE HELPERS (already defined - use these):
+- has(s, "pat") -> bool        Check if string contains pattern
+- count(s, "pat") -> usize     Count occurrences of pattern
+- after(s, "pat") -> &str      Get text after first occurrence
+- before(s, "pat") -> &str     Get text before first occurrence
+- word(s, n) -> &str           Get nth whitespace-separated word (0-indexed)
+- slice(s, start, end) -> &str Get substring by byte position
+- parse_int(s) -> i64          Parse integer (returns 0 on failure)
+- eq(a, b) -> bool             Compare strings for equality
+
+SAFE STDLIB:
+- Vec, Vec::new(), .push(), .len(), indexing
+- .trim(), .to_string(), .is_empty(), .len()
+- format!(), .push_str(), .join()
+- .iter(), .map(), .filter(), .collect()
+- .sort_by() for sorting
+
+FORBIDDEN (these panic in WASM):
+- .contains(), .find(), .split(), .matches() -> use helpers
+- HashMap / HashSet -> use Vec<(String, usize)>
+- .unwrap() -> use .unwrap_or() or .unwrap_or_default()
+
+REDUCIBLE OPERATIONS (can be computed with streaming):
+- Count, Sum, Min, Max
+- Mean (track sum and count, divide in finalize)
+- Frequency counting (track Vec<(key, count)>)
+- Finding unique values
+- Top-N by frequency
+
+NOT REDUCIBLE (require all data at once):
+- Median, Percentiles (need sorted data)
+- Mode (need full frequency then find max)
+
+EXAMPLE - Count unique IPs and rank top 10:
+
+struct State {
+    ip_counts: Vec<(String, usize)>,
+}
+
+fn init_state() -> State {
+    State {
+        ip_counts: Vec::new(),
+    }
+}
+
+fn process_line(state: &mut State, line: &str) {
+    // Extract IP address (first word)
+    let ip = word(line, 0).to_string();
+    if ip.is_empty() {
+        return;
+    }
+
+    // Update count for this IP
+    let mut found = false;
+    for i in 0..state.ip_counts.len() {
+        if eq(&state.ip_counts[i].0, &ip) {
+            state.ip_counts[i].1 += 1;
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        state.ip_counts.push((ip, 1));
+    }
+}
+
+fn finalize(state: &State) -> String {
+    // Sort by count descending
+    let mut sorted = state.ip_counts.clone();
+    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // Take top 10 and format
+    let mut result = format!("Unique IPs: {}\n\nTop 10:\n", sorted.len());
+    for (i, (ip, count)) in sorted.iter().take(10).enumerate() {
+        result.push_str(&format!("{}. {} ({} requests)\n", i + 1, ip, count));
+    }
+    result
+}
+
+EXAMPLE - Count error types:
+
+struct State {
+    error_counts: Vec<(String, usize)>,
+}
+
+fn init_state() -> State {
+    State {
+        error_counts: Vec::new(),
+    }
+}
+
+fn process_line(state: &mut State, line: &str) {
+    if !has(line, "[ERROR]") {
+        return;
+    }
+    let err_type = word(after(line, "[ERROR] "), 0).to_string();
+    if err_type.is_empty() {
+        return;
+    }
+
+    let mut found = false;
+    for i in 0..state.error_counts.len() {
+        if eq(&state.error_counts[i].0, &err_type) {
+            state.error_counts[i].1 += 1;
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        state.error_counts.push((err_type, 1));
+    }
+}
+
+fn finalize(state: &State) -> String {
+    let mut sorted = state.error_counts.clone();
+    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted.iter()
+        .map(|(k, c)| format!("{}: {}", k, c))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+Now generate streaming reduce code for the following intent. Output ONLY the struct State, init_state, process_line, and finalize functions:"#
+    }
+
     /// Extract Rust code from LLM response
     fn extract_code(response: &str) -> Result<String, CodeGenError> {
         let response = response.trim();
@@ -326,6 +503,85 @@ Now generate code for the following intent. Output ONLY the Rust function, start
             }
         }
         None
+    }
+
+    /// Extract reduce code from LLM response
+    ///
+    /// Looks for: struct State, fn init_state, fn process_line, fn finalize
+    fn extract_reduce_code(response: &str) -> Result<String, CodeGenError> {
+        let response = response.trim();
+
+        // Try to extract from markdown code block first
+        let code = if let Some(start) = response.find("```rust") {
+            let code_start = start + 7;
+            if let Some(end) = response[code_start..].find("```") {
+                response[code_start..code_start + end].trim()
+            } else {
+                response
+            }
+        } else if let Some(start) = response.find("```") {
+            let code_start = start + 3;
+            let code_start = if let Some(newline) = response[code_start..].find('\n') {
+                code_start + newline + 1
+            } else {
+                code_start
+            };
+            if let Some(end) = response[code_start..].find("```") {
+                response[code_start..code_start + end].trim()
+            } else {
+                response
+            }
+        } else {
+            response
+        };
+
+        // Validate that all required components are present
+        let has_state = code.contains("struct State");
+        let has_init = code.contains("fn init_state");
+        let has_process = code.contains("fn process_line");
+        let has_finalize = code.contains("fn finalize");
+
+        if !has_state {
+            return Err(CodeGenError::InvalidCode(
+                "Missing 'struct State' definition".to_string(),
+            ));
+        }
+        if !has_init {
+            return Err(CodeGenError::InvalidCode(
+                "Missing 'fn init_state()' function".to_string(),
+            ));
+        }
+        if !has_process {
+            return Err(CodeGenError::InvalidCode(
+                "Missing 'fn process_line()' function".to_string(),
+            ));
+        }
+        if !has_finalize {
+            return Err(CodeGenError::InvalidCode(
+                "Missing 'fn finalize()' function".to_string(),
+            ));
+        }
+
+        // Find the start (struct State) and extract everything through finalize
+        if let Some(struct_start) = code.find("struct State") {
+            // Find the last function (finalize) and its end
+            if let Some(finalize_start) = code.rfind("fn finalize") {
+                let finalize_code = &code[finalize_start..];
+                if let Some(end) = Self::find_function_end(finalize_code) {
+                    let full_end = finalize_start + end;
+                    return Ok(code[struct_start..full_end].to_string());
+                }
+            }
+        }
+
+        Err(CodeGenError::InvalidCode(format!(
+            "Could not extract valid reduce code from response: {}",
+            if code.len() > 200 {
+                format!("{}...", &code[..200])
+            } else {
+                code.to_string()
+            }
+        )))
     }
 
     /// Check if the code generator is configured

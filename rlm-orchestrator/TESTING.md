@@ -1,5 +1,9 @@
 # RLM Testing Guide
 
+## Important: Use LiteLLM Only
+
+**Do NOT use local Ollama models directly.** Always use the LiteLLM gateway to access DeepSeek models.
+
 ## Environment Setup
 
 ### Required Environment Variables
@@ -21,65 +25,77 @@ DEEPSEEK_API_KEY=sk-...
 
 ### LiteLLM Gateway
 
-We use LiteLLM as a gateway to DeepSeek APIs. **Do not use local Ollama models** - they're not good enough.
+We use LiteLLM as a gateway to DeepSeek APIs.
 
 - **Gateway URL**: `http://localhost:4000`
 - **Models available**:
-  - `deepseek/deepseek-chat` - General reasoning
-  - `deepseek/deepseek-coder` - Code generation (use for both base and helper LLMs)
+  - `deepseek/deepseek-chat` - General reasoning (base LLM)
+  - `deepseek/deepseek-coder` - Code generation (codegen LLM for rust_wasm_intent)
 
-## Configuration
+## CLI Usage
 
-### config.toml
+The CLI auto-configures codegen to use LiteLLM when `--litellm` flag is set.
 
-The server uses `config.toml` in the project root:
+### Basic Usage
 
-```toml
-# Disable bypass to ensure RLM is always used (for testing)
-bypass_enabled = false
-bypass_threshold = 0
+```bash
+# Source environment first!
+export $(cat ~/.env | grep -v '^#' | xargs)
 
-# WASM configuration
-[wasm]
-enabled = true
-rust_wasm_enabled = true
+# Simple query (auto-configures codegen via LiteLLM)
+./target/release/rlm data.txt "Your query" --litellm -m deepseek/deepseek-coder
 
-# Code generation via LiteLLM gateway
-codegen_provider = "litellm"
-codegen_url = "http://localhost:4000"
-codegen_model = "deepseek/deepseek-coder"
+# Verbose output
+./target/release/rlm data.txt "Your query" --litellm -m deepseek/deepseek-coder -v
 
-# LLM provider via LiteLLM
-[[providers]]
-provider_type = "litellm"
-base_url = "http://localhost:4000"
-model = "deepseek/deepseek-coder"
-role = "both"
-weight = 1
+# Extra verbose (shows commands)
+./target/release/rlm data.txt "Your query" --litellm -m deepseek/deepseek-coder -vv
 ```
 
 ### CLI Flags
 
-The CLI has its own configuration that overrides config.toml:
-
 ```bash
-# Use LiteLLM for base LLM
---litellm                   # Enable LiteLLM mode
+# LiteLLM configuration
+--litellm                   # Enable LiteLLM mode (REQUIRED)
 --litellm-url <URL>         # LiteLLM URL (default: http://localhost:4000)
---litellm-key <KEY>         # API key (or use LITELLM_MASTER_KEY env var)
 -m, --model <MODEL>         # Model name (e.g., deepseek/deepseek-coder)
 
-# Code generation (rust_wasm_intent command)
---codegen-url <URL>         # Codegen LLM URL
---codegen-model <MODEL>     # Codegen model name
+# Code generation (auto-configured when --litellm is set)
+--codegen-model <MODEL>     # Override codegen model (default: same as --model)
 
-# Other
+# Verbosity
 -v                          # Verbose output
 -vv                         # Extra verbose (show commands)
 --no-rust-wasm              # Disable rust_wasm commands
 ```
 
 ## Running Tests
+
+### Simple Test Suite
+
+```bash
+cd /Users/mike/github/softwarewrighter/rlm-project/rlm-orchestrator
+
+# Source environment
+export $(cat ~/.env | grep -v '^#' | xargs)
+
+# Run all 7 simple tests (~5-7 minutes total)
+./tests/simple/run-all.sh
+```
+
+### Individual Test
+
+```bash
+export $(cat ~/.env | grep -v '^#' | xargs)
+
+./target/release/rlm tests/simple/data-5lines.txt \
+    "How many lines are there?" \
+    --litellm \
+    -m deepseek/deepseek-coder \
+    -v
+```
+
+## Running Demos
 
 ### Start Server First
 
@@ -99,45 +115,38 @@ pkill -9 -f rlm-server 2>/dev/null
 curl -s http://localhost:8080/health
 ```
 
-### Run CLI Tests
+### Run a Demo
 
 ```bash
-cd /Users/mike/github/softwarewrighter/rlm-project/rlm-orchestrator
+# Large logs error ranking
+./demos/large-logs-error-ranking.sh
 
-# Source environment
-export $(cat ~/.env | grep -v '^#' | xargs)
-
-# Simple test with LiteLLM
-./target/release/rlm tests/simple/data-5lines.txt \
-    "How many lines are there?" \
-    --litellm \
-    -m deepseek/deepseek-coder \
-    --codegen-url http://localhost:4000 \
-    --codegen-model deepseek/deepseek-coder \
-    -v
+# War and Peace character analysis
+./demos/war-and-peace-family-tree.sh
 ```
 
 ## Test Cases
 
-### Level 1: No WASM Required
+### Level 1: Basic DSL Commands
 
-Simple tests that should complete with basic DSL commands (find, count, lines):
+Simple tests that complete with basic DSL commands (find, count, lines):
 
 1. **Count lines**: "How many lines are there?"
 2. **Find text**: "Find lines containing 'apple'"
 3. **Count matches**: "How many lines contain 'berry'?"
 
-### Level 2: Simple WASM (rust_wasm_intent)
+### Level 2: Code Generation (rust_wasm_intent)
 
-Tests that require code generation:
+Tests that require code generation via the helper LLM:
 
 1. **Sum numbers**: "Sum all the numbers"
-2. **Extract pattern**: "Extract all words starting with 'a'"
+2. **Count occurrences**: "Count occurrences of 'Smith', 'Brown', 'Wilson'"
+3. **Calculate median**: "Calculate the median of all numbers"
 
 ### Level 3: Complex Analysis
 
-1. **Frequency count**: "Count occurrences of each word"
-2. **Sort and rank**: "Rank items by frequency"
+1. **Frequency count and rank**: "Rank error types by frequency"
+2. **IP extraction and counting**: "List unique IPs with their counts"
 
 ## Troubleshooting
 
@@ -149,23 +158,26 @@ export $(cat ~/.env | grep -v '^#' | xargs)
 echo $LITELLM_MASTER_KEY  # Should show the key
 ```
 
-### "Code generation LLM not configured"
+### "Code generation LLM error: Provider ret..."
 
-Make sure you passed `--codegen-url`:
+This usually means the LiteLLM gateway timed out or the codegen model is overloaded. Try again or check:
 ```bash
---codegen-url http://localhost:4000 --codegen-model deepseek/deepseek-coder
+curl -s http://localhost:4000/health
 ```
 
 ### WASM Panics (TwoWaySearcher, memcmp)
 
-The generated code is using forbidden operations. Check:
-1. Using `has()` instead of `.contains()`
-2. Using `eq()` instead of `==` for strings
-3. Using `Vec<(String, usize)>` instead of `HashMap`
+The generated code is using forbidden operations. The code generator should avoid these, but if you see these errors, the LLM generated unsafe code.
+
+Forbidden operations:
+- `.contains()` - use `has()` instead
+- `.find()` - use `after()`/`before()` instead
+- `.split()` - use `word()` instead
+- `HashMap`/`HashSet` - use `Vec<(String, usize)>` instead
 
 ### Server Won't Start
 
-Check the config:
+Check the logs:
 ```bash
 cat /tmp/rlm-server.log
 ```

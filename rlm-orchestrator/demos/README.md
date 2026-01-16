@@ -1,7 +1,9 @@
 # RLM CLI Demos
 
 This directory contains bash scripts demonstrating RLM's capabilities via the CLI.
-All demos use **DeepSeek** via the LiteLLM gateway for reliable, fast results.
+All demos use **DeepSeek** via the LiteLLM gateway for both the base LLM and code generation.
+
+**Important:** Do NOT use local Ollama models. Always use LiteLLM gateway.
 
 ## Prerequisites
 
@@ -34,8 +36,8 @@ These demos require the server running to fetch sample data.
 | Demo | Description | Expected Time (DeepSeek) | Iterations |
 |------|-------------|--------------------------|------------|
 | `war-and-peace-family-tree.sh` | Extracts character relationships from 3.2MB of War and Peace | 60-90 sec | 3-5 |
-| `large-logs-error-ranking.sh` | Ranks error types in 5000 log lines using WASM HashMap | 30-60 sec | 2-3 |
-| `large-logs-unique-ips.sh` | Counts unique IPs in 5000 log lines using WASM HashSet | 30-60 sec | 2-3 |
+| `large-logs-error-ranking.sh` | Ranks error types in 5000 log lines using WASM | 30-60 sec | 2-3 |
+| `large-logs-unique-ips.sh` | Counts unique IPs in 5000 log lines using WASM | 30-60 sec | 2-3 |
 
 ### WASM Demos
 
@@ -110,9 +112,7 @@ WASM example (large-logs-error-ranking):
 ```
 ┌─ Iteration 1
 │ ⏱  LLM: 8500ms (3200p + 450c tokens)
-│ 🦀 Generated rust_wasm code
-│   Commands JSON:
-│   [{"cmd":"rust_wasm","args":{"code":"use std::collections::HashMap..."}}]
+│ 🦀 Generated rust_wasm code (via rust_wasm_intent)
 │ 🔧 Compiling Rust to WASM... done (180ms)
 │ ⚡ Executing WASM: 12ms
 │ ◀ Output: 245 chars, 8 lines (192ms)

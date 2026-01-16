@@ -1,15 +1,18 @@
 # RLM Orchestrator Configuration Example
 #
 # Copy this file to config.toml and customize for your environment.
+#
+# IMPORTANT: Use LiteLLM gateway with DeepSeek models for best results.
+# Do NOT use local Ollama models - they are not capable enough.
 
 max_iterations = 20
 max_sub_calls = 50
 output_limit = 10000
 
 # Smart bypass: skip RLM for small contexts and send directly to LLM
-# This avoids RLM overhead when the full context fits easily
-bypass_enabled = true
-bypass_threshold = 4000  # chars (~1000 tokens) - contexts smaller than this use direct LLM
+# Disable for testing to ensure RLM is always used
+bypass_enabled = false
+bypass_threshold = 0
 
 # WASM execution configuration
 [wasm]
@@ -18,34 +21,32 @@ rust_wasm_enabled = true        # Enable rust_wasm command (requires rustc + was
 fuel_limit = 1000000            # Max WASM instructions (prevents infinite loops)
 memory_limit = 67108864         # Max WASM memory in bytes (64MB)
 cache_size = 100                # Max modules in memory cache
-# cache_dir = "/tmp/rlm-wasm-cache"  # Disk cache directory (optional)
-# rustc_path = "/path/to/rustc"      # Custom rustc path (optional, auto-detected)
 
-# Two-LLM code generation (RECOMMENDED for rust_wasm_intent command)
-# Uses a specialized coding LLM (e.g., qwen2.5-coder) to generate safe Rust code
-# from natural language descriptions. This avoids WASM runtime panics.
-#
-# Set codegen_url to your Ollama server with a coding model:
-# codegen_url = "http://localhost:11434"       # Local Ollama
-# codegen_url = "http://your-server:11434"     # Remote Ollama
-codegen_model = "qwen2.5-coder:14b"            # Model for code generation
+# Two-LLM code generation via LiteLLM (REQUIRED for rust_wasm_intent)
+# Uses DeepSeek-coder through LiteLLM gateway to generate safe Rust code
+codegen_provider = "litellm"
+codegen_url = "http://localhost:4000"
+codegen_model = "deepseek/deepseek-coder"
 
 # ============================================================================
 # LLM Provider Configuration
 # ============================================================================
-# Configure one or more providers. Providers with role="root" handle the main
-# RLM orchestration. Providers with role="sub" handle llm_query sub-calls.
+# Use LiteLLM gateway to access DeepSeek models.
+# Requires LITELLM_MASTER_KEY environment variable.
 
-# Option 1: LiteLLM Proxy (recommended for production - enables usage tracking)
-# Requires LITELLM_API_KEY or LITELLM_MASTER_KEY environment variable
-# [[providers]]
-# provider_type = "litellm"
-# base_url = "http://localhost:4000"
-# model = "deepseek/deepseek-chat"
-# role = "root"
-# weight = 1
+# Primary provider via LiteLLM (RECOMMENDED)
+[[providers]]
+provider_type = "litellm"
+base_url = "http://localhost:4000"
+model = "deepseek/deepseek-coder"
+role = "both"  # Use for both root and sub calls
+weight = 1
 
-# Option 2: DeepSeek API directly
+# ============================================================================
+# Alternative Configurations (NOT RECOMMENDED)
+# ============================================================================
+
+# Option: DeepSeek API directly (bypass LiteLLM)
 # Requires DEEPSEEK_API_KEY environment variable
 # [[providers]]
 # provider_type = "deepseek"
@@ -53,20 +54,3 @@ codegen_model = "qwen2.5-coder:14b"            # Model for code generation
 # model = "deepseek-chat"
 # role = "root"
 # weight = 1
-
-# Option 3: Ollama (local or remote)
-# No API key required
-[[providers]]
-provider_type = "ollama"
-base_url = "http://localhost:11434"
-model = "qwen2.5:14b"
-role = "root"
-weight = 1
-
-# Sub-LM provider for llm_query calls
-[[providers]]
-provider_type = "ollama"
-base_url = "http://localhost:11434"
-model = "gemma2:9b"
-role = "sub"
-weight = 1

@@ -31,13 +31,13 @@ fi
 # Server URL for fetching sample data
 RLM_SERVER="${RLM_SERVER:-http://localhost:8080}"
 
-# LiteLLM gateway settings (for DeepSeek)
+# LiteLLM gateway settings (for all LLM access)
 LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"
 LITELLM_MODEL="${LITELLM_MODEL:-deepseek/deepseek-chat}"
 
-# Code generation LLM settings (for rust_wasm_intent)
-CODEGEN_URL="${CODEGEN_URL:-http://big72.local:11434}"
-CODEGEN_MODEL="${CODEGEN_MODEL:-qwen2.5-coder:14b}"
+# Code generation LLM settings (also via LiteLLM)
+# Uses deepseek-coder for rust_wasm_intent code generation
+CODEGEN_MODEL="${CODEGEN_MODEL:-deepseek/deepseek-coder}"
 
 # Function to fetch sample data from the server
 fetch_sample() {
@@ -59,7 +59,7 @@ fetch_sample() {
 }
 
 # Function to run a demo with timing
-# Uses DeepSeek via LiteLLM gateway
+# Uses DeepSeek via LiteLLM gateway for both base and codegen LLMs
 run_demo() {
     local context_file="$1"
     local query="$2"
@@ -68,7 +68,7 @@ run_demo() {
     echo ""
     echo "Query: $query"
     echo "Model: $LITELLM_MODEL (via LiteLLM @ $LITELLM_URL)"
-    echo "CodeGen: $CODEGEN_MODEL (@ $CODEGEN_URL)"
+    echo "CodeGen: $CODEGEN_MODEL (via LiteLLM @ $LITELLM_URL)"
     echo ""
     echo "Running..."
     echo "----------------------------------------"
@@ -77,6 +77,5 @@ run_demo() {
         --litellm \
         --litellm-url "$LITELLM_URL" \
         --model "$LITELLM_MODEL" \
-        --codegen-url "$CODEGEN_URL" \
         --codegen-model "$CODEGEN_MODEL"
 }
