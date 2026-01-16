@@ -571,7 +571,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             color: var(--muted);
             border: none;
             cursor: pointer;
-            font-size: 0.9rem;
+            font-size: 1rem;
             font-weight: 600;
             transition: background 0.2s, color 0.2s;
         }
@@ -618,7 +618,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             padding: 10px;
             color: var(--text);
             font-family: inherit;
-            font-size: 0.9rem;
+            font-size: 1rem;
         }
         .example-selector select:focus {
             outline: none;
@@ -633,7 +633,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .tag {
             padding: 4px 10px;
             border-radius: 12px;
-            font-size: 0.7rem;
+            font-size: 1rem;
             text-transform: uppercase;
             font-weight: 600;
         }
@@ -653,7 +653,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             flex-shrink: 0;
         }
         label {
-            font-size: 0.85rem;
+            font-size: 1rem;
             color: var(--muted);
             margin-bottom: 5px;
             display: block;
@@ -666,7 +666,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             padding: 12px;
             color: var(--text);
             font-family: inherit;
-            font-size: 0.9rem;
+            font-size: 1rem;
             resize: none;
         }
         textarea:focus {
@@ -688,7 +688,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             margin-bottom: 5px;
         }
         .context-stats {
-            font-size: 0.75rem;
+            font-size: 1rem;
             color: var(--muted);
         }
         #context {
@@ -726,13 +726,13 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             margin-bottom: 10px;
         }
         .progress-header h2 {
-            font-size: 0.9rem;
+            font-size: 1rem;
             color: var(--progress);
             text-transform: uppercase;
             letter-spacing: 1px;
         }
         .progress-status {
-            font-size: 0.8rem;
+            font-size: 1rem;
             color: var(--muted);
         }
         .progress-status.active { color: var(--progress); }
@@ -742,7 +742,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             padding: 12px;
             flex: 1;
             overflow-y: auto;
-            font-size: 0.8rem;
+            font-size: 1rem;
             line-height: 1.6;
             min-height: 100px;
         }
@@ -790,7 +790,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         }
         .stat-value.wasm { color: var(--wasm); }
         .stat-label {
-            font-size: 0.7rem;
+            font-size: 1rem;
             color: var(--muted);
             text-transform: uppercase;
         }
@@ -805,7 +805,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .answer-box h3 {
             color: var(--success);
             margin-bottom: 8px;
-            font-size: 0.9rem;
+            font-size: 1rem;
         }
         .answer-box.error {
             background: linear-gradient(135deg, #7f1d1d, #450a0a);
@@ -827,7 +827,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             overflow-y: auto;
         }
         .timeline h2 {
-            font-size: 0.85rem;
+            font-size: 1rem;
             color: var(--muted);
             margin-bottom: 12px;
             text-transform: uppercase;
@@ -854,10 +854,10 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .step-number {
             font-weight: bold;
             color: var(--highlight);
-            font-size: 0.9rem;
+            font-size: 1rem;
         }
         .step-meta {
-            font-size: 0.7rem;
+            font-size: 1rem;
             color: var(--muted);
             margin-top: 3px;
         }
@@ -869,7 +869,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .badge {
             padding: 2px 6px;
             border-radius: 4px;
-            font-size: 0.6rem;
+            font-size: 1rem;
             font-weight: 600;
         }
         .badge.wasm { background: var(--wasm); color: #000; }
@@ -884,7 +884,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             margin-bottom: 15px;
         }
         .detail-section h3 {
-            font-size: 0.8rem;
+            font-size: 1rem;
             color: var(--highlight);
             margin-bottom: 8px;
             text-transform: uppercase;
@@ -896,7 +896,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             border-radius: 8px;
             padding: 12px;
             overflow-x: auto;
-            font-size: 0.8rem;
+            font-size: 1rem;
             line-height: 1.5;
             white-space: pre-wrap;
             word-break: break-word;
@@ -921,11 +921,11 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .wasm-info h3 {
             color: var(--wasm);
             margin-bottom: 5px;
-            font-size: 0.85rem;
+            font-size: 1rem;
         }
         .wasm-info p {
             color: var(--text);
-            font-size: 0.8rem;
+            font-size: 1rem;
             line-height: 1.4;
         }
 
@@ -941,7 +941,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             padding: 6px 10px;
             background: var(--accent);
             border-radius: 6px;
-            font-size: 0.7rem;
+            font-size: 1rem;
         }
         .flow-node.query { background: var(--highlight); }
         .flow-node.final { background: #065f46; }
@@ -1047,7 +1047,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             background: var(--bg);
             border-radius: 8px;
             padding: 15px;
-            font-size: 0.9rem;
+            font-size: 1rem;
             line-height: 1.6;
             white-space: pre-wrap;
             word-break: break-word;
@@ -1064,7 +1064,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             background: var(--accent);
             padding: 8px 12px;
             border-radius: 6px;
-            font-size: 0.8rem;
+            font-size: 1rem;
         }
         .modal-stat-value {
             color: var(--highlight);
@@ -1072,7 +1072,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         }
         .modal-stat-label {
             color: var(--muted);
-            font-size: 0.7rem;
+            font-size: 1rem;
         }
         .modal-footer {
             padding: 15px 20px;
@@ -1082,7 +1082,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         }
         .modal-footer button {
             padding: 8px 20px;
-            font-size: 0.9rem;
+            font-size: 1rem;
         }
 
         /* Show Result button */
@@ -1663,7 +1663,7 @@ Line 7: ERROR - Invalid input received</textarea>
 
                 document.getElementById('exampleTags').innerHTML =
                     tagsHtml + benchmarkBadge + levelBadge +
-                    `<div style="color: var(--muted); font-size: 0.75rem; margin-top: 6px; width: 100%;">${example.description}</div>`;
+                    `<div style="color: var(--muted); font-size: 1rem; margin-top: 6px; width: 100%;">${example.description}</div>`;
 
                 // Load context - either from URL or use static value
                 if (example.loadUrl) {
