@@ -83,12 +83,11 @@ impl RustCompiler {
     /// Find rustc in PATH or common locations
     fn find_rustc() -> Result<PathBuf, CompileError> {
         // Try PATH first
-        if let Ok(output) = Command::new("rustc").arg("--version").output() {
-            if output.status.success() {
+        if let Ok(output) = Command::new("rustc").arg("--version").output()
+            && output.status.success() {
                 debug!("Found rustc in PATH");
                 return Ok(PathBuf::from("rustc"));
             }
-        }
 
         // Try common locations
         let home = std::env::var("HOME").unwrap_or_default();

@@ -373,7 +373,7 @@ async fn run_test_suite(client: &Client, spec: BenchmarkSpec) -> Result<TestResu
         let metrics = run_query(client, &q.query, &context).await;
 
         // Fail fast on infrastructure errors
-        if let Some(ref err) = &metrics.error {
+        if let Some(err) = &metrics.error {
             consecutive_errors += 1;
             if consecutive_errors >= 2 {
                 println!("  ✗ ERROR: {}", err);

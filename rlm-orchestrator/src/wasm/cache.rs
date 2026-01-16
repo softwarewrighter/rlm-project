@@ -111,8 +111,8 @@ impl ModuleCache {
         }
 
         // Check disk cache
-        if self.disk_enabled {
-            if let Some(ref dir) = self.disk_dir {
+        if self.disk_enabled
+            && let Some(ref dir) = self.disk_dir {
                 let disk_path = dir.join(&key);
                 if let Ok(wasm) = std::fs::read(&disk_path) {
                     debug!("Cache hit (disk): {}", &key[..8]);
@@ -122,7 +122,6 @@ impl ModuleCache {
                     return Some(wasm);
                 }
             }
-        }
 
         debug!("Cache miss: {}", &key[..8]);
         self.misses += 1;
@@ -134,14 +133,13 @@ impl ModuleCache {
         let key = Self::hash_source(source);
 
         // Write to disk cache first (if enabled)
-        if self.disk_enabled {
-            if let Some(ref dir) = self.disk_dir {
+        if self.disk_enabled
+            && let Some(ref dir) = self.disk_dir {
                 let disk_path = dir.join(&key);
                 if let Err(e) = std::fs::write(&disk_path, &wasm) {
                     warn!("Failed to write to disk cache: {}", e);
                 }
             }
-        }
 
         // Write to memory cache
         debug!("Cached module: {} ({} bytes)", &key[..8], wasm.len());
@@ -156,11 +154,10 @@ impl ModuleCache {
             return true;
         }
 
-        if self.disk_enabled {
-            if let Some(ref dir) = self.disk_dir {
+        if self.disk_enabled
+            && let Some(ref dir) = self.disk_dir {
                 return dir.join(&key).exists();
             }
-        }
 
         false
     }
@@ -177,8 +174,8 @@ impl ModuleCache {
         self.hits = 0;
         self.misses = 0;
 
-        if self.disk_enabled {
-            if let Some(ref dir) = self.disk_dir {
+        if self.disk_enabled
+            && let Some(ref dir) = self.disk_dir {
                 if let Err(e) = std::fs::remove_dir_all(dir) {
                     warn!("Failed to clear disk cache: {}", e);
                 } else if let Err(e) = std::fs::create_dir_all(dir) {
@@ -186,7 +183,6 @@ impl ModuleCache {
                     self.disk_enabled = false;
                 }
             }
-        }
 
         info!("Cache cleared");
     }
@@ -217,12 +213,11 @@ impl ModuleCache {
                     let mut count = 0;
                     let mut bytes = 0u64;
                     for entry in entries.flatten() {
-                        if let Ok(meta) = entry.metadata() {
-                            if meta.is_file() {
+                        if let Ok(meta) = entry.metadata()
+                            && meta.is_file() {
                                 count += 1;
                                 bytes += meta.len();
                             }
-                        }
                     }
                     (count, bytes)
                 }
@@ -267,12 +262,11 @@ impl ModuleCache {
         let mut files: Vec<(PathBuf, std::time::SystemTime, u64)> = Vec::new();
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
-                if let Ok(meta) = entry.metadata() {
-                    if meta.is_file() {
+                if let Ok(meta) = entry.metadata()
+                    && meta.is_file() {
                         let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                         files.push((entry.path(), mtime, meta.len()));
                     }
-                }
             }
         }
 
