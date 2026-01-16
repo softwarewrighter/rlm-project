@@ -962,20 +962,144 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             margin-bottom: 10px;
         }
 
+        /* Result modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s, visibility 0.2s;
+        }
+        .modal-overlay.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+        .modal {
+            background: var(--card);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            transform: scale(0.95);
+            transition: transform 0.2s;
+        }
+        .modal-overlay.visible .modal {
+            transform: scale(1);
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--accent);
+        }
+        .modal-header h2 {
+            color: var(--success);
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .modal-header h2.error { color: var(--error); }
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--muted);
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0 5px;
+            line-height: 1;
+        }
+        .modal-close:hover { color: var(--text); }
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+        .modal-result {
+            background: var(--bg);
+            border-radius: 8px;
+            padding: 15px;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 50vh;
+            overflow-y: auto;
+        }
+        .modal-stats {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        .modal-stat {
+            background: var(--accent);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+        }
+        .modal-stat-value {
+            color: var(--highlight);
+            font-weight: bold;
+        }
+        .modal-stat-label {
+            color: var(--muted);
+            font-size: 0.7rem;
+        }
+        .modal-footer {
+            padding: 15px 20px;
+            border-top: 1px solid var(--accent);
+            display: flex;
+            justify-content: flex-end;
+        }
+        .modal-footer button {
+            padding: 8px 20px;
+            font-size: 0.9rem;
+        }
+
+        /* Show Result button */
+        .btn-secondary {
+            background: var(--accent);
+            margin-right: 10px;
+        }
+        .btn-secondary:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .btn-secondary:not(:disabled):hover {
+            background: #1a4a7a;
+        }
+
         @media (max-width: 900px) {
             .results { grid-template-columns: 1fr; }
             .input-row { flex-direction: column; }
             .query-col { width: 100%; }
             .container { padding: 10px; }
+            .modal { width: 95%; max-height: 90vh; }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Header with title and Run button -->
+        <!-- Header with title and buttons -->
         <div class="header">
             <h1><span>🔄</span> RLM Visualizer</h1>
-            <button id="runBtn" onclick="runQuery()">Run RLM Query</button>
+            <div>
+                <button id="showResultBtn" class="btn-secondary" onclick="showResultModal()" disabled>Show Result</button>
+                <button id="runBtn" onclick="runQuery()">Run RLM Query</button>
+            </div>
         </div>
 
         <!-- Tab bar -->
@@ -1108,13 +1232,75 @@ Line 7: ERROR - Invalid input received</textarea>
         </div>
     </div>
 
+    <!-- Result Modal -->
+    <div id="resultModal" class="modal-overlay" onclick="hideResultModal(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2 id="modalTitle">✅ Result</h2>
+                <button class="modal-close" onclick="hideResultModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="modalResult" class="modal-result"></div>
+                <div id="modalStats" class="modal-stats"></div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="hideResultModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let currentData = null;
         let eventSource = null;
         let startTime = null;
 
         // Initialize on load
-        document.addEventListener('DOMContentLoaded', updateContextStats);
+        document.addEventListener('DOMContentLoaded', () => {
+            updateContextStats();
+            // Add Esc key listener to close modal
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') hideResultModal();
+            });
+        });
+
+        // Modal functions
+        function showResultModal() {
+            if (!currentData) return;
+
+            const modal = document.getElementById('resultModal');
+            const title = document.getElementById('modalTitle');
+            const result = document.getElementById('modalResult');
+            const stats = document.getElementById('modalStats');
+
+            // Set title based on success/failure
+            if (currentData.success) {
+                title.textContent = '✅ Result';
+                title.className = '';
+            } else {
+                title.textContent = '❌ Error';
+                title.className = 'error';
+            }
+
+            // Set result content
+            result.textContent = currentData.success ? currentData.answer : (currentData.error || 'Failed');
+
+            // Set stats
+            const totalTokens = (currentData.total_prompt_tokens || 0) + (currentData.total_completion_tokens || 0);
+            const durationSec = currentData.total_duration_ms ? (currentData.total_duration_ms / 1000).toFixed(1) + 's' : '-';
+            stats.innerHTML = `
+                <div class="modal-stat"><span class="modal-stat-value">${currentData.iterations}</span> <span class="modal-stat-label">iterations</span></div>
+                <div class="modal-stat"><span class="modal-stat-value">${totalTokens.toLocaleString()}</span> <span class="modal-stat-label">tokens</span></div>
+                <div class="modal-stat"><span class="modal-stat-value">${durationSec}</span> <span class="modal-stat-label">duration</span></div>
+            `;
+
+            modal.classList.add('visible');
+        }
+
+        function hideResultModal(event) {
+            // If called from background click, only close if clicking the overlay itself
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('resultModal').classList.remove('visible');
+        }
 
         // Tab switching
         function switchTab(tabName) {
@@ -1382,6 +1568,10 @@ Line 7: ERROR - Invalid input received</textarea>
             btn.textContent = 'Running...';
             startTime = Date.now();
 
+            // Disable Show Result button and clear old data
+            document.getElementById('showResultBtn').disabled = true;
+            currentData = null;
+
             // Switch to Output tab
             switchTab('output');
 
@@ -1563,6 +1753,10 @@ Line 7: ERROR - Invalid input received</textarea>
             // Collapse progress section and show results
             document.getElementById('progressSection').classList.remove('expanded');
             document.getElementById('resultsSection').classList.remove('hidden');
+
+            // Enable Show Result button and auto-show modal
+            document.getElementById('showResultBtn').disabled = false;
+            showResultModal();
 
             // Check for WASM usage across all steps
             const wasmSteps = data.history.filter(s => hasWasm(s.commands));
