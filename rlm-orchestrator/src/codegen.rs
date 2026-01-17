@@ -284,6 +284,24 @@ fn map_line(line: &str) -> Vec<(String, String)> {
     vec![(status, "1".to_string())]
 }
 
+EXAMPLE - Extract each word from text (for word frequency):
+
+fn map_line(line: &str) -> Vec<(String, String)> {
+    let mut results = Vec::new();
+    let mut i = 0;
+    loop {
+        let w = word(line, i).trim().to_string();
+        if w.is_empty() {
+            break;
+        }
+        // Convert to lowercase for consistent counting
+        let w_lower = w.to_lowercase();
+        results.push((w_lower, "1".to_string()));
+        i += 1;
+    }
+    results
+}
+
 Now generate stateless map code for the following intent. Output ONLY the fn map_line function:"#
     }
 

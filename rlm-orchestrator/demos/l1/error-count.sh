@@ -7,7 +7,7 @@
 # Expected time with DeepSeek: 15-30 seconds
 # Expected iterations: 1-2
 
-source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../common.sh"
 
 echo "============================================"
 echo "Basic Error Count Demo"

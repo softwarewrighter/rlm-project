@@ -7,7 +7,7 @@
 # Expected time with DeepSeek: 60-90 seconds
 # Expected iterations: 3-5
 
-source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/../common.sh"
 
 echo "============================================"
 echo "War and Peace Family Tree Demo"

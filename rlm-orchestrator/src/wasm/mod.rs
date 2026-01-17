@@ -424,6 +424,7 @@ impl ReduceInstance {
 pub struct MapInstance {
     store: Store<()>,
     instance: Instance,
+    fuel_limit: u64,
 }
 
 impl MapInstance {
@@ -431,6 +432,11 @@ impl MapInstance {
     ///
     /// Returns pairs as Vec<(key, value)> for aggregation in native Rust.
     pub fn map_line(&mut self, line: &str) -> Result<Vec<(String, String)>, WasmError> {
+        // Refresh fuel for this line call - each line gets its own fuel budget
+        self.store
+            .set_fuel(self.fuel_limit)
+            .map_err(|e| WasmError::ExecutionError(format!("Failed to set fuel: {}", e)))?;
+
         // Get memory and functions
         let memory = self
             .instance
@@ -561,7 +567,7 @@ impl WasmExecutor {
             .get_typed_func::<(i32, i32), i32>(&mut store, "map_one")
             .map_err(|e| WasmError::FunctionNotFound(format!("map_one: {}", e)))?;
 
-        Ok(MapInstance { store, instance })
+        Ok(MapInstance { store, instance, fuel_limit: self.config.fuel_limit })
     }
 }
 

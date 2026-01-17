@@ -40,6 +40,9 @@ pub struct QueryRequest {
     /// Optional: Override sub model (e.g., "local-sub", "manager-gemma9b")
     #[serde(default)]
     pub sub_model: Option<String>,
+    /// Optional: Force RLM processing even for small contexts (for demos/testing)
+    #[serde(default)]
+    pub force_rlm: bool,
 }
 
 /// Response from a query
@@ -364,6 +367,7 @@ async fn stream_query(
     let orchestrator = state.orchestrator.clone();
     let query = request.query.clone();
     let context = request.context.clone();
+    let force_rlm = request.force_rlm;
 
     tokio::spawn(async move {
         let query_start = std::time::Instant::now();
@@ -442,7 +446,7 @@ async fn stream_query(
 
         // Run the query with progress callback
         match orchestrator
-            .process_with_progress(&query, &context, Some(callback))
+            .process_with_options(&query, &context, Some(callback), force_rlm)
             .await
         {
             Ok(result) => {
@@ -649,6 +653,8 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         }
         .tag.dsl { background: #34d399; color: #000; }
         .tag.wasm { background: var(--color-wasm); color: #000; }
+        .tag.cli { background: var(--color-cli); color: #fff; }
+        .tag.llm { background: var(--color-llm4); color: #fff; }
         .tag.combined { background: #8b5cf6; color: #fff; }
         .tag.basic { background: var(--accent); }
         .tag.aggregation { background: #7c3aed; }
@@ -1343,22 +1349,24 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
                     <label for="exampleSelect">Load Example</label>
                     <select id="exampleSelect" onchange="loadExample()">
                         <option value="">-- Select an example --</option>
-                        <optgroup label="Level 1: DSL (Easy - Text Operations)">
+                        <optgroup label="Level 1: DSL (Text Operations)">
                             <option value="count_errors" selected>Count ERROR lines</option>
                             <option value="find_pattern">Find text pattern</option>
                             <option value="dsl_slice_lines">Extract line range</option>
                         </optgroup>
-                        <optgroup label="Level 2: WASM (Medium - Computation)">
+                        <optgroup label="Level 2: WASM (Sandboxed Computation)">
                             <option value="wasm_unique_ips">Count unique IP addresses</option>
                             <option value="wasm_error_ranking">Rank errors by frequency</option>
-                            <option value="wasm_word_freq">Word frequency analysis</option>
+                            <option value="wasm_http_status">HTTP status code frequency</option>
                             <option value="wasm_response_times">Response time percentiles</option>
-                        </optgroup>
-                        <optgroup label="Level 2: WASM (Large Context)">
                             <option value="large_logs_errors">Large Logs: Error Ranking (5000 lines)</option>
                             <option value="large_logs_ips">Large Logs: Unique IPs (5000 lines)</option>
                         </optgroup>
-                        <optgroup label="Combined (Advanced - Not Yet Implemented)">
+                        <optgroup label="Level 3: CLI (Native Binary)">
+                            <option value="cli_word_frequency">Word frequency analysis</option>
+                            <option value="cli_web_extraction">Web data extraction (Not Yet Implemented)</option>
+                        </optgroup>
+                        <optgroup label="Level 4: Recursive LLM (Multi-hop Reasoning)">
                             <option value="war_peace_family">War and Peace: Family Tree (3.2MB)</option>
                         </optgroup>
                     </select>
@@ -1863,28 +1871,26 @@ Line 7: ERROR - Invalid input received</textarea>
                 maxIterations: 10,
                 description: 'OOLONG: Frequency ranking. Uses rust_wasm_mapreduce for map (extract) then reduce (count+sort).'
             },
-            wasm_word_freq: {
-                query: "What are the top 10 most common words in this text?",
-                context: generateTextSample(),
-                tags: ['wasm', 'aggregation', 'text-analysis'],
+            wasm_http_status: {
+                query: "Count the frequency of each HTTP status code (200, 404, 500, etc.) and show the most common ones. Use rust_wasm_mapreduce with intent 'Extract the word after HTTP/1.1\" from each line' and combiner='count'.",
+                context: generateHttpLogs(200),
+                tags: ['wasm', 'aggregation', 'logs'],
                 benchmark: 'OOLONG',
                 level: 'Level 2 (WASM)',
                 maxIterations: 10,
-                description: 'OOLONG: Word frequency analysis. Uses rust_wasm with HashMap for counting, then sorting.'
+                description: 'OOLONG: HTTP status frequency. Uses rust_wasm_mapreduce to count status codes.'
             },
             wasm_response_times: {
-                query: "Calculate the p50, p95, and p99 response time percentiles",
+                query: "Calculate the p50, p95, and p99 response time percentiles. Use rust_wasm_intent with intent 'Extract the number before ms from each line, sort all numbers, and compute p50 (median), p95, and p99 percentiles'.",
                 context: generateResponseTimes(300),
                 tags: ['wasm', 'statistics', 'percentiles'],
                 benchmark: 'OOLONG',
                 level: 'Level 2 (WASM)',
                 maxIterations: 10,
-                description: 'OOLONG: Statistical computation. Uses rust_wasm to parse, sort, and compute percentiles.'
+                description: 'OOLONG: Statistical computation. Uses rust_wasm_intent (not mapreduce) because percentiles need sorted data.'
             },
 
-            // ========================================
-            // LEVEL 2: WASM (Large Context)
-            // ========================================
+            // (Large context WASM examples - merged into WASM group)
             large_logs_errors: {
                 query: "Rank the error types from most to least frequent. Show the count for each error type.",
                 context: null,
@@ -1907,17 +1913,39 @@ Line 7: ERROR - Invalid input received</textarea>
             },
 
             // ========================================
-            // COMBINED (Advanced - Not Yet Implemented)
+            // LEVEL 3: CLI (Native Binary)
+            // ========================================
+            cli_word_frequency: {
+                query: "Find the top 10 most common words in this text (excluding common words like 'the', 'a', 'is').",
+                context: generateTextSample(),
+                tags: ['cli', 'aggregation', 'text'],
+                benchmark: 'OOLONG',
+                level: 'Level 3 (CLI)',
+                maxIterations: 10,
+                description: 'OOLONG: Word frequency analysis with filtering. Uses rust_cli_intent for complex text processing.'
+            },
+            cli_web_extraction: {
+                query: "Extract structured data from this web page content (e.g., product names, prices, ratings).",
+                context: "<!-- Web extraction example - NOT YET IMPLEMENTED -->\n<html>\n<body>\n<div class='product'><h2>Widget Pro</h2><span class='price'>$29.99</span><span class='rating'>4.5/5</span></div>\n<div class='product'><h2>Gadget Max</h2><span class='price'>$49.99</span><span class='rating'>4.8/5</span></div>\n</body>\n</html>",
+                tags: ['cli', 'web', 'extraction'],
+                benchmark: 'BrowseComp-Plus',
+                level: 'Level 3 (CLI)',
+                maxIterations: 10,
+                description: 'BrowseComp-Plus: Web data extraction. Uses rust_cli_intent for HTML parsing. NOT YET IMPLEMENTED.'
+            },
+
+            // ========================================
+            // LEVEL 4: Recursive LLM (Multi-hop Reasoning)
             // ========================================
             war_peace_family: {
                 query: "Build a family tree for the main characters. Identify characters who appear multiple times and are related to each other (by blood or marriage). Show the relationships in a structured format.",
                 context: null,
                 loadUrl: '/samples/war-and-peace',
-                tags: ['combined', 'large-context', 'synthesis'],
+                tags: ['llm', 'large-context', 'synthesis'],
                 benchmark: 'S-NIAH',
-                level: 'Level 1 + Level 2',
+                level: 'Level 4 (Recursive LLM)',
                 maxIterations: 20,
-                description: 'S-NIAH: Find scattered character mentions in 3.2MB text. NOT YET IMPLEMENTED.'
+                description: 'S-NIAH: Find scattered character mentions in 3.2MB text. Requires multi-hop LLM reasoning.'
             }
         };
 
@@ -1964,6 +1992,7 @@ Line 7: ERROR - Invalid input received</textarea>
 
         // Generate text sample for word frequency
         function generateTextSample() {
+            // Generate enough text to exceed bypass threshold (4000 chars)
             const sentences = [
                 'The quick brown fox jumps over the lazy dog.',
                 'A journey of a thousand miles begins with a single step.',
@@ -1974,13 +2003,36 @@ Line 7: ERROR - Invalid input received</textarea>
                 'It was the best of times, it was the worst of times.',
                 'Call me Ishmael.',
                 'The quick fox ran across the field.',
-                'Happy families are all alike; every unhappy family is unhappy in its own way.'
+                'Happy families are all alike; every unhappy family is unhappy in its own way.',
+                'It is a truth universally acknowledged that a man in possession of fortune must be in want of wife.',
+                'In the middle of the journey of our life I found myself within a dark woods.',
+                'One morning when Gregor Samsa woke from troubled dreams he found himself transformed.',
+                'The past is a foreign country; they do things differently there.',
+                'All happy families resemble one another, but each unhappy family is unhappy in its own way.'
             ];
             const result = [];
-            for (let i = 0; i < 50; i++) {
+            // 100 sentences should give us ~5000 chars
+            for (let i = 0; i < 100; i++) {
                 result.push(sentences[i % sentences.length]);
             }
             return result.join(' ');
+        }
+
+        // Generate HTTP access logs for status code analysis
+        function generateHttpLogs(n) {
+            const lines = [];
+            const ips = ['192.168.1.100', '10.0.0.50', '172.16.0.25', '192.168.1.200', '10.0.0.75'];
+            const endpoints = ['/api/users', '/api/data', '/api/health', '/api/products', '/api/login'];
+            // Realistic status distribution: mostly 200, some 404, few 500
+            const statuses = ['200', '200', '200', '200', '200', '200', '201', '204', '301', '302', '400', '401', '403', '404', '404', '500', '502', '503'];
+            for (let i = 0; i < n; i++) {
+                const ip = ips[i % ips.length];
+                const ep = endpoints[i % endpoints.length];
+                const status = statuses[i % statuses.length];
+                const date = '16/Jan/2024:10:' + String(i % 60).padStart(2, '0') + ':00';
+                lines.push(`${ip} - - [${date}] "GET ${ep} HTTP/1.1" ${status} 1234`);
+            }
+            return lines.join('\n');
         }
 
         // Generate response time logs
@@ -2010,6 +2062,8 @@ Line 7: ERROR - Invalid input received</textarea>
                     let tagClass = 'basic';
                     if (tag === 'dsl') tagClass = 'dsl';
                     else if (tag === 'wasm') tagClass = 'wasm';
+                    else if (tag === 'cli') tagClass = 'cli';
+                    else if (tag === 'llm') tagClass = 'llm';
                     else if (tag === 'combined') tagClass = 'combined';
                     else if (tag === 'large-context') tagClass = 'large-context';
                     else if (tag === 'aggregation' || tag === 'ranking') tagClass = 'aggregation';
@@ -2123,10 +2177,11 @@ Line 7: ERROR - Invalid input received</textarea>
 
             try {
                 // Use fetch to POST and get SSE stream
+                // force_rlm bypasses small-context optimization to ensure WASM demos work
                 const response = await fetch('/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query, context })
+                    body: JSON.stringify({ query, context, force_rlm: true })
                 });
 
                 if (!response.ok) {
@@ -2280,28 +2335,51 @@ Line 7: ERROR - Invalid input received</textarea>
             if (!commands) return [];
             const types = [];
             // DSL commands
-            if (commands.includes('"slice"') || commands.includes('"op": "slice"')) types.push('slice');
-            if (commands.includes('"lines"') || commands.includes('"op": "lines"')) types.push('lines');
-            if (commands.includes('"regex"') || commands.includes('"op": "regex"')) types.push('regex');
-            if (commands.includes('"find"') || commands.includes('"op": "find"')) types.push('find');
-            if (commands.includes('"count"') || commands.includes('"op": "count"')) types.push('count');
-            if (commands.includes('"split"') || commands.includes('"op": "split"')) types.push('split');
-            if (commands.includes('"len"') || commands.includes('"op": "len"')) types.push('len');
-            if (commands.includes('"set"') || commands.includes('"op": "set"')) types.push('set');
-            if (commands.includes('"get"') || commands.includes('"op": "get"')) types.push('get');
-            if (commands.includes('"print"') || commands.includes('"op": "print"')) types.push('print');
-            if (commands.includes('"final"') || commands.includes('"op": "final"')) types.push('final');
-            // WASM/CLI commands
-            if (commands.includes('rust_wasm') || commands.includes('"op": "wasm"')) types.push('rust_wasm');
-            if (commands.includes('rust_cli_intent')) types.push('rust_cli');
+            if (commands.includes('"op": "slice"')) types.push('slice');
+            if (commands.includes('"op": "lines"')) types.push('lines');
+            if (commands.includes('"op": "regex"')) types.push('regex');
+            if (commands.includes('"op": "find"')) types.push('find');
+            if (commands.includes('"op": "count"')) types.push('count');
+            if (commands.includes('"op": "split"')) types.push('split');
+            if (commands.includes('"op": "len"')) types.push('len');
+            if (commands.includes('"op": "set"')) types.push('set');
+            if (commands.includes('"op": "get"')) types.push('get');
+            if (commands.includes('"op": "print"')) types.push('print');
+            if (commands.includes('"op": "final"') || commands.includes('"op": "final_var"')) types.push('final');
+            if (commands.includes('"op": "llm_query"')) types.push('llm_query');
+            if (commands.includes('"op": "wasm_template"')) types.push('wasm_template');
+            // WASM/CLI commands (more specific)
+            if (commands.includes('rust_wasm_mapreduce')) types.push('wasm_mapreduce');
+            else if (commands.includes('rust_wasm_reduce_intent')) types.push('wasm_reduce');
+            else if (commands.includes('rust_wasm_intent')) types.push('wasm_intent');
+            else if (commands.includes('"op": "rust_wasm"') || commands.includes('"op": "wasm"')) types.push('wasm');
+            else if (commands.includes('"op": "wasm_wat"')) types.push('wasm_wat');
+            if (commands.includes('rust_cli_intent')) types.push('cli');
             return types;
         }
 
         function formatCommandTypes(commands) {
+            if (!commands) return 'commands';
             const types = getCommandTypes(commands);
-            if (types.length === 0) return 'commands';
-            if (types.includes('rust_wasm')) return 'rust_wasm';
-            if (types.includes('rust_cli')) return 'rust_cli';
+            if (types.length === 0) {
+                // Try to extract op directly from JSON
+                const opMatch = commands.match(/"op"\s*:\s*"([^"]+)"/);
+                return opMatch ? opMatch[1] : 'commands';
+            }
+
+            // For WASM mapreduce, include the combiner type
+            if (types.includes('wasm_mapreduce')) {
+                const combinerMatch = commands.match(/"combiner"\s*:\s*"(\w+)"/);
+                const combiner = combinerMatch ? combinerMatch[1] : '';
+                return combiner ? `mapreduce (${combiner})` : 'mapreduce';
+            }
+            if (types.includes('wasm_reduce')) return 'reduce';
+            if (types.includes('wasm_intent')) return 'wasm_intent';
+            if (types.includes('wasm_template')) return 'wasm_template';
+            if (types.includes('wasm')) return 'wasm';
+            if (types.includes('wasm_wat')) return 'wasm_wat';
+            if (types.includes('cli')) return 'cli';
+            if (types.includes('llm_query')) return 'llm_query';
             return types.join(', ');
         }
 

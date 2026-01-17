@@ -1,11 +1,63 @@
-# RLM CLI Demos
+# RLM Demos
 
-This directory contains bash scripts demonstrating RLM's capabilities via the CLI.
-All demos use **DeepSeek** via the LiteLLM gateway for both the base LLM and code generation.
+This directory contains demos for RLM (Recursive Language Model), organized by **capability level**. Each demo is available both as a **command-line script** and in the **Web UI visualizer**.
 
-**Important:** Do NOT use local Ollama models. Always use LiteLLM gateway.
+## Capability Levels
 
-## Prerequisites
+RLM supports 4 capability levels, each with different trade-offs:
+
+| Level | Name | Description | Sandbox | Use Case |
+|-------|------|-------------|---------|----------|
+| **L1** | DSL | Text operations (slice, find, regex, count) | Safe | Simple pattern matching, line extraction |
+| **L2** | WASM | Sandboxed Rust computation | Safe | Aggregation, frequency counting, statistics |
+| **L3** | CLI | Native Rust binary (future) | Unsafe | Complex analysis requiring full stdlib |
+| **L4** | Recursive LLM | Multi-hop LLM reasoning (future) | Safe | Semantic analysis of scattered information |
+
+## Problem Types (from RLM Paper)
+
+- **Simple NIAH**: "Needle in a haystack" - find specific patterns in large text
+- **OOLONG**: Aggregation and statistical operations over data
+- **BrowseComp-Plus**: Complex extraction and ranking tasks
+- **S-NIAH**: Scattered needle - information spread across document
+
+---
+
+## Demo Correspondence: CLI Scripts ↔ Web UI
+
+### Level 1: DSL (Text Operations)
+
+| CLI Script | Web UI Dropdown | Problem Type | Description |
+|------------|-----------------|--------------|-------------|
+| `l1/error-count.sh` | "Count ERROR lines" | Simple NIAH | Count lines matching a pattern using DSL find/count |
+
+### Level 2: WASM (Sandboxed Computation)
+
+| CLI Script | Web UI Dropdown | Problem Type | Description |
+|------------|-----------------|--------------|-------------|
+| `l2/unique-ips.sh` | "Count unique IP addresses" | OOLONG | Count unique items using rust_wasm_mapreduce (combiner=unique) |
+| `l2/error-ranking.sh` | "Rank errors by frequency" | OOLONG | Frequency ranking using rust_wasm_mapreduce (combiner=count) |
+| `l2/percentiles.sh` | "Response time percentiles" | OOLONG | Statistical computation using rust_wasm_intent (needs sorting) |
+| - | "HTTP status code frequency" | OOLONG | Similar to error-ranking but for HTTP status codes |
+| - | "Large Logs: Error Ranking" | BrowseComp-Plus | Same as error-ranking but with 5000 lines |
+| - | "Large Logs: Unique IPs" | BrowseComp-Plus | Same as unique-ips but with 5000 lines |
+
+### Level 3: CLI (Native Binary) - FUTURE
+
+| CLI Script | Web UI Dropdown | Problem Type | Description |
+|------------|-----------------|--------------|-------------|
+| `future/l3-cli/*` | "Word frequency analysis" | OOLONG | Complex text processing with full Rust stdlib |
+
+### Level 4: Recursive LLM - FUTURE
+
+| CLI Script | Web UI Dropdown | Problem Type | Description |
+|------------|-----------------|--------------|-------------|
+| `l4/family-tree.sh` | "War and Peace Family Tree" | S-NIAH | Multi-hop reasoning over 3.2MB text |
+
+---
+
+## Running Demos
+
+### Prerequisites
 
 1. **Build the CLI**:
    ```bash
@@ -15,156 +67,107 @@ All demos use **DeepSeek** via the LiteLLM gateway for both the base LLM and cod
 2. **Set up API keys** in `~/.env`:
    ```bash
    DEEPSEEK_API_KEY=your_key_here
-   LITELLM_API_KEY=sk-local-test-key-123
-   LITELLM_MASTER_KEY=sk-local-test-key-123
    ```
 
-3. **Start the LiteLLM gateway**:
+3. **Start LiteLLM gateway**:
    ```bash
    litellm --config litellm_config.yaml --port 4000
    ```
 
-4. **Start the RLM server** (required for demos that fetch sample data):
+4. **Start RLM server** (for Web UI and demos that fetch sample data):
    ```bash
-   # IMPORTANT: Server needs env vars from ~/.env
-   export $(grep -E "^[A-Z]" ~/.env | xargs) && ./target/release/rlm-server config.toml
+   ./scripts/run-server-litellm.sh
    ```
 
-   Or use the helper script:
-   ```bash
-   ./scripts/start-server.sh
-   ```
-
-## Demos
-
-### Large Context Demos
-
-These demos require the server running to fetch sample data.
-
-| Demo | Description | Expected Time (DeepSeek) | Iterations |
-|------|-------------|--------------------------|------------|
-| `war-and-peace-family-tree.sh` | Extracts character relationships from 3.2MB of War and Peace | 60-90 sec | 3-5 |
-| `large-logs-error-ranking.sh` | Ranks error types in 5000 log lines using WASM | 30-60 sec | 2-3 |
-| `large-logs-unique-ips.sh` | Counts unique IPs in 5000 log lines using WASM | 30-60 sec | 2-3 |
-
-### WASM Demos
-
-These demos generate their own context data.
-
-| Demo | Description | Expected Time (DeepSeek) | Iterations |
-|------|-------------|--------------------------|------------|
-| `wasm-percentiles.sh` | Calculates p50/p95/p99 response time percentiles | 20-40 sec | 2-3 |
-
-### Basic Demos
-
-These demos use basic RLM commands without WASM.
-
-| Demo | Description | Expected Time (DeepSeek) | Iterations |
-|------|-------------|--------------------------|------------|
-| `basic-error-count.sh` | Counts ERROR lines in log data | 15-30 sec | 1-2 |
-
-## Running a Demo
+### CLI Scripts
 
 ```bash
-# From the rlm-orchestrator directory
-./demos/basic-error-count.sh
+# Level 1: DSL demo
+./demos/l1/error-count.sh
 
-# Or from anywhere
-/path/to/rlm-orchestrator/demos/war-and-peace-family-tree.sh
+# Level 2: WASM demos (today's focus)
+./demos/l2/unique-ips.sh
+./demos/l2/error-ranking.sh
+./demos/l2/percentiles.sh
+
+# Level 4: Recursive LLM demo (future)
+./demos/l4/family-tree.sh
 ```
 
-## Output
+### Web UI Visualizer
 
-Each demo shows:
-- Context size (chars, lines)
-- Query being executed
-- Per-iteration progress (with -v flag):
-  - LLM response time and token usage
-  - WASM compile/run time (if applicable)
-- Final answer
-- Total duration
+1. Open http://localhost:8080/visualize
+2. Select a demo from the "Load Example" dropdown
+3. Click "Run RLM Query"
+4. Watch real-time progress and WASM execution
 
-Example output:
+---
+
+## WASM Operations (Level 2)
+
+Level 2 demos use two WASM operations:
+
+### rust_wasm_mapreduce
+For per-line extraction + aggregation:
+- `combiner="unique"` - count unique items (HashSet)
+- `combiner="count"` - frequency counting (HashMap)
+- `combiner="sum"` - numeric totals
+
+### rust_wasm_intent
+For operations needing ALL data at once:
+- Sorting, percentiles, median
+- Complex statistics
+- Any operation requiring sorted/complete data
+
+---
+
+## Directory Structure
+
 ```
-============================================
-Basic Error Count Demo
-============================================
-
-Generated: 100 log entries
-
-Query: How many ERROR lines are there?
-
-Running...
-----------------------------------------
-Starting query (context: 4250 chars, query: 32 chars)
-┌─ Iteration 1
-│ ⏱  LLM: 2450ms (1234p + 89c tokens)
-│ ▶ Extracted 2 command(s)
-│   Commands JSON:
-│   [{"cmd":"find","args":{"pattern":"ERROR"}}]
-│ ◀ Output: 850 chars, 20 lines (2ms)
-│   Preview:
-│   [2024-01-15 10:05:00] ERROR AuthenticationFailed from 192.168.1.105
-│   [2024-01-15 10:10:00] ERROR AuthenticationFailed from 192.168.1.110
-└────────────────────────────────────────
-┌─ Iteration 2
-│ ⏱  LLM: 1890ms (890p + 45c tokens)
-│ ✓ Returning FINAL answer
-└────────────────────────────────────────
-Completed in 2 iteration(s), 4523ms total
-
-FINAL: There are 20 ERROR lines.
-```
-
-WASM example (large-logs-error-ranking):
-```
-┌─ Iteration 1
-│ ⏱  LLM: 8500ms (3200p + 450c tokens)
-│ 🦀 Generated rust_wasm code (via rust_wasm_intent)
-│ 🔧 Compiling Rust to WASM... done (180ms)
-│ ⚡ Executing WASM: 12ms
-│ ◀ Output: 245 chars, 8 lines (192ms)
-│   Preview:
-│   AuthenticationFailed: 1250
-│   DatabaseError: 890
-│   NetworkTimeout: 456
-└────────────────────────────────────────
+demos/
+├── README.md           # This file
+├── common.sh           # Shared setup (API keys, paths, run_demo function)
+├── l1/                 # Level 1: DSL demos
+│   └── error-count.sh
+├── l2/                 # Level 2: WASM demos
+│   ├── unique-ips.sh
+│   ├── error-ranking.sh
+│   └── percentiles.sh
+├── l4/                 # Level 4: Recursive LLM demos
+│   └── family-tree.sh
+└── future/             # Work in progress
+    └── l3-cli/         # Level 3: CLI demos (not yet ready)
 ```
 
-## Timing Notes
+---
 
-Times are estimates for DeepSeek API via LiteLLM gateway. Actual times depend on:
-- Network latency to DeepSeek API
-- API server load
-- Context size
-- Query complexity
+## Expected Performance
 
-## Configuration
+All times are estimates using DeepSeek via LiteLLM gateway:
 
-Demos use these defaults (override via environment variables):
+| Demo | Expected Time | Iterations | Notes |
+|------|---------------|------------|-------|
+| L1: error-count | 15-30s | 1-2 | Simple DSL operations |
+| L2: unique-ips | 15-25s | 1-2 | WASM mapreduce unique |
+| L2: error-ranking | 15-25s | 1-2 | WASM mapreduce count |
+| L2: percentiles | 15-30s | 1-2 | WASM intent (sorting) |
+| L4: family-tree | 60-90s | 3-5 | Multi-hop LLM reasoning |
+
+---
+
+## Troubleshooting
+
+### "LiteLLM not responding"
+Ensure LiteLLM gateway is running on port 4000:
 ```bash
-LITELLM_URL=http://localhost:4000
-LITELLM_MODEL=deepseek/deepseek-chat
+litellm --config litellm_config.yaml --port 4000
 ```
 
-To use a different model:
+### "Sample data not found"
+Start the RLM server for demos that fetch sample data:
 ```bash
-LITELLM_MODEL=gpt-4o ./demos/basic-error-count.sh
+./scripts/run-server-litellm.sh
 ```
 
-## Creating New Demos
-
-1. Source `common.sh` for shared utilities
-2. Use `fetch_sample` for server-based context or generate locally
-3. Use `run_demo` to execute with timing
-4. Add entry to this README
-
-```bash
-#!/bin/bash
-source "$(dirname "$0")/common.sh"
-
-# Setup and context generation...
-
-QUERY="Your query here"
-run_demo "$CONTEXT_FILE" "$QUERY" -v
-```
+### "WASM compilation failed"
+Check that the LLM is generating valid Rust code. The sub-LLM (gemma2:9b via Ollama) handles code generation for WASM operations.

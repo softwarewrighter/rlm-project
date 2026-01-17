@@ -274,7 +274,7 @@ impl RlmOrchestrator {
         query: &str,
         context: &str,
     ) -> Result<RlmResult, OrchestratorError> {
-        self.process_with_progress(query, context, None).await
+        self.process_with_options(query, context, None, false).await
     }
 
     /// Process a query with optional progress callbacks for real-time feedback
@@ -283,6 +283,17 @@ impl RlmOrchestrator {
         query: &str,
         context: &str,
         progress: Option<ProgressCallback>,
+    ) -> Result<RlmResult, OrchestratorError> {
+        self.process_with_options(query, context, progress, false).await
+    }
+
+    /// Process a query with all options
+    pub async fn process_with_options(
+        &self,
+        query: &str,
+        context: &str,
+        progress: Option<ProgressCallback>,
+        force_rlm: bool,
     ) -> Result<RlmResult, OrchestratorError> {
         // Track overall query duration
         let query_start = Instant::now();
@@ -294,8 +305,8 @@ impl RlmOrchestrator {
             }
         };
 
-        // Check if we should bypass RLM for small contexts
-        if self.should_bypass(context.len()) {
+        // Check if we should bypass RLM for small contexts (unless force_rlm is set)
+        if !force_rlm && self.should_bypass(context.len()) {
             return self.process_direct(query, context).await;
         }
 
@@ -651,6 +662,9 @@ impl RlmOrchestrator {
 - {{"op": "find", "text": "error"}} - Find text occurrences
 - {{"op": "set", "name": "x", "value": "..."}} - Set variable
 - {{"op": "get", "name": "x"}} - Get variable value
+
+DSL is for: Finding/extracting specific text, counting occurrences of ONE pattern
+DSL CANNOT: Count frequencies of MULTIPLE items, compute statistics, sort results
 "#);
         }
 
@@ -658,16 +672,29 @@ impl RlmOrchestrator {
         if self.config.wasm.enabled {
             commands_section.push_str(r#"
 ### Level 2: WASM Computation (sandboxed code execution) [ENABLED]
-- {{"op": "rust_wasm_mapreduce", "intent": "DESCRIPTION", "combiner": "count|unique|sum", "store": "result"}}
-  combiner options: "count" (frequency), "unique" (distinct items), "sum" (totals)
 
-IMPORTANT WASM GUIDANCE:
-- Keep the "intent" description SIMPLE and SPECIFIC
-- ALWAYS describe WHERE in the line to find the data (e.g., "after 'from '")
-- For IP addresses: "Extract the word after 'from ' from each line" (IPs follow "from " in logs)
-- For error types: "Extract the word after '[ERROR]' from each line"
-- For HTTP codes: "Extract the word after 'HTTP/1.1\"' from each line"
-- The combiner handles aggregation - just describe what to EXTRACT per line
+TWO WASM OPERATIONS - choose the right one:
+
+1. rust_wasm_mapreduce - SIMPLE per-line extraction + ONE aggregation:
+   {{"op": "rust_wasm_mapreduce", "intent": "EXTRACT something from each line", "combiner": "count|unique|sum", "store": "result"}}
+   Use ONLY for: simple frequency OR simple unique count OR simple sum (ONE thing)
+
+2. rust_wasm_intent - COMPLEX queries, multiple requirements, sorting, ranking:
+   {{"op": "rust_wasm_intent", "intent": "FULL ANALYSIS DESCRIPTION", "store": "result"}}
+   Use for: ANY query asking for multiple things, top N, ranking, percentiles, sorting
+
+CHOOSING - IMPORTANT:
+- Query asks for ONE simple thing (just unique count OR just frequency) -> mapreduce
+- Query asks for MULTIPLE things or ranking -> rust_wasm_intent (ALWAYS)
+- "unique count AND top N" / "how many AND list" -> rust_wasm_intent
+- "top N most active/common" -> rust_wasm_intent
+- "percentile" / "sort" / "rank" -> rust_wasm_intent
+
+EXAMPLES:
+- "How many unique IPs?" -> mapreduce combiner="unique"
+- "Count each error type" -> mapreduce combiner="count"
+- "How many unique IPs AND list top 10" -> rust_wasm_intent (TWO requirements!)
+- "Top 10 most active IPs" -> rust_wasm_intent (needs count + sort)
 "#);
         }
 
@@ -709,23 +736,27 @@ IMPORTANT WASM GUIDANCE:
             r#"
 ## Workflow
 1. **Simple queries**: Use find/regex/lines to extract, then final
-2. **Counting unique items**: Use rust_wasm_mapreduce with combiner="unique"
-3. **Counting frequencies**: Use rust_wasm_mapreduce with combiner="count"
+2. **ONE simple aggregation**: Use rust_wasm_mapreduce
+3. **Complex/multi-part queries**: Use rust_wasm_intent (handles everything in one shot)
 
 ## Examples
 
-Count unique IP addresses (in logs where IPs follow "from "):
+Simple unique count (ONE thing):
 ```json
-{{"op": "rust_wasm_mapreduce", "intent": "Extract the word after 'from ' from each line", "combiner": "unique", "store": "unique_ips"}}
-```
-Then finish with:
-```json
-{{"op": "final_var", "name": "unique_ips"}}
+{{"op": "rust_wasm_mapreduce", "intent": "Extract the word after 'from ' from each line", "combiner": "unique", "store": "result"}}
+{{"op": "final_var", "name": "result"}}
 ```
 
-Count error type frequencies:
+Combined query - unique count AND top 10 (use rust_wasm_intent for MULTIPLE requirements):
 ```json
-{{"op": "rust_wasm_mapreduce", "intent": "Extract the word after '[ERROR]' from each line", "combiner": "count", "store": "counts"}}
+{{"op": "rust_wasm_intent", "intent": "Extract IP after 'from ', count unique IPs, also count frequency of each IP and return top 10 most active", "store": "result"}}
+{{"op": "final_var", "name": "result"}}
+```
+
+Percentiles (needs sorting - use rust_wasm_intent):
+```json
+{{"op": "rust_wasm_intent", "intent": "Extract the number before 'ms' from each line, sort all numbers, compute p50 p95 p99 percentiles", "store": "result"}}
+{{"op": "final_var", "name": "result"}}
 ```"#
         } else {
             r#"
