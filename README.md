@@ -156,6 +156,35 @@ model = "qwen2.5-coder:14b"
 role = "sub"
 ```
 
+### Using LiteLLM Gateway
+
+For unified LLM access via [LiteLLM](https://github.com/BerriAI/litellm), use `config-litellm-cli.toml`:
+
+**1. Set up environment variables in `~/.env`:**
+```bash
+LITELLM_MASTER_KEY=sk-your-key-here
+LITELLM_HOST=http://localhost:4000
+```
+
+**2. Load env vars and start the server:**
+```bash
+cd rlm-orchestrator
+export $(cat ~/.env | grep -v '^#' | xargs) && ./target/release/rlm-server config-litellm-cli.toml
+```
+
+**Important:** Always use the `export $(cat ~/.env | grep -v '^#' | xargs)` pattern to load environment variables. `source ~/.env` does not work reliably in all contexts.
+
+### Running L3 CLI Demos
+
+Level 3 demos use native Rust binary execution and require LiteLLM:
+
+```bash
+# Load env vars and run demo
+export $(cat ~/.env | grep -v '^#' | xargs) && ./demo/l3/percentiles.sh
+export $(cat ~/.env | grep -v '^#' | xargs) && ./demo/l3/error-ranking.sh
+export $(cat ~/.env | grep -v '^#' | xargs) && ./demo/l3/unique-ips.sh
+```
+
 ## Roadmap
 
 | Feature | Status | Description |

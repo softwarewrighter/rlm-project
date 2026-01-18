@@ -483,6 +483,8 @@ pub struct CommandExecutor {
     last_compile_time_ms: u64,
     /// Time spent executing WASM (not compiling)
     last_wasm_run_time_ms: u64,
+    /// Time spent generating code via LLM (for CLI intent)
+    last_codegen_time_ms: u64,
     /// Code generator for two-LLM architecture (None if not configured)
     code_generator: Option<CodeGenerator>,
     /// Directory for CLI binary cache
@@ -615,6 +617,7 @@ impl CommandExecutor {
             wasm_cache,
             last_compile_time_ms: 0,
             last_wasm_run_time_ms: 0,
+            last_codegen_time_ms: 0,
             code_generator,
             cli_binary_cache_dir,
         }
@@ -628,6 +631,11 @@ impl CommandExecutor {
     /// Get the last WASM execution time in milliseconds (for instrumentation)
     pub fn last_wasm_run_time_ms(&self) -> u64 {
         self.last_wasm_run_time_ms
+    }
+
+    /// Get the last CLI code generation time in milliseconds (for instrumentation)
+    pub fn last_codegen_time_ms(&self) -> u64 {
+        self.last_codegen_time_ms
     }
 
     /// Check if Rust WASM compilation is available
@@ -1779,6 +1787,7 @@ impl CommandExecutor {
                 // Reset timing
                 self.last_compile_time_ms = 0;
                 self.last_wasm_run_time_ms = 0;
+                self.last_codegen_time_ms = 0;
 
                 // Check if code generator is configured
                 let generator = self
@@ -1808,10 +1817,10 @@ impl CommandExecutor {
                 })
                 .map_err(|e| CommandError::CodeGenError(e.to_string()))?;
 
-                let codegen_ms = codegen_start.elapsed().as_millis() as u64;
+                self.last_codegen_time_ms = codegen_start.elapsed().as_millis() as u64;
                 tracing::info!(
                     "CLI code generation took {}ms, generated {} bytes",
-                    codegen_ms,
+                    self.last_codegen_time_ms,
                     code.len()
                 );
                 tracing::debug!("Generated CLI code:\n{}", code);
@@ -1899,7 +1908,7 @@ impl CommandExecutor {
                 Ok(ExecutionResult::Continue {
                     output: format!(
                         "rust_cli_intent (codegen: {}ms, compile: {}ms, exec: {}ms, {} bytes processed): {}",
-                        codegen_ms,
+                        self.last_codegen_time_ms,
                         self.last_compile_time_ms,
                         exec_ms,
                         source_len,

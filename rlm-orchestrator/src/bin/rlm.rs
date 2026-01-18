@@ -140,6 +140,21 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
                     let _ = stderr.flush();
                 }
             }
+            ProgressEvent::CliCodegenStart { step: _ } => {
+                if verbose >= 1 {
+                    eprint!("{} {}", "│".cyan(), "🧠 Generating CLI code (LLM)...".magenta());
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::CliCodegenComplete {
+                step: _,
+                duration_ms,
+            } => {
+                if verbose >= 1 {
+                    eprintln!(" {}", format!("done ({}ms)", duration_ms).green());
+                    let _ = stderr.flush();
+                }
+            }
             ProgressEvent::CliCompileStart { step: _ } => {
                 if verbose >= 1 {
                     eprint!("{} {}", "│".cyan(), "🔧 Compiling CLI binary...".magenta());

@@ -40,9 +40,13 @@ pub enum ProgressEvent {
     WasmCompileComplete { step: usize, duration_ms: u64 },
     /// WASM execution complete (separate from compilation)
     WasmRunComplete { step: usize, duration_ms: u64 },
-    /// CLI compilation starting
+    /// CLI code generation starting (LLM call)
+    CliCodegenStart { step: usize },
+    /// CLI code generation complete (LLM call)
+    CliCodegenComplete { step: usize, duration_ms: u64 },
+    /// CLI compilation starting (rustc)
     CliCompileStart { step: usize },
-    /// CLI compilation complete
+    /// CLI compilation complete (rustc)
     CliCompileComplete { step: usize, duration_ms: u64 },
     /// CLI execution complete
     CliRunComplete { step: usize, duration_ms: u64 },
@@ -405,7 +409,8 @@ impl RlmOrchestrator {
                 let is_cli = json.contains("rust_cli_intent");
                 let is_wasm = json.contains("rust_wasm");
                 if is_cli {
-                    emit(ProgressEvent::CliCompileStart { step });
+                    // CLI: emit codegen start (LLM call to generate code)
+                    emit(ProgressEvent::CliCodegenStart { step });
                 } else if is_wasm {
                     emit(ProgressEvent::WasmCompileStart { step });
                 }
@@ -415,20 +420,29 @@ impl RlmOrchestrator {
                 let exec_result = executor.execute_json(&json);
                 let exec_ms = exec_start.elapsed().as_millis() as u64;
                 let compile_ms = executor.last_compile_time_ms();
+                let codegen_ms = executor.last_codegen_time_ms();
 
-                // Emit compile complete if there was compilation
-                if compile_ms > 0 {
-                    if is_cli {
+                // Emit CLI codegen complete and compile complete separately
+                if is_cli {
+                    if codegen_ms > 0 {
+                        emit(ProgressEvent::CliCodegenComplete {
+                            step,
+                            duration_ms: codegen_ms,
+                        });
+                    }
+                    // Emit compile start now (after codegen)
+                    if compile_ms > 0 {
+                        emit(ProgressEvent::CliCompileStart { step });
                         emit(ProgressEvent::CliCompileComplete {
                             step,
                             duration_ms: compile_ms,
                         });
-                    } else {
-                        emit(ProgressEvent::WasmCompileComplete {
-                            step,
-                            duration_ms: compile_ms,
-                        });
                     }
+                } else if is_wasm && compile_ms > 0 {
+                    emit(ProgressEvent::WasmCompileComplete {
+                        step,
+                        duration_ms: compile_ms,
+                    });
                 }
 
                 let wasm_run_ms = executor.last_wasm_run_time_ms();

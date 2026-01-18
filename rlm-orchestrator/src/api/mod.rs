@@ -176,6 +176,10 @@ pub enum StreamEvent {
     WasmCompileComplete { step: usize, duration_ms: u64 },
     #[serde(rename = "wasm_run_complete")]
     WasmRunComplete { step: usize, duration_ms: u64 },
+    #[serde(rename = "cli_codegen_start")]
+    CliCodegenStart { step: usize },
+    #[serde(rename = "cli_codegen_complete")]
+    CliCodegenComplete { step: usize, duration_ms: u64 },
     #[serde(rename = "cli_compile_start")]
     CliCompileStart { step: usize },
     #[serde(rename = "cli_compile_complete")]
@@ -447,6 +451,10 @@ async fn stream_query(
                 }
                 ProgressEvent::WasmRunComplete { step, duration_ms } => {
                     StreamEvent::WasmRunComplete { step, duration_ms }
+                }
+                ProgressEvent::CliCodegenStart { step } => StreamEvent::CliCodegenStart { step },
+                ProgressEvent::CliCodegenComplete { step, duration_ms } => {
+                    StreamEvent::CliCodegenComplete { step, duration_ms }
                 }
                 ProgressEvent::CliCompileStart { step } => StreamEvent::CliCompileStart { step },
                 ProgressEvent::CliCompileComplete { step, duration_ms } => {
@@ -2340,6 +2348,12 @@ Line 7: ERROR - Invalid input received</textarea>
                     break;
                 case 'wasm_run_complete':
                     logProgress('⚡', `WASM executed (${event.duration_ms}ms)`, 'event-wasm');
+                    break;
+                case 'cli_codegen_start':
+                    logProgress('🧠', `Generating CLI code (LLM)...`, 'event-cli');
+                    break;
+                case 'cli_codegen_complete':
+                    logProgress('✓', `CLI codegen (${event.duration_ms}ms)`, 'event-cli');
                     break;
                 case 'cli_compile_start':
                     logProgress('🔧', `Compiling CLI binary...`, 'event-cli');

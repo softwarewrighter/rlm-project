@@ -337,6 +337,15 @@ HELPER FUNCTIONS (already defined):
 - slice(s, start, end) -> &str Get substring by byte position
 - parse_int(s) -> i64          Parse integer (returns 0 on failure)
 
+TYPE ANNOTATIONS (IMPORTANT - prevents compilation errors):
+- Always use explicit types for numeric operations:
+  let count: usize = 0;
+  let total: i64 = 0;
+- Use `.len()` directly (returns usize) - no need for cast
+- For arithmetic on lengths: line.len().saturating_sub(5)
+- For HashMap counts: *counts.entry(key).or_insert(0usize) += 1;
+- Avoid intermediate variables with ambiguous numeric types
+
 SECURITY RESTRICTIONS (these will be rejected):
 - No std::fs::remove (file deletion)
 - No std::fs::write (file writing)
