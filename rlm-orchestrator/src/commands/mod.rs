@@ -485,6 +485,8 @@ pub struct CommandExecutor {
     last_wasm_run_time_ms: u64,
     /// Time spent generating code via LLM (for CLI intent)
     last_codegen_time_ms: u64,
+    /// Time spent executing CLI binary (separate from WASM)
+    last_cli_run_time_ms: u64,
     /// Code generator for two-LLM architecture (None if not configured)
     code_generator: Option<CodeGenerator>,
     /// Directory for CLI binary cache
@@ -618,6 +620,7 @@ impl CommandExecutor {
             last_compile_time_ms: 0,
             last_wasm_run_time_ms: 0,
             last_codegen_time_ms: 0,
+            last_cli_run_time_ms: 0,
             code_generator,
             cli_binary_cache_dir,
         }
@@ -636,6 +639,11 @@ impl CommandExecutor {
     /// Get the last CLI code generation time in milliseconds (for instrumentation)
     pub fn last_codegen_time_ms(&self) -> u64 {
         self.last_codegen_time_ms
+    }
+
+    /// Get the last CLI binary execution time in milliseconds (for instrumentation)
+    pub fn last_cli_run_time_ms(&self) -> u64 {
+        self.last_cli_run_time_ms
     }
 
     /// Check if Rust WASM compilation is available
@@ -1788,6 +1796,7 @@ impl CommandExecutor {
                 self.last_compile_time_ms = 0;
                 self.last_wasm_run_time_ms = 0;
                 self.last_codegen_time_ms = 0;
+                self.last_cli_run_time_ms = 0;
 
                 // Check if code generator is configured
                 let generator = self
@@ -1885,7 +1894,7 @@ impl CommandExecutor {
                 };
 
                 let exec_ms = exec_start.elapsed().as_millis() as u64;
-                self.last_wasm_run_time_ms = exec_ms; // Reuse this field for CLI exec time
+                self.last_cli_run_time_ms = exec_ms;
 
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);

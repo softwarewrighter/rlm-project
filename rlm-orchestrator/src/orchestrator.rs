@@ -446,6 +446,7 @@ impl RlmOrchestrator {
                 }
 
                 let wasm_run_ms = executor.last_wasm_run_time_ms();
+                let cli_run_ms = executor.last_cli_run_time_ms();
                 let timing = IterationTiming {
                     llm_ms,
                     exec_ms,
@@ -453,19 +454,18 @@ impl RlmOrchestrator {
                     wasm_run_ms,
                 };
 
-                // Emit run complete if there was execution
+                // Emit run complete events - separate CLI and WASM
+                if cli_run_ms > 0 {
+                    emit(ProgressEvent::CliRunComplete {
+                        step,
+                        duration_ms: cli_run_ms,
+                    });
+                }
                 if wasm_run_ms > 0 {
-                    if is_cli {
-                        emit(ProgressEvent::CliRunComplete {
-                            step,
-                            duration_ms: wasm_run_ms,
-                        });
-                    } else {
-                        emit(ProgressEvent::WasmRunComplete {
-                            step,
-                            duration_ms: wasm_run_ms,
-                        });
-                    }
+                    emit(ProgressEvent::WasmRunComplete {
+                        step,
+                        duration_ms: wasm_run_ms,
+                    });
                 }
 
                 match exec_result {
