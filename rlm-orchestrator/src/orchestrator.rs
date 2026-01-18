@@ -703,8 +703,20 @@ EXAMPLES:
             commands_section.push_str(r#"
 ### Level 3: CLI Computation (native binary, PREFERRED for analysis) [ENABLED]
 - {{"op": "rust_cli_intent", "intent": "what to compute", "store": "result"}}
-  Full Rust stdlib (HashMap, contains, split). Fast and reliable.
-  Use for: Complex analysis, large datasets, frequency counting, ranking
+  Full Rust stdlib (HashMap, HashSet, contains, split, sort). Fast and reliable.
+
+USE CLI FOR:
+- Large datasets (1000+ lines) - WASM may timeout
+- Complex aggregations (frequency counting, top-N ranking)
+- Operations needing HashMap/HashSet
+- Sorting, percentiles, statistics
+- When WASM fails or produces errors
+
+WASM LIMITATIONS (why CLI is better for complex tasks):
+- No HashMap/HashSet (use custom byte-level helpers)
+- 64MB memory limit
+- Fuel-based instruction limits
+- String methods can panic (TwoWaySearcher issue)
 "#);
         }
 
@@ -726,11 +738,23 @@ EXAMPLES:
 2. **Aggregation/analysis**: Use rust_cli_intent (PREFERRED) for counting, ranking
 3. **Semantic analysis**: Extract content first, then use llm_query
 
+## Dataset Size Guidance
+- Small (<500 lines): DSL commands (find, regex, lines) work well
+- Medium (500-2000 lines): WASM works but CLI is faster
+- Large (2000+ lines): ALWAYS use rust_cli_intent - WASM may timeout
+
 ## Example: Frequency Analysis (use rust_cli_intent)
 
 ```json
 {{"op": "rust_cli_intent", "intent": "Count each error type and rank by frequency", "store": "counts"}}
 {{"op": "final_var", "name": "counts"}}
+```
+
+## Example: Top-N with Percentiles
+
+```json
+{{"op": "rust_cli_intent", "intent": "Find top 10 most active IPs and calculate p50, p95, p99 response times", "store": "analysis"}}
+{{"op": "final_var", "name": "analysis"}}
 ```"#
         } else if self.config.wasm.enabled {
             r#"

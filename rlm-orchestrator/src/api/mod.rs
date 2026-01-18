@@ -226,6 +226,7 @@ pub fn create_router(state: Arc<ApiState>) -> Router {
         .route("/visualize", get(visualize_page))
         .route("/samples/war-and-peace", get(serve_war_and_peace))
         .route("/samples/large-logs", get(serve_large_logs))
+        .route("/samples/response-times", get(serve_response_times))
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10MB for large contexts
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -295,6 +296,49 @@ async fn serve_large_logs() -> String {
     }
 
     logs
+}
+
+/// Serve response time sample data (2000 lines with realistic distribution)
+async fn serve_response_times() -> String {
+    let mut lines = String::with_capacity(100_000);
+    let endpoints = ["/api/users", "/api/data", "/api/health", "/api/products", "/api/orders", "/api/batch", "/api/upload"];
+    let methods = ["GET", "POST", "PUT", "DELETE"];
+
+    // Use a simple PRNG for reproducible "random" distribution
+    let mut seed: u64 = 12345;
+    let next_rand = |s: &mut u64| -> u64 {
+        *s = s.wrapping_mul(1103515245).wrapping_add(12345);
+        (*s >> 16) & 0x7fff
+    };
+
+    for i in 0..2000 {
+        let endpoint = endpoints[i % endpoints.len()];
+        let method = methods[i % methods.len()];
+
+        // Realistic distribution: mostly fast, some slow outliers
+        // p50 ~50ms, p95 ~200ms, p99 ~500ms
+        let r = next_rand(&mut seed) % 100;
+        let ms = if r < 50 {
+            // 50% under 50ms
+            20 + (next_rand(&mut seed) % 30) as u32
+        } else if r < 80 {
+            // 30% between 50-150ms
+            50 + (next_rand(&mut seed) % 100) as u32
+        } else if r < 95 {
+            // 15% between 150-300ms
+            150 + (next_rand(&mut seed) % 150) as u32
+        } else if r < 99 {
+            // 4% between 300-600ms
+            300 + (next_rand(&mut seed) % 300) as u32
+        } else {
+            // 1% outliers 600-1500ms
+            600 + (next_rand(&mut seed) % 900) as u32
+        };
+
+        lines.push_str(&format!("{} {} - {}ms\n", method, endpoint, ms));
+    }
+
+    lines
 }
 
 /// Process a query
@@ -1363,8 +1407,10 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
                             <option value="large_logs_ips">Large Logs: Unique IPs (5000 lines)</option>
                         </optgroup>
                         <optgroup label="Level 3: CLI (Native Binary)">
-                            <option value="cli_word_frequency">Word frequency analysis</option>
-                            <option value="cli_web_extraction">Web data extraction (Not Yet Implemented)</option>
+                            <option value="cli_error_ranking">CLI: Error Ranking (5000 lines)</option>
+                            <option value="cli_unique_ips">CLI: Unique IPs (5000 lines)</option>
+                            <option value="cli_percentiles">CLI: Response Percentiles</option>
+                            <option value="cli_word_frequency">CLI: Word frequency analysis</option>
                         </optgroup>
                         <optgroup label="Level 4: Recursive LLM (Multi-hop Reasoning)">
                             <option value="war_peace_family">War and Peace: Family Tree (3.2MB)</option>
@@ -1915,6 +1961,36 @@ Line 7: ERROR - Invalid input received</textarea>
             // ========================================
             // LEVEL 3: CLI (Native Binary)
             // ========================================
+            cli_error_ranking: {
+                query: "Rank the error types from most to least frequent. Show the count for each error type.",
+                context: null,
+                loadUrl: '/samples/large-logs',
+                tags: ['cli', 'large-context', 'aggregation'],
+                benchmark: 'BrowseComp-Plus',
+                level: 'Level 3 (CLI)',
+                maxIterations: 10,
+                description: 'BrowseComp-Plus: Error frequency on 5000 lines using native CLI.'
+            },
+            cli_unique_ips: {
+                query: "How many unique IP addresses appear in these logs? List the top 10 most active IPs.",
+                context: null,
+                loadUrl: '/samples/large-logs',
+                tags: ['cli', 'large-context', 'aggregation'],
+                benchmark: 'BrowseComp-Plus',
+                level: 'Level 3 (CLI)',
+                maxIterations: 10,
+                description: 'BrowseComp-Plus: Unique IP analysis on 5000 lines using native CLI.'
+            },
+            cli_percentiles: {
+                query: "Calculate the p50, p95, and p99 response time percentiles.",
+                context: null,
+                loadUrl: '/samples/response-times',
+                tags: ['cli', 'statistics', 'percentiles'],
+                benchmark: 'OOLONG',
+                level: 'Level 3 (CLI)',
+                maxIterations: 10,
+                description: 'OOLONG: Percentile computation using native CLI with sorting.'
+            },
             cli_word_frequency: {
                 query: "Find the top 10 most common words in this text (excluding common words like 'the', 'a', 'is').",
                 context: generateTextSample(),
@@ -1923,15 +1999,6 @@ Line 7: ERROR - Invalid input received</textarea>
                 level: 'Level 3 (CLI)',
                 maxIterations: 10,
                 description: 'OOLONG: Word frequency analysis with filtering. Uses rust_cli_intent for complex text processing.'
-            },
-            cli_web_extraction: {
-                query: "Extract structured data from this web page content (e.g., product names, prices, ratings).",
-                context: "<!-- Web extraction example - NOT YET IMPLEMENTED -->\n<html>\n<body>\n<div class='product'><h2>Widget Pro</h2><span class='price'>$29.99</span><span class='rating'>4.5/5</span></div>\n<div class='product'><h2>Gadget Max</h2><span class='price'>$49.99</span><span class='rating'>4.8/5</span></div>\n</body>\n</html>",
-                tags: ['cli', 'web', 'extraction'],
-                benchmark: 'BrowseComp-Plus',
-                level: 'Level 3 (CLI)',
-                maxIterations: 10,
-                description: 'BrowseComp-Plus: Web data extraction. Uses rust_cli_intent for HTML parsing. NOT YET IMPLEMENTED.'
             },
 
             // ========================================
