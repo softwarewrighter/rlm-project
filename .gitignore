@@ -30,10 +30,17 @@ Cargo.lock
 demo/*.gif
 demo/*.mp4
 demo/*.webm
+demo/*.tape
 demo/war-and-peace*.txt
 *.gif
 *.mp4
 *.webm
+*.tape
+
+# Local config files (user-specific)
+config-local*.toml
+**/config-local*.toml
+**/config-cli.toml
 
 # Large text files
 war-and-peace*.txt

@@ -26,10 +26,10 @@ pub mod pool;
 pub mod provider;
 pub mod wasm;
 
+pub use levels::{Level, LevelRegistry, RiskLevel};
 pub use orchestrator::{ProgressCallback, ProgressEvent, RlmOrchestrator};
 pub use pool::LlmPool;
 pub use provider::{LlmProvider, LlmRequest, LlmResponse};
-pub use levels::{Level, LevelRegistry, RiskLevel};
 
 /// Configuration for the RLM system
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -136,9 +136,9 @@ impl Default for DslConfig {
         Self {
             enabled: true,
             max_regex_matches: 10_000,
-            max_slice_size: 1024 * 1024,      // 1MB
+            max_slice_size: 1024 * 1024, // 1MB
             max_variables: 100,
-            max_variable_size: 1024 * 1024,   // 1MB
+            max_variable_size: 1024 * 1024, // 1MB
         }
     }
 }
@@ -200,12 +200,12 @@ pub struct CliConfig {
 impl Default for CliConfig {
     fn default() -> Self {
         Self {
-            enabled: false,  // OFF by default
+            enabled: false, // OFF by default
             sandbox_mode: "none".to_string(),
             timeout_secs: 30,
-            max_output_size: 10 * 1024 * 1024,  // 10MB
+            max_output_size: 10 * 1024 * 1024, // 10MB
             cache_dir: None,
-            max_cache_size: 100 * 1024 * 1024,  // 100MB
+            max_cache_size: 100 * 1024 * 1024, // 100MB
             validation: CliValidationConfig::default(),
         }
     }
@@ -293,7 +293,7 @@ pub struct LlmDelegationConfig {
 impl Default for LlmDelegationConfig {
     fn default() -> Self {
         Self {
-            enabled: false,  // OFF by default
+            enabled: false, // OFF by default
             chunk_size: 4096,
             overlap: 256,
             max_chunks: 100,

@@ -1,13 +1,13 @@
 //! RLM orchestration logic
 
+use crate::RlmConfig;
 use crate::commands::{
-    extract_commands, extract_final, CommandExecutor, ExecutionResult, LlmQueryCallback,
+    CommandExecutor, ExecutionResult, LlmQueryCallback, extract_commands, extract_final,
 };
 use crate::pool::LlmPool;
 use crate::provider::{LlmRequest, ProviderError};
-use crate::RlmConfig;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -288,7 +288,8 @@ impl RlmOrchestrator {
         context: &str,
         progress: Option<ProgressCallback>,
     ) -> Result<RlmResult, OrchestratorError> {
-        self.process_with_options(query, context, progress, false).await
+        self.process_with_options(query, context, progress, false)
+            .await
     }
 
     /// Process a query with all options
@@ -360,8 +361,7 @@ impl RlmOrchestrator {
             // Call the root LLM (with timing)
             emit(ProgressEvent::LlmCallStart { step });
             let llm_start = Instant::now();
-            let request = LlmRequest::new(&system_prompt, &prompt)
-                .with_max_tokens(2048);  // Ensure enough tokens for WASM code
+            let request = LlmRequest::new(&system_prompt, &prompt).with_max_tokens(2048); // Ensure enough tokens for WASM code
             let response = self.pool.complete(&request, false).await?;
             let llm_ms = llm_start.elapsed().as_millis() as u64;
 
@@ -379,7 +379,10 @@ impl RlmOrchestrator {
 
             // Emit LLM complete with preview and tokens (UTF-8 safe truncation)
             let response_preview = if response.content.chars().count() > 100 {
-                format!("{}...", response.content.chars().take(100).collect::<String>())
+                format!(
+                    "{}...",
+                    response.content.chars().take(100).collect::<String>()
+                )
             } else {
                 response.content.clone()
             };
@@ -656,17 +659,34 @@ impl RlmOrchestrator {
 
     fn build_system_prompt(&self, context_len: usize) -> String {
         // Build level status strings
-        let dsl_status = if self.config.dsl.enabled { "ENABLED" } else { "DISABLED" };
-        let wasm_status = if self.config.wasm.enabled { "ENABLED" } else { "DISABLED" };
-        let cli_status = if self.config.cli.enabled { "ENABLED" } else { "DISABLED" };
-        let llm_status = if self.config.llm_delegation.enabled { "ENABLED" } else { "DISABLED" };
+        let dsl_status = if self.config.dsl.enabled {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        };
+        let wasm_status = if self.config.wasm.enabled {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        };
+        let cli_status = if self.config.cli.enabled {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        };
+        let llm_status = if self.config.llm_delegation.enabled {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        };
 
         // Build available commands section based on enabled levels
         let mut commands_section = String::new();
 
         // Level 1: DSL commands (always shown if enabled)
         if self.config.dsl.enabled {
-            commands_section.push_str(r#"
+            commands_section.push_str(
+                r#"
 ### Level 1: DSL Operations (text extraction and search) [ENABLED]
 - {{"op": "slice", "start": 0, "end": 1000}} - Get characters [start:end]
 - {{"op": "lines", "start": 0, "end": 100}} - Get lines [start:end]
@@ -679,7 +699,8 @@ impl RlmOrchestrator {
 
 DSL is for: Finding/extracting specific text, counting occurrences of ONE pattern
 DSL CANNOT: Count frequencies of MULTIPLE items, compute statistics, sort results
-"#);
+"#,
+            );
         }
 
         // Level 2: WASM commands
@@ -714,7 +735,8 @@ EXAMPLES:
 
         // Level 3: CLI commands
         if self.config.cli.enabled {
-            commands_section.push_str(r#"
+            commands_section.push_str(
+                r#"
 ### Level 3: CLI Computation (native binary, PREFERRED for analysis) [ENABLED]
 - {{"op": "rust_cli_intent", "intent": "what to compute", "store": "result"}}
   Full Rust stdlib (HashMap, HashSet, contains, split, sort). Fast and reliable.
@@ -731,17 +753,20 @@ WASM LIMITATIONS (why CLI is better for complex tasks):
 - 64MB memory limit
 - Fuel-based instruction limits
 - String methods can panic (TwoWaySearcher issue)
-"#);
+"#,
+            );
         }
 
         // Level 4: LLM Delegation
         if self.config.llm_delegation.enabled {
-            commands_section.push_str(r#"
+            commands_section.push_str(
+                r#"
 ### Level 4: LLM Delegation (semantic analysis) [ENABLED]
 - {{"op": "llm_query", "prompt": "Analyze: ${{var}}", "store": "result"}}
   IMPORTANT: Sub-LLM has NO access to original context!
   You MUST extract content first, then pass via ${{var}}.
-"#);
+"#,
+            );
         }
 
         // Build workflow section based on available levels
@@ -855,11 +880,17 @@ Use the LOWEST level that can accomplish the task.
         // Only include first/last of context if it's large (UTF-8 safe)
         let context_preview = if context.chars().count() > 2000 {
             let first_500: String = context.chars().take(500).collect();
-            let last_500: String = context.chars().rev().take(500).collect::<Vec<_>>().into_iter().rev().collect();
+            let last_500: String = context
+                .chars()
+                .rev()
+                .take(500)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
             format!(
                 "[First 500 chars]\n{}\n\n[Last 500 chars]\n{}",
-                first_500,
-                last_500
+                first_500, last_500
             )
         } else {
             context.to_string()

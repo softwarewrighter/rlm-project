@@ -40,10 +40,7 @@ impl Level for LlmDelegationLevel {
     }
 
     fn supported_commands(&self) -> &[&'static str] {
-        &[
-            "llm_query",
-            "llm_delegate_chunks",
-        ]
+        &["llm_query", "llm_delegate_chunks"]
     }
 
     fn risk_level(&self) -> RiskLevel {

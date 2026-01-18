@@ -603,7 +603,11 @@ impl CommandExecutor {
         };
         // Create the directory if it doesn't exist
         if let Err(e) = std::fs::create_dir_all(&cli_binary_cache_dir) {
-            tracing::warn!("Failed to create CLI cache dir {:?}: {}", cli_binary_cache_dir, e);
+            tracing::warn!(
+                "Failed to create CLI cache dir {:?}: {}",
+                cli_binary_cache_dir,
+                e
+            );
         }
 
         Self {
@@ -883,7 +887,10 @@ impl CommandExecutor {
 
                 let count = matching_lines.len();
                 // Store raw lines without prefixes (for use by reduce/other ops)
-                let raw_lines: Vec<&str> = matching_lines.iter().map(|(_, line, _)| line.as_str()).collect();
+                let raw_lines: Vec<&str> = matching_lines
+                    .iter()
+                    .map(|(_, line, _)| line.as_str())
+                    .collect();
                 let result = raw_lines.join("\n");
 
                 // Format with line numbers for preview only
@@ -1042,7 +1049,7 @@ impl CommandExecutor {
             }
 
             Command::Wasm {
-                module: _,  // Legacy module syntax deprecated
+                module: _, // Legacy module syntax deprecated
                 tool,
                 args,
                 function,
@@ -1164,7 +1171,7 @@ impl CommandExecutor {
 
                 // Execute the compiled WASM (with timing)
                 // Sanitize to ASCII for safe byte-level processing
-                let source = to_ascii(&self.resolve_source(on)?.to_string());
+                let source = to_ascii(self.resolve_source(on)?);
                 let exec_start = std::time::Instant::now();
                 let result = executor
                     .execute(&wasm_bytes, "run_analyze", &source)
@@ -1201,7 +1208,7 @@ impl CommandExecutor {
                 self.last_wasm_run_time_ms = 0;
 
                 // Parse template type
-                let template_type = TemplateType::from_str(template).ok_or_else(|| {
+                let template_type = TemplateType::parse(template).ok_or_else(|| {
                     CommandError::InvalidCommand(format!(
                         "Unknown template '{}'. Available: group_count, filter_lines, map_lines, numeric_stats, count_matching",
                         template
@@ -1283,7 +1290,7 @@ impl CommandExecutor {
 
                 // Execute the compiled WASM (with timing)
                 // Sanitize to ASCII for safe byte-level processing
-                let source = to_ascii(&self.resolve_source(on)?.to_string());
+                let source = to_ascii(self.resolve_source(on)?);
                 let exec_start = std::time::Instant::now();
                 let result = executor
                     .execute(&wasm_bytes, "run_analyze", &source)
@@ -1315,9 +1322,10 @@ impl CommandExecutor {
                 self.last_wasm_run_time_ms = 0;
 
                 // Check if code generator is configured
-                let generator = self.code_generator.as_ref().ok_or_else(|| {
-                    CommandError::CodeGenNotConfigured
-                })?;
+                let generator = self
+                    .code_generator
+                    .as_ref()
+                    .ok_or(CommandError::CodeGenNotConfigured)?;
 
                 // Check if Rust compiler is available
                 let compiler = self.rust_compiler.as_ref().ok_or_else(|| {
@@ -1344,13 +1352,16 @@ impl CommandExecutor {
                 let generator_ref = generator;
                 let intent_clone = intent.clone();
                 let code = tokio::task::block_in_place(|| {
-                    handle.block_on(async {
-                        generator_ref.generate(&intent_clone).await
-                    })
-                }).map_err(|e| CommandError::CodeGenError(e.to_string()))?;
+                    handle.block_on(async { generator_ref.generate(&intent_clone).await })
+                })
+                .map_err(|e| CommandError::CodeGenError(e.to_string()))?;
 
                 let codegen_ms = codegen_start.elapsed().as_millis() as u64;
-                tracing::info!("Code generation took {}ms, generated {} bytes", codegen_ms, code.len());
+                tracing::info!(
+                    "Code generation took {}ms, generated {} bytes",
+                    codegen_ms,
+                    code.len()
+                );
                 tracing::debug!("Generated code:\n{}", code);
 
                 // Check cache first (using generated code as key)
@@ -1361,12 +1372,10 @@ impl CommandExecutor {
                     // Compile the generated Rust to WASM
                     tracing::debug!("Compiling generated code ({} bytes)", code.len());
                     let compile_start = Instant::now();
-                    let compiled = compiler
-                        .compile(&code)
-                        .map_err(|e| {
-                            tracing::error!("Compilation failed for code:\n{}", code);
-                            CommandError::RustCompileError(e.to_string())
-                        })?;
+                    let compiled = compiler.compile(&code).map_err(|e| {
+                        tracing::error!("Compilation failed for code:\n{}", code);
+                        CommandError::RustCompileError(e.to_string())
+                    })?;
                     self.last_compile_time_ms = compile_start.elapsed().as_millis() as u64;
                     tracing::info!("Rust compilation took {}ms", self.last_compile_time_ms);
 
@@ -1377,7 +1386,7 @@ impl CommandExecutor {
 
                 // Execute the compiled WASM
                 // Sanitize to ASCII for safe byte-level processing
-                let source = to_ascii(&self.resolve_source(on)?.to_string());
+                let source = to_ascii(self.resolve_source(on)?);
                 let exec_start = Instant::now();
                 let result = executor
                     .execute(&wasm_bytes, "run_analyze", &source)
@@ -1420,7 +1429,7 @@ impl CommandExecutor {
                 let generator = self
                     .code_generator
                     .as_ref()
-                    .ok_or_else(|| CommandError::CodeGenNotConfigured)?;
+                    .ok_or(CommandError::CodeGenNotConfigured)?;
 
                 // Check if Rust compiler is available
                 let compiler = self.rust_compiler.as_ref().ok_or_else(|| {
@@ -1466,12 +1475,10 @@ impl CommandExecutor {
                 } else {
                     tracing::debug!("Compiling reduce code ({} bytes)", code.len());
                     let compile_start = Instant::now();
-                    let compiled = compiler
-                        .compile_reduce(&code)
-                        .map_err(|e| {
-                            tracing::error!("Reduce compilation failed for code:\n{}", code);
-                            CommandError::RustCompileError(e.to_string())
-                        })?;
+                    let compiled = compiler.compile_reduce(&code).map_err(|e| {
+                        tracing::error!("Reduce compilation failed for code:\n{}", code);
+                        CommandError::RustCompileError(e.to_string())
+                    })?;
                     self.last_compile_time_ms = compile_start.elapsed().as_millis() as u64;
                     tracing::info!("Reduce compilation took {}ms", self.last_compile_time_ms);
 
@@ -1481,15 +1488,14 @@ impl CommandExecutor {
                 };
 
                 // Create reduce instance
-                let mut reduce_instance = executor
-                    .create_reduce_instance(&wasm_bytes)
-                    .map_err(|e| {
+                let mut reduce_instance =
+                    executor.create_reduce_instance(&wasm_bytes).map_err(|e| {
                         tracing::error!("Failed to create reduce instance");
                         CommandError::WasmError(e)
                     })?;
 
                 // Get source data (sanitize to ASCII)
-                let source = to_ascii(&self.resolve_source(on)?.to_string());
+                let source = to_ascii(self.resolve_source(on)?);
                 let source_len = source.len();
                 let chunk_bytes = chunk_size.unwrap_or(4 * 1024); // Default 4KB chunks (smaller for WASM safety)
 
@@ -1511,21 +1517,28 @@ impl CommandExecutor {
                     let mut end = std::cmp::min(start + chunk_bytes, source.len());
 
                     // If not at the end, try to find a newline to split at
-                    if end < source.len() {
-                        if let Some(newline_pos) = source[start..end].rfind('\n') {
-                            end = start + newline_pos + 1; // Include the newline
-                        }
+                    if end < source.len()
+                        && let Some(newline_pos) = source[start..end].rfind('\n')
+                    {
+                        end = start + newline_pos + 1; // Include the newline
                     }
 
                     let chunk = &source[start..end];
                     reduce_instance.process_chunk(chunk).map_err(|e| {
-                        tracing::error!("Reduce process_chunk failed at chunk {}", chunks_processed);
+                        tracing::error!(
+                            "Reduce process_chunk failed at chunk {}",
+                            chunks_processed
+                        );
                         // Save crash info to file for debugging
                         if let Ok(mut f) = std::fs::File::create("/tmp/rlm-wasm-crash.rs") {
                             use std::io::Write;
                             let _ = writeln!(f, "// WASM crash at chunk {}", chunks_processed);
                             let _ = writeln!(f, "// Error: {}", e);
-                            let _ = writeln!(f, "// Chunk preview: {:?}", &chunk[..chunk.len().min(200)]);
+                            let _ = writeln!(
+                                f,
+                                "// Chunk preview: {:?}",
+                                &chunk[..chunk.len().min(200)]
+                            );
                             let _ = writeln!(f, "\n{}", code);
                         }
                         CommandError::WasmError(e)
@@ -1588,7 +1601,7 @@ impl CommandExecutor {
                 let generator = self
                     .code_generator
                     .as_ref()
-                    .ok_or_else(|| CommandError::CodeGenNotConfigured)?;
+                    .ok_or(CommandError::CodeGenNotConfigured)?;
 
                 // Check if Rust compiler is available
                 let compiler = self.rust_compiler.as_ref().ok_or_else(|| {
@@ -1634,12 +1647,10 @@ impl CommandExecutor {
                 } else {
                     tracing::debug!("Compiling map code ({} bytes)", code.len());
                     let compile_start = Instant::now();
-                    let compiled = compiler
-                        .compile_map(&code)
-                        .map_err(|e| {
-                            tracing::error!("Map compilation failed for code:\n{}", code);
-                            CommandError::RustCompileError(e.to_string())
-                        })?;
+                    let compiled = compiler.compile_map(&code).map_err(|e| {
+                        tracing::error!("Map compilation failed for code:\n{}", code);
+                        CommandError::RustCompileError(e.to_string())
+                    })?;
                     self.last_compile_time_ms = compile_start.elapsed().as_millis() as u64;
                     tracing::info!("Map compilation took {}ms", self.last_compile_time_ms);
 
@@ -1649,15 +1660,13 @@ impl CommandExecutor {
                 };
 
                 // Create map instance
-                let mut map_instance = executor
-                    .create_map_instance(&wasm_bytes)
-                    .map_err(|e| {
-                        tracing::error!("Failed to create map instance");
-                        CommandError::WasmError(e)
-                    })?;
+                let mut map_instance = executor.create_map_instance(&wasm_bytes).map_err(|e| {
+                    tracing::error!("Failed to create map instance");
+                    CommandError::WasmError(e)
+                })?;
 
                 // Get source data (sanitize to ASCII)
-                let source = to_ascii(&self.resolve_source(on)?.to_string());
+                let source = to_ascii(self.resolve_source(on)?);
 
                 // MAP PHASE: Process each line, collect key-value pairs
                 let exec_start = Instant::now();
@@ -1701,7 +1710,11 @@ impl CommandExecutor {
                     grouped.entry(key).or_default().push(value);
                 }
                 let shuffle_ms = shuffle_start.elapsed().as_millis() as u64;
-                tracing::info!("Shuffle phase: {} unique keys in {}ms", grouped.len(), shuffle_ms);
+                tracing::info!(
+                    "Shuffle phase: {} unique keys in {}ms",
+                    grouped.len(),
+                    shuffle_ms
+                );
 
                 // REDUCE PHASE: Combine values for each key
                 let reduce_start = Instant::now();
@@ -1711,25 +1724,22 @@ impl CommandExecutor {
                     let combined = match combiner.to_lowercase().as_str() {
                         "count" => values.len().to_string(),
                         "sum" => {
-                            let sum: i64 = values.iter()
-                                .filter_map(|v| v.parse::<i64>().ok())
-                                .sum();
+                            let sum: i64 =
+                                values.iter().filter_map(|v| v.parse::<i64>().ok()).sum();
                             sum.to_string()
                         }
-                        "max" => {
-                            values.iter()
-                                .filter_map(|v| v.parse::<i64>().ok())
-                                .max()
-                                .map(|v| v.to_string())
-                                .unwrap_or_default()
-                        }
-                        "min" => {
-                            values.iter()
-                                .filter_map(|v| v.parse::<i64>().ok())
-                                .min()
-                                .map(|v| v.to_string())
-                                .unwrap_or_default()
-                        }
+                        "max" => values
+                            .iter()
+                            .filter_map(|v| v.parse::<i64>().ok())
+                            .max()
+                            .map(|v| v.to_string())
+                            .unwrap_or_default(),
+                        "min" => values
+                            .iter()
+                            .filter_map(|v| v.parse::<i64>().ok())
+                            .min()
+                            .map(|v| v.to_string())
+                            .unwrap_or_default(),
                         "first" => values.first().cloned().unwrap_or_default(),
                         "last" => values.last().cloned().unwrap_or_default(),
                         "list" => values.join(", "),
@@ -1739,7 +1749,8 @@ impl CommandExecutor {
                 }
 
                 // Sort by value (descending) for count/sum combiners
-                let should_sort = sort_desc.unwrap_or(matches!(combiner.to_lowercase().as_str(), "count" | "sum"));
+                let should_sort = sort_desc
+                    .unwrap_or(matches!(combiner.to_lowercase().as_str(), "count" | "sum"));
                 if should_sort {
                     results.sort_by(|a, b| {
                         let a_num: i64 = a.1.parse().unwrap_or(0);
@@ -1757,7 +1768,8 @@ impl CommandExecutor {
                 self.last_wasm_run_time_ms = map_ms + shuffle_ms + reduce_ms;
 
                 // Format result
-                let result: String = results.iter()
+                let result: String = results
+                    .iter()
                     .map(|(k, v)| format!("{}: {}", k, v))
                     .collect::<Vec<_>>()
                     .join("\n");
@@ -1802,7 +1814,7 @@ impl CommandExecutor {
                 let generator = self
                     .code_generator
                     .as_ref()
-                    .ok_or_else(|| CommandError::CodeGenNotConfigured)?;
+                    .ok_or(CommandError::CodeGenNotConfigured)?;
 
                 // Check if Rust compiler is available
                 let compiler = self.rust_compiler.as_ref().ok_or_else(|| {

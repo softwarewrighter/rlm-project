@@ -112,16 +112,17 @@ impl ModuleCache {
 
         // Check disk cache
         if self.disk_enabled
-            && let Some(ref dir) = self.disk_dir {
-                let disk_path = dir.join(&key);
-                if let Ok(wasm) = std::fs::read(&disk_path) {
-                    debug!("Cache hit (disk): {}", &key[..8]);
-                    // Promote to memory cache
-                    self.memory.put(key, wasm.clone());
-                    self.hits += 1;
-                    return Some(wasm);
-                }
+            && let Some(ref dir) = self.disk_dir
+        {
+            let disk_path = dir.join(&key);
+            if let Ok(wasm) = std::fs::read(&disk_path) {
+                debug!("Cache hit (disk): {}", &key[..8]);
+                // Promote to memory cache
+                self.memory.put(key, wasm.clone());
+                self.hits += 1;
+                return Some(wasm);
             }
+        }
 
         debug!("Cache miss: {}", &key[..8]);
         self.misses += 1;
@@ -134,12 +135,13 @@ impl ModuleCache {
 
         // Write to disk cache first (if enabled)
         if self.disk_enabled
-            && let Some(ref dir) = self.disk_dir {
-                let disk_path = dir.join(&key);
-                if let Err(e) = std::fs::write(&disk_path, &wasm) {
-                    warn!("Failed to write to disk cache: {}", e);
-                }
+            && let Some(ref dir) = self.disk_dir
+        {
+            let disk_path = dir.join(&key);
+            if let Err(e) = std::fs::write(&disk_path, &wasm) {
+                warn!("Failed to write to disk cache: {}", e);
             }
+        }
 
         // Write to memory cache
         debug!("Cached module: {} ({} bytes)", &key[..8], wasm.len());
@@ -155,9 +157,10 @@ impl ModuleCache {
         }
 
         if self.disk_enabled
-            && let Some(ref dir) = self.disk_dir {
-                return dir.join(&key).exists();
-            }
+            && let Some(ref dir) = self.disk_dir
+        {
+            return dir.join(&key).exists();
+        }
 
         false
     }
@@ -175,14 +178,15 @@ impl ModuleCache {
         self.misses = 0;
 
         if self.disk_enabled
-            && let Some(ref dir) = self.disk_dir {
-                if let Err(e) = std::fs::remove_dir_all(dir) {
-                    warn!("Failed to clear disk cache: {}", e);
-                } else if let Err(e) = std::fs::create_dir_all(dir) {
-                    warn!("Failed to recreate disk cache directory: {}", e);
-                    self.disk_enabled = false;
-                }
+            && let Some(ref dir) = self.disk_dir
+        {
+            if let Err(e) = std::fs::remove_dir_all(dir) {
+                warn!("Failed to clear disk cache: {}", e);
+            } else if let Err(e) = std::fs::create_dir_all(dir) {
+                warn!("Failed to recreate disk cache directory: {}", e);
+                self.disk_enabled = false;
             }
+        }
 
         info!("Cache cleared");
     }
@@ -214,10 +218,11 @@ impl ModuleCache {
                     let mut bytes = 0u64;
                     for entry in entries.flatten() {
                         if let Ok(meta) = entry.metadata()
-                            && meta.is_file() {
-                                count += 1;
-                                bytes += meta.len();
-                            }
+                            && meta.is_file()
+                        {
+                            count += 1;
+                            bytes += meta.len();
+                        }
                     }
                     (count, bytes)
                 }
@@ -263,10 +268,11 @@ impl ModuleCache {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 if let Ok(meta) = entry.metadata()
-                    && meta.is_file() {
-                        let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                        files.push((entry.path(), mtime, meta.len()));
-                    }
+                    && meta.is_file()
+                {
+                    let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                    files.push((entry.path(), mtime, meta.len()));
+                }
             }
         }
 

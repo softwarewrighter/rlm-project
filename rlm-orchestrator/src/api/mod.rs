@@ -2,14 +2,14 @@
 
 use crate::orchestrator::{IterationRecord, ProgressEvent, RlmOrchestrator, RlmResult};
 use axum::{
+    Json, Router,
     extract::{DefaultBodyLimit, State},
     http::StatusCode,
     response::{
-        sse::{Event, KeepAlive, Sse},
         Html,
+        sse::{Event, KeepAlive, Sse},
     },
     routing::{get, post},
-    Json, Router,
 };
 use futures::stream::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -262,15 +262,47 @@ async fn serve_war_and_peace() -> Result<String, (StatusCode, String)> {
         }
     }
 
-    Err((StatusCode::NOT_FOUND, "War and Peace file not found".to_string()))
+    Err((
+        StatusCode::NOT_FOUND,
+        "War and Peace file not found".to_string(),
+    ))
 }
 
 /// Generate large log data for demos
 async fn serve_large_logs() -> String {
     let mut logs = String::with_capacity(500_000);
-    let error_types = ["AuthenticationFailed", "ConnectionTimeout", "RequestFailed", "ValidationError", "DatabaseError", "PermissionDenied", "RateLimited", "ServiceUnavailable"];
-    let ips = ["192.168.1.100", "10.0.0.50", "172.16.0.25", "10.0.0.75", "192.168.1.200", "172.16.0.30", "10.0.0.60", "192.168.1.105", "10.0.0.80", "172.16.0.40"];
-    let endpoints = ["/api/users", "/api/data", "/api/health", "/api/products", "/api/orders", "/api/auth", "/api/settings", "/api/batch"];
+    let error_types = [
+        "AuthenticationFailed",
+        "ConnectionTimeout",
+        "RequestFailed",
+        "ValidationError",
+        "DatabaseError",
+        "PermissionDenied",
+        "RateLimited",
+        "ServiceUnavailable",
+    ];
+    let ips = [
+        "192.168.1.100",
+        "10.0.0.50",
+        "172.16.0.25",
+        "10.0.0.75",
+        "192.168.1.200",
+        "172.16.0.30",
+        "10.0.0.60",
+        "192.168.1.105",
+        "10.0.0.80",
+        "172.16.0.40",
+    ];
+    let endpoints = [
+        "/api/users",
+        "/api/data",
+        "/api/health",
+        "/api/products",
+        "/api/orders",
+        "/api/auth",
+        "/api/settings",
+        "/api/batch",
+    ];
     let methods = ["GET", "POST", "PUT", "DELETE"];
 
     for i in 0..5000 {
@@ -305,7 +337,15 @@ async fn serve_large_logs() -> String {
 /// Serve response time sample data (2000 lines with realistic distribution)
 async fn serve_response_times() -> String {
     let mut lines = String::with_capacity(100_000);
-    let endpoints = ["/api/users", "/api/data", "/api/health", "/api/products", "/api/orders", "/api/batch", "/api/upload"];
+    let endpoints = [
+        "/api/users",
+        "/api/data",
+        "/api/health",
+        "/api/products",
+        "/api/orders",
+        "/api/batch",
+        "/api/upload",
+    ];
     let methods = ["GET", "POST", "PUT", "DELETE"];
 
     // Use a simple PRNG for reproducible "random" distribution
@@ -424,9 +464,13 @@ async fn stream_query(
         let callback = Box::new(move |event: ProgressEvent| {
             tracing::debug!("Progress event: {:?}", event);
             let stream_event = match event {
-                ProgressEvent::QueryStart { context_chars, query_len } => {
-                    StreamEvent::QueryStart { context_chars, query_len }
-                }
+                ProgressEvent::QueryStart {
+                    context_chars,
+                    query_len,
+                } => StreamEvent::QueryStart {
+                    context_chars,
+                    query_len,
+                },
                 ProgressEvent::IterationStart { step } => StreamEvent::IterationStart { step },
                 ProgressEvent::LlmCallStart { step } => StreamEvent::LlmStart { step },
                 ProgressEvent::LlmCallComplete {
@@ -536,16 +580,15 @@ async fn stream_query(
 }
 
 /// Visualization page (no caching to ensure fresh JS)
-async fn visualize_page(State(state): State<Arc<ApiState>>) -> (axum::http::HeaderMap, Html<String>) {
+async fn visualize_page(
+    State(state): State<Arc<ApiState>>,
+) -> (axum::http::HeaderMap, Html<String>) {
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(
         axum::http::header::CACHE_CONTROL,
         "no-cache, no-store, must-revalidate".parse().unwrap(),
     );
-    headers.insert(
-        axum::http::header::PRAGMA,
-        "no-cache".parse().unwrap(),
-    );
+    headers.insert(axum::http::header::PRAGMA, "no-cache".parse().unwrap());
     // Fill in the root provider name
     let html = VISUALIZE_HTML.replace("{root_provider}", &state.root_provider_name);
     (headers, Html(html))

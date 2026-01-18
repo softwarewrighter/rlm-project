@@ -163,7 +163,10 @@ impl PrebuiltHooks {
         let all_hooks: Vec<(&'static str, &'static str)> = match template {
             TemplateType::GroupCount => vec![
                 ("error_type", "Groups by error type after [ERROR] marker"),
-                ("log_level", "Groups by log level [ERROR]/[WARN]/[INFO]/etc."),
+                (
+                    "log_level",
+                    "Groups by log level [ERROR]/[WARN]/[INFO]/etc.",
+                ),
                 ("http_status", "Groups by HTTP status code"),
                 ("ip_address", "Groups by IP address"),
                 ("first_word", "Groups by first word"),
@@ -190,7 +193,8 @@ impl PrebuiltHooks {
 }
 
 impl TemplateType {
-    pub fn from_str(s: &str) -> Option<Self> {
+    /// Parse a template type from a string name
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "group_count" => Some(Self::GroupCount),
             "filter_lines" => Some(Self::FilterLines),
@@ -215,7 +219,8 @@ impl TemplateType {
     /// Get example SPI implementation for the LLM
     pub fn spi_example(&self) -> &'static str {
         match self {
-            Self::GroupCount => r#"fn classify(line: &str) -> Option<String> {
+            Self::GroupCount => {
+                r#"fn classify(line: &str) -> Option<String> {
     // Return Some(category) to count this line under that category
     // Return None to skip this line
     if line.contains("[ERROR]") {
@@ -227,25 +232,34 @@ impl TemplateType {
     } else {
         None
     }
-}"#,
-            Self::FilterLines => r#"fn filter(line: &str) -> bool {
+}"#
+            }
+            Self::FilterLines => {
+                r#"fn filter(line: &str) -> bool {
     // Return true to include this line, false to exclude
     line.contains("ERROR") && line.contains("timeout")
-}"#,
-            Self::MapLines => r#"fn transform(line: &str) -> String {
+}"#
+            }
+            Self::MapLines => {
+                r#"fn transform(line: &str) -> String {
     // Transform the line and return the result
     line.split_whitespace().take(3).collect::<Vec<_>>().join(" ")
-}"#,
-            Self::NumericStats => r#"fn extract_number(line: &str) -> Option<i64> {
+}"#
+            }
+            Self::NumericStats => {
+                r#"fn extract_number(line: &str) -> Option<i64> {
     // Extract a number from this line, or None to skip
     line.split_whitespace()
         .last()
         .and_then(|s| s.trim_end_matches("ms").parse().ok())
-}"#,
-            Self::CountMatching => r#"fn matches(line: &str) -> bool {
+}"#
+            }
+            Self::CountMatching => {
+                r#"fn matches(line: &str) -> bool {
     // Return true if this line should be counted
     line.contains("[ERROR]")
-}"#,
+}"#
+            }
         }
     }
 }
@@ -279,7 +293,8 @@ impl TemplateFramework {
     /// Get the framework code for a template type
     fn get_framework_code(template: TemplateType) -> &'static str {
         match template {
-            TemplateType::GroupCount => r#"
+            TemplateType::GroupCount => {
+                r#"
 pub fn analyze(input: &str) -> String {
     let mut counts: HashMap<String, usize> = HashMap::new();
 
@@ -300,8 +315,10 @@ pub fn analyze(input: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
-"#,
-            TemplateType::FilterLines => r#"
+"#
+            }
+            TemplateType::FilterLines => {
+                r#"
 pub fn analyze(input: &str) -> String {
     let mut results = Vec::new();
 
@@ -314,8 +331,10 @@ pub fn analyze(input: &str) -> String {
 
     format!("{} matching lines:\n{}", results.len(), results.join("\n"))
 }
-"#,
-            TemplateType::MapLines => r#"
+"#
+            }
+            TemplateType::MapLines => {
+                r#"
 pub fn analyze(input: &str) -> String {
     let mut results = Vec::new();
 
@@ -326,8 +345,10 @@ pub fn analyze(input: &str) -> String {
 
     results.join("\n")
 }
-"#,
-            TemplateType::NumericStats => r#"
+"#
+            }
+            TemplateType::NumericStats => {
+                r#"
 pub fn analyze(input: &str) -> String {
     let mut numbers = Vec::new();
 
@@ -359,8 +380,10 @@ pub fn analyze(input: &str) -> String {
         count, sum, min, max, avg, p50, p95, p99
     )
 }
-"#,
-            TemplateType::CountMatching => r#"
+"#
+            }
+            TemplateType::CountMatching => {
+                r#"
 pub fn analyze(input: &str) -> String {
     let mut count = 0usize;
 
@@ -373,14 +396,15 @@ pub fn analyze(input: &str) -> String {
 
     count.to_string()
 }
-"#,
+"#
+            }
         }
     }
 
     /// Generate prompt documentation for the LLM
     pub fn prompt_documentation() -> String {
         let mut doc = String::from(
-r#"## WASM Templates (PREFERRED over raw rust_wasm)
+            r#"## WASM Templates (PREFERRED over raw rust_wasm)
 
 Instead of writing full Rust code, use templates with simple hooks:
 
@@ -390,7 +414,8 @@ Instead of writing full Rust code, use templates with simple hooks:
 
 Available templates:
 
-"#);
+"#,
+        );
 
         for template in [
             TemplateType::GroupCount,
@@ -399,7 +424,10 @@ Available templates:
             TemplateType::NumericStats,
             TemplateType::CountMatching,
         ] {
-            doc.push_str(&format!("### {}\n", format!("{:?}", template).to_lowercase()));
+            doc.push_str(&format!(
+                "### {}\n",
+                format!("{:?}", template).to_lowercase()
+            ));
             doc.push_str(&format!("Hook signature: `{}`\n", template.spi_signature()));
             doc.push_str("Example:\n```rust\n");
             doc.push_str(template.spi_example());
@@ -443,8 +471,14 @@ mod tests {
 
     #[test]
     fn test_template_types() {
-        assert_eq!(TemplateType::from_str("group_count"), Some(TemplateType::GroupCount));
-        assert_eq!(TemplateType::from_str("filter_lines"), Some(TemplateType::FilterLines));
-        assert_eq!(TemplateType::from_str("invalid"), None);
+        assert_eq!(
+            TemplateType::parse("group_count"),
+            Some(TemplateType::GroupCount)
+        );
+        assert_eq!(
+            TemplateType::parse("filter_lines"),
+            Some(TemplateType::FilterLines)
+        );
+        assert_eq!(TemplateType::parse("invalid"), None);
     }
 }

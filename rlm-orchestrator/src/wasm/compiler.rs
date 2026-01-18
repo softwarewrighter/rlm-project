@@ -84,10 +84,11 @@ impl RustCompiler {
     fn find_rustc() -> Result<PathBuf, CompileError> {
         // Try PATH first
         if let Ok(output) = Command::new("rustc").arg("--version").output()
-            && output.status.success() {
-                debug!("Found rustc in PATH");
-                return Ok(PathBuf::from("rustc"));
-            }
+            && output.status.success()
+        {
+            debug!("Found rustc in PATH");
+            return Ok(PathBuf::from("rustc"));
+        }
 
         // Try common locations
         let home = std::env::var("HOME").unwrap_or_default();
@@ -174,18 +175,45 @@ impl RustCompiler {
         let forbidden_string_ops = [
             (".contains(", "Use has() helper instead of .contains()"),
             (".find(", "Use after()/before() helpers instead of .find()"),
-            (".rfind(", "Use after()/before() helpers instead of .rfind()"),
+            (
+                ".rfind(",
+                "Use after()/before() helpers instead of .rfind()",
+            ),
             (".split(", "Use word() helper instead of .split()"),
-            (".split_once(", "Use after()/before() helpers instead of .split_once()"),
+            (
+                ".split_once(",
+                "Use after()/before() helpers instead of .split_once()",
+            ),
             (".rsplit(", "Use word() helper instead of .rsplit()"),
             (".matches(", "Use has() helper instead of .matches()"),
-            (".match_indices(", "Use custom byte iteration instead of .match_indices()"),
-            (".replace(", "Build new string manually instead of .replace()"),
-            (".replacen(", "Build new string manually instead of .replacen()"),
-            (".strip_prefix(", "Use after() helper instead of .strip_prefix()"),
-            (".strip_suffix(", "Use before() helper instead of .strip_suffix()"),
-            (".starts_with(", "Use has() helper instead of .starts_with()"),
-            (".ends_with(", "Use has() with appropriate logic instead of .ends_with()"),
+            (
+                ".match_indices(",
+                "Use custom byte iteration instead of .match_indices()",
+            ),
+            (
+                ".replace(",
+                "Build new string manually instead of .replace()",
+            ),
+            (
+                ".replacen(",
+                "Build new string manually instead of .replacen()",
+            ),
+            (
+                ".strip_prefix(",
+                "Use after() helper instead of .strip_prefix()",
+            ),
+            (
+                ".strip_suffix(",
+                "Use before() helper instead of .strip_suffix()",
+            ),
+            (
+                ".starts_with(",
+                "Use has() helper instead of .starts_with()",
+            ),
+            (
+                ".ends_with(",
+                "Use has() with appropriate logic instead of .ends_with()",
+            ),
         ];
 
         for (pattern, suggestion) in forbidden_string_ops {
@@ -200,8 +228,14 @@ impl RustCompiler {
 
         // Check for string comparison with == or != (use eq() instead)
         let string_comparison_patterns = [
-            ("== \"", "String comparison with == crashes in WASM. Use eq(a, b) instead"),
-            ("!= \"", "String comparison with != crashes in WASM. Use !eq(a, b) instead"),
+            (
+                "== \"",
+                "String comparison with == crashes in WASM. Use eq(a, b) instead",
+            ),
+            (
+                "!= \"",
+                "String comparison with != crashes in WASM. Use !eq(a, b) instead",
+            ),
         ];
         for (pattern, reason) in string_comparison_patterns {
             if code.contains(pattern) {
@@ -837,7 +871,8 @@ pub extern "C" fn get_result_len() -> usize {{
         for (pattern, reason) in forbidden_security {
             if code.contains(pattern) {
                 return Err(CompileError::InvalidSource(format!(
-                    "{}: found '{}'", reason, pattern
+                    "{}: found '{}'",
+                    reason, pattern
                 )));
             }
         }
@@ -863,7 +898,9 @@ pub extern "C" fn get_result_len() -> usize {{
         for (pattern, suggestion) in forbidden_string_ops {
             if code.contains(pattern) {
                 return Err(CompileError::InvalidSource(format!(
-                    "WASM-unsafe operation '{}'. {}", pattern.trim_end_matches('('), suggestion
+                    "WASM-unsafe operation '{}'. {}",
+                    pattern.trim_end_matches('('),
+                    suggestion
                 )));
             }
         }
@@ -871,8 +908,14 @@ pub extern "C" fn get_result_len() -> usize {{
         // Check for string comparison with == or != (use eq() instead)
         // Look for patterns like: == " or != " (comparison with string literals)
         let string_comparison_patterns = [
-            ("== \"", "String comparison with == crashes in WASM. Use eq(a, b) instead"),
-            ("!= \"", "String comparison with != crashes in WASM. Use !eq(a, b) instead"),
+            (
+                "== \"",
+                "String comparison with == crashes in WASM. Use eq(a, b) instead",
+            ),
+            (
+                "!= \"",
+                "String comparison with != crashes in WASM. Use !eq(a, b) instead",
+            ),
         ];
         for (pattern, reason) in string_comparison_patterns {
             if code.contains(pattern) {
@@ -893,7 +936,8 @@ pub extern "C" fn get_result_len() -> usize {{
         }
         if !code.contains("fn process_line") {
             return Err(CompileError::InvalidSource(
-                "Reduce code must define: fn process_line(state: &mut State, line: &str)".to_string(),
+                "Reduce code must define: fn process_line(state: &mut State, line: &str)"
+                    .to_string(),
             ));
         }
         if !code.contains("fn finalize") {
@@ -970,8 +1014,10 @@ pub extern "C" fn get_result_len() -> usize {{
     }
 
     /// Generate the WASM module source for stateless map pattern
+    ///
     /// User code should define:
-    /// - fn map_line(line: &str) -> Vec<(String, String)>
+    /// - `fn map_line(line: &str) -> Vec<(String, String)>`
+    ///
     /// Returns key-value pairs for each line, which are then aggregated in native Rust
     fn generate_map_module_source(&self, user_code: &str) -> String {
         format!(
@@ -1205,7 +1251,8 @@ pub extern "C" fn get_result_len() -> usize {{
         for (pattern, reason) in forbidden_security {
             if code.contains(pattern) {
                 return Err(CompileError::InvalidSource(format!(
-                    "{}: found '{}'", reason, pattern
+                    "{}: found '{}'",
+                    reason, pattern
                 )));
             }
         }
@@ -1231,15 +1278,23 @@ pub extern "C" fn get_result_len() -> usize {{
         for (pattern, suggestion) in forbidden_string_ops {
             if code.contains(pattern) {
                 return Err(CompileError::InvalidSource(format!(
-                    "WASM-unsafe operation '{}'. {}", pattern.trim_end_matches('('), suggestion
+                    "WASM-unsafe operation '{}'. {}",
+                    pattern.trim_end_matches('('),
+                    suggestion
                 )));
             }
         }
 
         // Check for string comparison with == or !=
         let string_comparison_patterns = [
-            ("== \"", "String comparison with == crashes in WASM. Use eq(a, b) instead"),
-            ("!= \"", "String comparison with != crashes in WASM. Use !eq(a, b) instead"),
+            (
+                "== \"",
+                "String comparison with == crashes in WASM. Use eq(a, b) instead",
+            ),
+            (
+                "!= \"",
+                "String comparison with != crashes in WASM. Use !eq(a, b) instead",
+            ),
         ];
         for (pattern, reason) in string_comparison_patterns {
             if code.contains(pattern) {
@@ -1250,7 +1305,8 @@ pub extern "C" fn get_result_len() -> usize {{
         // Must contain required function for map pattern
         if !code.contains("fn map_line") {
             return Err(CompileError::InvalidSource(
-                "Map code must define: fn map_line(line: &str) -> Vec<(String, String)>".to_string(),
+                "Map code must define: fn map_line(line: &str) -> Vec<(String, String)>"
+                    .to_string(),
             ));
         }
 
@@ -1429,7 +1485,8 @@ fn main() {{
         for (pattern, reason) in forbidden_security {
             if code.contains(pattern) {
                 return Err(CompileError::InvalidSource(format!(
-                    "{}: found '{}'", reason, pattern
+                    "{}: found '{}'",
+                    reason, pattern
                 )));
             }
         }
@@ -1448,7 +1505,11 @@ fn main() {{
     ///
     /// Returns the path to the compiled binary.
     /// The binary reads from stdin and writes to stdout.
-    pub fn compile_cli(&self, user_code: &str, output_dir: &std::path::Path) -> Result<PathBuf, CompileError> {
+    pub fn compile_cli(
+        &self,
+        user_code: &str,
+        output_dir: &std::path::Path,
+    ) -> Result<PathBuf, CompileError> {
         self.validate_cli_source(user_code)?;
 
         // Generate unique filename based on code hash
@@ -1480,8 +1541,10 @@ fn main() {{
         // Compile to native binary
         let mut cmd = Command::new(&self.rustc_path);
         cmd.args([
-            "-C", &format!("opt-level={}", self.config.opt_level),
-            "-C", "lto=yes",
+            "-C",
+            &format!("opt-level={}", self.config.opt_level),
+            "-C",
+            "lto=yes",
             "-o",
         ])
         .arg(&binary_path)

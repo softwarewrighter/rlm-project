@@ -215,10 +215,7 @@ impl WasmExecutor {
     /// - `reduce_finalize()`: finalize and produce the result
     /// - `get_result_ptr() -> i32`: get pointer to result
     /// - `get_result_len() -> i32`: get length of result
-    pub fn create_reduce_instance(
-        &self,
-        wasm_bytes: &[u8],
-    ) -> Result<ReduceInstance, WasmError> {
+    pub fn create_reduce_instance(&self, wasm_bytes: &[u8]) -> Result<ReduceInstance, WasmError> {
         // Create a store with fuel limit
         let mut store = Store::new(&self.engine, ());
         store
@@ -541,10 +538,7 @@ impl WasmExecutor {
     /// - `map_one(ptr: i32, len: i32) -> i32`: map a line to key-value pairs
     /// - `get_result_ptr() -> i32`: get pointer to result
     /// - `get_result_len() -> i32`: get length of result
-    pub fn create_map_instance(
-        &self,
-        wasm_bytes: &[u8],
-    ) -> Result<MapInstance, WasmError> {
+    pub fn create_map_instance(&self, wasm_bytes: &[u8]) -> Result<MapInstance, WasmError> {
         // Create a store with fuel limit
         let mut store = Store::new(&self.engine, ());
         store
@@ -567,7 +561,11 @@ impl WasmExecutor {
             .get_typed_func::<(i32, i32), i32>(&mut store, "map_one")
             .map_err(|e| WasmError::FunctionNotFound(format!("map_one: {}", e)))?;
 
-        Ok(MapInstance { store, instance, fuel_limit: self.config.fuel_limit })
+        Ok(MapInstance {
+            store,
+            instance,
+            fuel_limit: self.config.fuel_limit,
+        })
     }
 }
 

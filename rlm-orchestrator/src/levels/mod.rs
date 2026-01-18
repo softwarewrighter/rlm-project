@@ -9,17 +9,17 @@
 //! | 3 | CLI | OFF | Medium | Native binaries, process isolation |
 //! | 4 | LLM Delegation | OFF | Variable | Chunk-based LLM analysis |
 
-mod dsl;
-mod wasm;
 mod cli;
+mod dsl;
 mod llm;
+mod wasm;
 
-pub use dsl::DslLevel;
-pub use wasm::WasmLevel;
 pub use cli::CliLevel;
+pub use dsl::DslLevel;
 pub use llm::LlmDelegationLevel;
+pub use wasm::WasmLevel;
 
-use crate::{DslConfig, WasmConfig, CliConfig, LlmDelegationConfig};
+use crate::{CliConfig, DslConfig, LlmDelegationConfig, WasmConfig};
 
 /// Risk level for a capability level
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -109,10 +109,10 @@ impl LevelRegistry {
     pub fn find_handler(&self, cmd: &str) -> Option<&dyn Level> {
         // Check levels in priority order
         for level_id in &self.priority {
-            if let Some(level) = self.levels.iter().find(|l| l.id() == level_id) {
-                if level.can_handle(cmd) {
-                    return Some(level.as_ref());
-                }
+            if let Some(level) = self.levels.iter().find(|l| l.id() == level_id)
+                && level.can_handle(cmd)
+            {
+                return Some(level.as_ref());
             }
         }
 
@@ -147,18 +147,23 @@ impl LevelRegistry {
 
     /// Get level by ID
     pub fn get_level(&self, level_id: &str) -> Option<&dyn Level> {
-        self.levels.iter().find(|l| l.id() == level_id).map(|l| l.as_ref())
+        self.levels
+            .iter()
+            .find(|l| l.id() == level_id)
+            .map(|l| l.as_ref())
     }
 
     /// Generate system prompt section describing available levels
     pub fn generate_prompt_section(&self) -> String {
-        let mut lines = vec![
-            "Available capability levels (in priority order):".to_string(),
-        ];
+        let mut lines = vec!["Available capability levels (in priority order):".to_string()];
 
         for level_id in &self.priority {
             if let Some(level) = self.get_level(level_id) {
-                let status = if level.is_enabled() { "ENABLED" } else { "DISABLED" };
+                let status = if level.is_enabled() {
+                    "ENABLED"
+                } else {
+                    "DISABLED"
+                };
                 let commands = level.supported_commands().join(", ");
                 lines.push(format!(
                     "- Level {} ({}): {} - {} [{}]",
@@ -180,7 +185,11 @@ impl LevelRegistry {
         // Add any levels not in priority
         for level in &self.levels {
             if !self.priority.contains(&level.id().to_string()) {
-                let status = if level.is_enabled() { "ENABLED" } else { "DISABLED" };
+                let status = if level.is_enabled() {
+                    "ENABLED"
+                } else {
+                    "DISABLED"
+                };
                 let commands = level.supported_commands().join(", ");
                 lines.push(format!(
                     "- Level {} ({}): {} - {} [{}]",
@@ -210,7 +219,14 @@ impl std::fmt::Debug for LevelRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LevelRegistry")
             .field("priority", &self.priority)
-            .field("enabled_levels", &self.enabled_levels().iter().map(|l| l.id()).collect::<Vec<_>>())
+            .field(
+                "enabled_levels",
+                &self
+                    .enabled_levels()
+                    .iter()
+                    .map(|l| l.id())
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }

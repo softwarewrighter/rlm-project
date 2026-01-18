@@ -38,11 +38,18 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
     Box::new(move |event: ProgressEvent| {
         let mut stderr = std::io::stderr();
         match event {
-            ProgressEvent::QueryStart { context_chars, query_len } => {
+            ProgressEvent::QueryStart {
+                context_chars,
+                query_len,
+            } => {
                 if verbose >= 1 {
                     eprintln!(
                         "{}",
-                        format!("Starting query (input: {} chars, query: {} chars)", context_chars, query_len).dimmed()
+                        format!(
+                            "Starting query (input: {} chars, query: {} chars)",
+                            context_chars, query_len
+                        )
+                        .dimmed()
                     );
                     let _ = stderr.flush();
                 }
@@ -71,7 +78,11 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
                     eprintln!(
                         "\r{} {}",
                         "│".cyan(),
-                        format!("⏱  LLM: {}ms ({}p + {}c tokens)", duration_ms, prompt_tokens, completion_tokens).dimmed()
+                        format!(
+                            "⏱  LLM: {}ms ({}p + {}c tokens)",
+                            duration_ms, prompt_tokens, completion_tokens
+                        )
+                        .dimmed()
                     );
                     if verbose >= 2 {
                         eprintln!("{} {}", "│".cyan(), "▼ Response preview:".blue());
@@ -97,7 +108,11 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
                         // Count commands
                         let cmd_count = commands.matches("\"cmd\"").count();
                         if cmd_count > 0 {
-                            eprintln!("{} {}", "│".cyan(), format!("▶ Extracted {} command(s)", cmd_count).dimmed());
+                            eprintln!(
+                                "{} {}",
+                                "│".cyan(),
+                                format!("▶ Extracted {} command(s)", cmd_count).dimmed()
+                            );
                         }
                     }
 
@@ -142,7 +157,11 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
             }
             ProgressEvent::CliCodegenStart { step: _ } => {
                 if verbose >= 1 {
-                    eprint!("{} {}", "│".cyan(), "🧠 Generating CLI code (LLM)...".magenta());
+                    eprint!(
+                        "{} {}",
+                        "│".cyan(),
+                        "🧠 Generating CLI code (LLM)...".magenta()
+                    );
                     let _ = stderr.flush();
                 }
             }
@@ -197,7 +216,11 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
                             "{} {} {}",
                             "│".cyan(),
                             "◀ Output:".magenta(),
-                            format!("{} chars, {} lines ({}ms)", output_len, output_lines, exec_ms).dimmed()
+                            format!(
+                                "{} chars, {} lines ({}ms)",
+                                output_len, output_lines, exec_ms
+                            )
+                            .dimmed()
                         );
                     } else {
                         eprintln!(
@@ -237,16 +260,22 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
                 if success {
                     eprintln!(
                         "{}",
-                        format!("Completed in {} iteration(s), {}ms total", iterations, total_duration_ms)
-                            .green()
-                            .dimmed()
+                        format!(
+                            "Completed in {} iteration(s), {}ms total",
+                            iterations, total_duration_ms
+                        )
+                        .green()
+                        .dimmed()
                     );
                 } else {
                     eprintln!(
                         "{}",
-                        format!("Stopped after {} iteration(s), {}ms total", iterations, total_duration_ms)
-                            .yellow()
-                            .dimmed()
+                        format!(
+                            "Stopped after {} iteration(s), {}ms total",
+                            iterations, total_duration_ms
+                        )
+                        .yellow()
+                        .dimmed()
                     );
                 }
                 let _ = stderr.flush();
@@ -465,10 +494,7 @@ fn parse_args() -> Result<CliArgs> {
             "--priority" => {
                 i += 1;
                 if i < args.len() {
-                    level_priority = args[i]
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .collect();
+                    level_priority = args[i].split(',').map(|s| s.trim().to_string()).collect();
                 }
             }
             "--litellm" => {

@@ -80,7 +80,11 @@ impl CodeGenerator {
             }
             CodeGenProviderType::LiteLLM => {
                 let api_key = config.api_key.clone().unwrap_or_default();
-                ProviderWrapper::LiteLLM(LiteLLMProvider::with_base_url(&config.url, &api_key, &config.model))
+                ProviderWrapper::LiteLLM(LiteLLMProvider::with_base_url(
+                    &config.url,
+                    &api_key,
+                    &config.model,
+                ))
             }
         };
         Self {
@@ -100,9 +104,7 @@ impl CodeGenerator {
     /// Generate Rust code from an intent description
     pub async fn generate(&self, intent: &str) -> Result<String, CodeGenError> {
         let provider_guard = self.provider.read().await;
-        let provider = provider_guard
-            .as_ref()
-            .ok_or(CodeGenError::NotConfigured)?;
+        let provider = provider_guard.as_ref().ok_or(CodeGenError::NotConfigured)?;
 
         let system_prompt = Self::build_system_prompt();
         let request = LlmRequest::new(system_prompt, intent)
@@ -128,9 +130,7 @@ impl CodeGenerator {
     /// and returns zero or more (key, value) pairs. Aggregation happens in native Rust.
     pub async fn generate_map(&self, intent: &str) -> Result<String, CodeGenError> {
         let provider_guard = self.provider.read().await;
-        let provider = provider_guard
-            .as_ref()
-            .ok_or(CodeGenError::NotConfigured)?;
+        let provider = provider_guard.as_ref().ok_or(CodeGenError::NotConfigured)?;
 
         let system_prompt = Self::build_map_system_prompt();
         let request = LlmRequest::new(system_prompt, intent)
@@ -155,9 +155,7 @@ impl CodeGenerator {
     /// This generates: fn analyze(input: &str) -> String
     pub async fn generate_cli(&self, intent: &str) -> Result<String, CodeGenError> {
         let provider_guard = self.provider.read().await;
-        let provider = provider_guard
-            .as_ref()
-            .ok_or(CodeGenError::NotConfigured)?;
+        let provider = provider_guard.as_ref().ok_or(CodeGenError::NotConfigured)?;
 
         let system_prompt = Self::build_cli_system_prompt();
         let request = LlmRequest::new(system_prompt, intent)
@@ -183,9 +181,7 @@ impl CodeGenerator {
     /// - finalize(state: &State) -> String to produce final result
     pub async fn generate_reduce(&self, intent: &str) -> Result<String, CodeGenError> {
         let provider_guard = self.provider.read().await;
-        let provider = provider_guard
-            .as_ref()
-            .ok_or(CodeGenError::NotConfigured)?;
+        let provider = provider_guard.as_ref().ok_or(CodeGenError::NotConfigured)?;
 
         let system_prompt = Self::build_reduce_system_prompt();
         let request = LlmRequest::new(system_prompt, intent)

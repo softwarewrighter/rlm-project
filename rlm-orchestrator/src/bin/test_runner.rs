@@ -139,13 +139,15 @@ async fn generate_context(client: &Client, spec: &BenchmarkSpec) -> String {
     if let Some(url_path) = &spec.context_url {
         let url = format!("{}{}", RLM_SERVER, url_path);
         match client.get(&url).send().await {
-            Ok(response) if response.status().is_success() => {
-                match response.text().await {
-                    Ok(text) => return text,
-                    Err(e) => eprintln!("Error reading context from {}: {}", url, e),
-                }
-            }
-            Ok(response) => eprintln!("Error fetching context from {}: HTTP {}", url, response.status()),
+            Ok(response) if response.status().is_success() => match response.text().await {
+                Ok(text) => return text,
+                Err(e) => eprintln!("Error reading context from {}: {}", url, e),
+            },
+            Ok(response) => eprintln!(
+                "Error fetching context from {}: HTTP {}",
+                url,
+                response.status()
+            ),
             Err(e) => eprintln!("Error fetching context from {}: {}", url, e),
         }
     }

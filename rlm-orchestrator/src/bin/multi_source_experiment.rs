@@ -183,22 +183,23 @@ fn build_context(client: &Client) -> Result<String, String> {
 
         // Fetch crates.io metadata
         if let Ok(content) = fetch_url(client, source.crates_io_url, true)
-            && let Ok(data) = serde_json::from_str::<CratesResponse>(&content) {
-                let c = &data.crate_info;
-                section.push_str("## Crates.io Metadata\n");
-                section.push_str(&format!("- Downloads: {}\n", c.downloads));
-                if let Some(recent) = c.recent_downloads {
-                    section.push_str(&format!("- Recent Downloads: {}\n", recent));
-                }
-                section.push_str(&format!("- Max Version: {}\n", c.max_version));
-                if let Some(desc) = &c.description {
-                    section.push_str(&format!("- Description: {}\n", desc));
-                }
-                if let Some(repo) = &c.repository {
-                    section.push_str(&format!("- Repository: {}\n", repo));
-                }
-                section.push('\n');
+            && let Ok(data) = serde_json::from_str::<CratesResponse>(&content)
+        {
+            let c = &data.crate_info;
+            section.push_str("## Crates.io Metadata\n");
+            section.push_str(&format!("- Downloads: {}\n", c.downloads));
+            if let Some(recent) = c.recent_downloads {
+                section.push_str(&format!("- Recent Downloads: {}\n", recent));
             }
+            section.push_str(&format!("- Max Version: {}\n", c.max_version));
+            if let Some(desc) = &c.description {
+                section.push_str(&format!("- Description: {}\n", desc));
+            }
+            if let Some(repo) = &c.repository {
+                section.push_str(&format!("- Repository: {}\n", repo));
+            }
+            section.push('\n');
+        }
 
         // Fetch README (include full content for larger context)
         if let Ok(content) = fetch_url(client, source.readme_url, true) {

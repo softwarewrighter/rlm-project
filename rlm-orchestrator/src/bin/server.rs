@@ -1,14 +1,14 @@
 //! RLM Server binary
 
 use anyhow::{Context, Result};
-use rlm::api::{create_router, ApiState};
+use rlm::RlmConfig;
+use rlm::api::{ApiState, create_router};
 use rlm::orchestrator::RlmOrchestrator;
 use rlm::pool::{LlmPool, LoadBalanceStrategy, ProviderRole};
 use rlm::provider::{DeepSeekProvider, LiteLLMProvider, OllamaProvider};
-use rlm::RlmConfig;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{info, warn, Level};
+use tracing::{Level, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
@@ -120,7 +120,9 @@ async fn main() -> Result<()> {
                     pool.add_provider(Arc::new(provider), provider_config.weight, role);
                     provider_count += 1;
                 } else {
-                    warn!("LiteLLM provider configured but no API key found (set LITELLM_API_KEY or LITELLM_MASTER_KEY)");
+                    warn!(
+                        "LiteLLM provider configured but no API key found (set LITELLM_API_KEY or LITELLM_MASTER_KEY)"
+                    );
                 }
             }
             _ => {

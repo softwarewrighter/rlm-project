@@ -40,9 +40,7 @@ impl Level for CliLevel {
     }
 
     fn supported_commands(&self) -> &[&'static str] {
-        &[
-            "rust_cli_intent",
-        ]
+        &["rust_cli_intent"]
     }
 
     fn risk_level(&self) -> RiskLevel {
