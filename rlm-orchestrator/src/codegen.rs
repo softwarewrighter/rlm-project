@@ -346,6 +346,14 @@ TYPE ANNOTATIONS (IMPORTANT - prevents compilation errors):
 - For HashMap counts: *counts.entry(key).or_insert(0usize) += 1;
 - Avoid intermediate variables with ambiguous numeric types
 
+ARRAY/COLLECTION PATTERNS (IMPORTANT):
+- NEVER use fixed-size arrays like [&str; 56] - the count is error-prone
+- For word lists/stop words, use Vec or HashSet:
+  let stop_words: HashSet<&str> = ["the", "a", "an", "is"].iter().copied().collect();
+- Or use a simple contains check with a slice:
+  const STOP_WORDS: &[&str] = &["the", "a", "an", "is", "are"];
+  if STOP_WORDS.contains(&word) { ... }
+
 SECURITY RESTRICTIONS (these will be rejected):
 - No std::fs::remove (file deletion)
 - No std::fs::write (file writing)
