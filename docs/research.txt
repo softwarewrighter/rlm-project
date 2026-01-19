@@ -1,0 +1,256 @@
+Skip to content
+Chat history
+
+
+
+
+You said:
+I want to use RLM (Recursive Language Model) as a way to solve a murder mystery problem where the ground truth is known (the murderer) by the creator of the puzzle, but has to be inferred by the base LLM without putting all the details into the context (think very long murder mystery novel, too big for context).  The LLM needs to use some combination of tools to reduce the context into smaller chunks for delegated-to LLMs to analyze (and reduce an answer).  The framework could determine the size of the input an partition it into chunks for LLMs to process sequentially (each LLM gets the reduction state and a chunk and updates the reduction state which gets returned to the base LLM.  My question is what it likely to work best (fastest): base LLM uses tools to pass chunks to delegate LLMs to work on parts of the problem, or the framework passes chunks to each LLM which use tools to reduce the answer (or some combination).   I'm trying to find an approach to implement and test to solve this class of problem (with suspects, evidence, alibis, facts, etc, that lead to a conclusion) or another class of problem: rading a larger novel (too big to fit in context) to extract characters and their relationships (produce family tree diagrams from War and Peace).  Thoughts? Suggestions?  Questions?
+ChatGPT said:
+
+Thought for 13s
+Requirements I’m assuming
+Input is too long for a single context window (novel-length).
+
+You want the base LLM to infer a single “ground truth” (murderer / relationship graph) with auditability (why it chose that).
+
+You want an RLM-style recursion/scaffolding: treat the text as an external environment, inspect pieces, call sub-models, and maintain a compact evolving state. 
+
+You care about speed (wall-clock latency) and likely also cost.
+
+The key design choice: who does chunking + control?
+There are 3 workable architectures:
+
+A) Base LLM is the “librarian” (LLM-driven control)
+Flow
+
+Framework exposes tools: get_chunk(i), search(query), get_passage(ref), write_state().
+
+Base LLM decides what to read next, when to delegate, and how to update state.
+
+Delegates are “workers” that summarize / extract facts from a chunk given the current state.
+
+Pros
+
+Best for non-uniform attention: murder mysteries rarely need equal reading of every chapter.
+
+Better at adaptive hypothesis testing (“I suspect X; fetch all alibi mentions for X”).
+
+Matches the original RLM idea: model programs the inspection/decomposition loop. 
+
+Cons
+
+Base model may spend tokens “thinking about control flow” unless you constrain it.
+
+More tool calls if the base model thrashes (bad search queries, redundant reads).
+
+Speed implication
+
+Fast if your tool API is good (search/index is strong) and the base model learns to retrieve only what matters.
+
+Slow if it devolves into “read everything anyway.”
+
+B) Framework is the “conveyor belt” (framework-driven chunking)
+Flow
+
+Framework partitions text into chunks and streams them sequentially to a reducer.
+
+Each chunk is processed by a delegate LLM that emits structured updates.
+
+Base LLM only reads the final reduced state (or periodically checks in).
+
+Pros
+
+Simple, deterministic, easy to benchmark.
+
+Can be heavily parallelized (“map” chunk extraction, then “reduce”).
+
+Cons
+
+Murder mysteries and relationship extraction are cross-chunk: early chunks may become relevant only after late revelations. A pure one-pass reducer often loses the “need-to-know later” details unless the state gets big.
+
+To be safe, workers over-extract → state bloat → slower over time.
+
+Speed implication
+
+Often fastest for pure extraction tasks (e.g., “list all characters + mentions”), but can be slower for inference tasks because you end up extracting far more than necessary.
+
+C) Hybrid (usually best): framework handles mechanics, base LLM handles strategy
+This is the pattern I’d implement first.
+
+Division of labor
+
+Framework (deterministic, fast):
+
+Chunking, caching, deduplication
+
+Full-text index (BM25/embedding), entity dictionary, timeline index
+
+Parallel “fact extraction” workers on-demand
+
+Base LLM (strategic):
+
+Maintains hypotheses
+
+Decides what evidence to fetch next
+
+Requests targeted extractions (“scan only scenes involving suspect A + poison”)
+
+This is very aligned with the RLM framing: long input lives “outside,” and the model recursively inspects and calls helpers. 
+
+Speed implication
+
+Best wall-clock latency because:
+
+You avoid reading everything.
+
+You parallelize only the expensive parts when the base model asks.
+
+What “state” should look like (so it stays small and useful)
+If you don’t design state carefully, it grows until it becomes the context problem.
+
+For murder mystery inference
+Use structured, bounded state with provenance pointers (no big prose summaries):
+
+Entities
+
+Suspects: {name → attributes}
+
+Victim, Witnesses
+
+Claims
+
+Atomic facts: (subject, predicate, object, time_range?, location?, source_ref)
+
+Example: (Alice, was_at, Library, 19:00-20:00, ref=ch12:p3)
+
+Alibis & contradictions
+
+For each suspect: constraints + conflicts list
+
+Evidence ledger
+
+Each item with: reliability score, who asserts it, direct quote pointer
+
+Hypotheses
+
+Top-K suspects with scores + “what would change my mind” queries
+
+The important trick: store pointers (chapter/paragraph ids) and only retrieve the original text when you need to justify or resolve conflicts.
+
+For relationship extraction / “War and Peace family tree”
+State as a graph:
+
+Nodes: Person{id, names/aliases}
+
+Edges: relation(type, from, to, certainty, first_ref, last_ref)
+
+Alias table: “Prince Andrei” == “Andrei Bolkonsky”
+
+Events: marriages, births, deaths, kinship reveals (time-stamped where possible)
+
+Delegation strategy that tends to be fastest
+To optimize for wall-clock time, use two kinds of delegate calls:
+
+1) Cheap “scouts” (small/fast model or constrained prompt)
+Goal: decide whether a chunk matters.
+
+Output: entities seen + any new events + any alibi/evidence keywords
+
+Very small structured JSON.
+
+2) Expensive “analysts” (bigger model, targeted)
+Triggered only when:
+
+A chunk has high relevance to current hypothesis, or
+
+The base LLM detects contradictions/gaps and asks for specific extraction.
+
+This reduces total tokens spent on deep reasoning across irrelevant text.
+
+Concrete implementation approach (minimal but strong baseline)
+Step 1: Build the environment API (framework)
+search(query) -> [passage_refs] (BM25 is fine to start; embeddings later)
+
+get_passage(ref) -> text
+
+get_chunk(i) for sequential scan modes
+
+emit_update(json_patch) to update state
+
+caching: passage text + delegate outputs keyed by (ref, task_version)
+
+Step 2: Implement a hybrid loop
+Base LLM starts with a “case file schema” (empty state).
+
+It requests a global index pass via scouts (parallel):
+
+“Extract: suspects/witnesses, times, locations, evidence keywords, chapter refs.”
+
+Base LLM forms initial hypotheses.
+
+Then it iterates:
+
+ask: “What evidence would discriminate top-2 suspects?”
+
+tool: targeted search(...)
+
+delegate analysts: extract only the needed constraints/facts
+
+update state; re-score
+
+Step 3: Add a “prove it” phase
+After selecting murderer / family tree:
+
+For each key claim, retrieve the top supporting passages and produce a citation bundle (refs + short quotes).
+
+This is critical for debugging and for measuring correctness.
+
+How to test (since you have ground truth)
+Use an evaluation harness with ablations:
+
+Metrics
+
+Accuracy: murderer id correct? relationships correct (precision/recall/F1 on edges)?
+
+Latency: wall-clock + number of model calls
+
+Cost proxy: total tokens across all calls
+
+Robustness: does it stay correct when you shuffle chapter order? add red herrings?
+
+Ablations
+
+Pure conveyor (B) vs hybrid (C)
+
+Scouts on/off
+
+Index type: BM25 vs embedding
+
+State size caps (e.g., max 5k tokens equivalent)
+
+This will quickly tell you what’s “fastest” on your models/tooling.
+
+My recommendation for “what’s likely fastest”
+For murder mystery inference: Hybrid (C) wins most of the time because it avoids exhaustive extraction and focuses delegates where they matter.
+
+For character/relationship extraction: start with framework-driven (B) for a quick graph baseline, then add the hybrid hypothesis loop to resolve ambiguous aliases and implied relations.
+
+If you want a single system that handles both well, build hybrid from day one, with scouts + targeted analysts, and keep the state strictly structured and bounded.
+
+A few practical “gotchas” to bake in early
+Alias resolution is a huge time sink in novels (nicknames, titles). Add it as a first-class state component.
+
+Contradiction handling: don’t overwrite facts—track competing claims with provenance.
+
+Chunk boundaries: create passage refs at paragraph/sentence granularity so retrieval can be precise; don’t force “chapter-sized” reads.
+
+Determinism for debugging: log every tool call and every state patch; you’ll need replay.
+
+If you tell me what model(s) you want to use for base vs delegates (and whether you can run many parallel calls), I can sketch an execution plan that’s tuned for latency (e.g., concurrency limits, when to scout vs analyze, and how to cap state growth).
+
+
+
+No file chosenNo file chosen
+ChatGPT can make mistakes. Check important info.
+

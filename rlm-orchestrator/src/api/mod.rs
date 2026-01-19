@@ -1309,6 +1309,8 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             padding: 15px;
             margin-bottom: 15px;
             flex-shrink: 0;
+            max-height: 400px;
+            overflow-y: auto;
         }
         .answer-box h3 {
             color: var(--success);
@@ -1319,6 +1321,50 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             background: linear-gradient(135deg, #7f1d1d, #450a0a);
         }
         .answer-box.error h3 { color: var(--error); }
+
+        /* Formatted answer content */
+        .answer-box .answer-content {
+            color: #d1fae5;
+            line-height: 1.6;
+        }
+        .answer-box .answer-content h1,
+        .answer-box .answer-content h2,
+        .answer-box .answer-content h3,
+        .answer-box .answer-content h4 {
+            color: #6ee7b7;
+            margin: 16px 0 8px 0;
+            font-weight: 600;
+        }
+        .answer-box .answer-content h1 { font-size: 1.3em; }
+        .answer-box .answer-content h2 { font-size: 1.2em; }
+        .answer-box .answer-content h3 { font-size: 1.1em; }
+        .answer-box .answer-content h4 { font-size: 1em; }
+        .answer-box .answer-content p {
+            margin: 8px 0;
+        }
+        .answer-box .answer-content ul,
+        .answer-box .answer-content ol {
+            margin: 8px 0 8px 20px;
+            padding-left: 10px;
+        }
+        .answer-box .answer-content li {
+            margin: 4px 0;
+        }
+        .answer-box .answer-content strong {
+            color: #a7f3d0;
+            font-weight: 600;
+        }
+        .answer-box .answer-content code {
+            background: rgba(0,0,0,0.3);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .answer-box .answer-content hr {
+            border: none;
+            border-top: 1px solid rgba(255,255,255,0.2);
+            margin: 16px 0;
+        }
 
         .results {
             display: grid;
@@ -1993,10 +2039,11 @@ Line 7: ERROR - Invalid input received</textarea>
                 title.className = 'error';
             }
 
-            // Answer box
+            // Answer box - format markdown-like content
             const answerBox = document.getElementById('modalAnswerBox');
             answerBox.className = 'answer-box' + (data.success ? '' : ' error');
-            document.getElementById('modalAnswerText').textContent = data.success ? data.answer : (data.error || 'Failed');
+            const answerText = data.success ? data.answer : (data.error || 'Failed');
+            document.getElementById('modalAnswerText').innerHTML = formatAnswer(answerText);
 
             // Check for WASM usage
             const wasmSteps = data.history.filter(s => hasWasm(s.commands));
@@ -2902,6 +2949,69 @@ Line 7: ERROR - Invalid input received</textarea>
                       .replace(/</g, '&lt;')
                       .replace(/>/g, '&gt;')
                       .replace(/"/g, '&quot;');
+        }
+
+        // Convert markdown-like text to HTML for answer display
+        function formatAnswer(text) {
+            if (!text) return '';
+
+            // Escape HTML first
+            let html = escapeHtml(text);
+
+            // Convert headers (### Header -> <h3>Header</h3>)
+            html = html.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
+            html = html.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+            html = html.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+            html = html.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+
+            // Convert bold (**text** or __text__)
+            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+
+            // Convert inline code (`code`)
+            html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+            // Convert horizontal rules (--- or ***)
+            html = html.replace(/^[-*]{3,}$/gm, '<hr>');
+
+            // Convert bullet lists (* item or - item)
+            // Group consecutive bullet lines into <ul>
+            const lines = html.split('\n');
+            const result = [];
+            let inList = false;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const bulletMatch = line.match(/^[\*\-]\s+(.+)$/);
+
+                if (bulletMatch) {
+                    if (!inList) {
+                        result.push('<ul>');
+                        inList = true;
+                    }
+                    result.push('<li>' + bulletMatch[1] + '</li>');
+                } else {
+                    if (inList) {
+                        result.push('</ul>');
+                        inList = false;
+                    }
+                    // Convert double newlines to paragraph breaks
+                    if (line.trim() === '') {
+                        if (result.length > 0 && !result[result.length-1].match(/<\/(ul|h[1-4]|hr)>$/)) {
+                            result.push('<br>');
+                        }
+                    } else if (!line.match(/^<(h[1-4]|hr)/)) {
+                        result.push('<p>' + line + '</p>');
+                    } else {
+                        result.push(line);
+                    }
+                }
+            }
+            if (inList) {
+                result.push('</ul>');
+            }
+
+            return '<div class="answer-content">' + result.join('\n') + '</div>';
         }
     </script>
 </body>
