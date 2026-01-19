@@ -674,6 +674,33 @@ pub struct LlmDelegateResult {
 pub type LlmDelegateCallback =
     Arc<dyn Fn(LlmDelegateParams) -> Result<LlmDelegateResult, String> + Send + Sync>;
 
+/// Progress event for command execution (used by llm_reduce)
+#[derive(Debug, Clone)]
+pub enum CommandProgress {
+    /// LLM reduce starting
+    LlmReduceStart {
+        num_chunks: usize,
+        total_chars: usize,
+        directive_preview: String,
+    },
+    /// LLM reduce chunk starting
+    LlmReduceChunkStart {
+        chunk_num: usize,
+        total_chunks: usize,
+        chunk_chars: usize,
+    },
+    /// LLM reduce chunk complete
+    LlmReduceChunkComplete {
+        chunk_num: usize,
+        total_chunks: usize,
+        duration_ms: u64,
+        result_preview: String,
+    },
+}
+
+/// Callback type for command progress events
+pub type CommandProgressCallback = Arc<dyn Fn(CommandProgress) + Send + Sync>;
+
 /// Command executor with variable store
 pub struct CommandExecutor {
     /// Variable store
@@ -720,6 +747,8 @@ pub struct CommandExecutor {
     last_nested_history: Vec<NestedIterationSummary>,
     /// Last llm_delegate depth (for progress events)
     last_delegate_depth: usize,
+    /// Progress callback for real-time updates during long operations
+    progress_callback: Option<CommandProgressCallback>,
 }
 
 impl CommandExecutor {
@@ -862,6 +891,19 @@ impl CommandExecutor {
             cli_binary_cache_dir,
             last_nested_history: Vec::new(),
             last_delegate_depth: 0,
+            progress_callback: None,
+        }
+    }
+
+    /// Set the progress callback for real-time updates
+    pub fn set_progress_callback(&mut self, callback: CommandProgressCallback) {
+        self.progress_callback = Some(callback);
+    }
+
+    /// Emit a progress event if callback is set
+    fn emit_progress(&self, event: CommandProgress) {
+        if let Some(ref callback) = self.progress_callback {
+            callback(event);
         }
     }
 
@@ -1442,12 +1484,31 @@ impl CommandExecutor {
                     "Starting LLM reduce over chunks (simple LLM mode)"
                 );
 
+                // Emit progress: LLM reduce starting
+                self.emit_progress(CommandProgress::LlmReduceStart {
+                    num_chunks,
+                    total_chars: source_context.len(),
+                    directive_preview: if directive.len() > 100 {
+                        format!("{}...", &directive[..100])
+                    } else {
+                        directive.clone()
+                    },
+                });
+
                 // Process chunks sequentially, accumulating results
                 // Use simple LLM calls instead of full RLM for reliability
                 let mut accumulated_result = String::new();
 
                 for (i, chunk) in chunks.iter().enumerate() {
                     let chunk_num = i + 1;
+
+                    // Emit progress: chunk starting
+                    self.emit_progress(CommandProgress::LlmReduceChunkStart {
+                        chunk_num,
+                        total_chunks: num_chunks,
+                        chunk_chars: chunk.len(),
+                    });
+                    let chunk_start = std::time::Instant::now();
 
                     // Build a prompt that includes the chunk directly
                     // CRITICAL: Ask for COMPLETE accumulated findings, not just delta
@@ -1505,6 +1566,19 @@ Complete updated findings:"#
                     // Make simple LLM call
                     let result = llm_callback(&prompt)
                         .map_err(|e| CommandError::LlmError(format!("LLM reduce chunk {} failed: {}", chunk_num, e)))?;
+
+                    // Emit progress: chunk complete
+                    let chunk_duration_ms = chunk_start.elapsed().as_millis() as u64;
+                    self.emit_progress(CommandProgress::LlmReduceChunkComplete {
+                        chunk_num,
+                        total_chunks: num_chunks,
+                        duration_ms: chunk_duration_ms,
+                        result_preview: if result.len() > 200 {
+                            format!("{}...", &result[..200])
+                        } else {
+                            result.clone()
+                        },
+                    });
 
                     accumulated_result = result;
                 }

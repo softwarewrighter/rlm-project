@@ -74,6 +74,28 @@ pub enum ProgressEvent {
         output_preview: String,
         has_error: bool,
     },
+    /// LLM reduce starting (chunked processing)
+    LlmReduceStart {
+        step: usize,
+        num_chunks: usize,
+        total_chars: usize,
+        directive_preview: String,
+    },
+    /// LLM reduce chunk starting
+    LlmReduceChunkStart {
+        step: usize,
+        chunk_num: usize,
+        total_chunks: usize,
+        chunk_chars: usize,
+    },
+    /// LLM reduce chunk complete
+    LlmReduceChunkComplete {
+        step: usize,
+        chunk_num: usize,
+        total_chunks: usize,
+        duration_ms: u64,
+        result_preview: String,
+    },
     /// Command execution complete
     CommandComplete {
         step: usize,
@@ -95,8 +117,8 @@ pub enum ProgressEvent {
     },
 }
 
-/// Callback type for progress events
-pub type ProgressCallback = Box<dyn Fn(ProgressEvent) + Send + Sync>;
+/// Callback type for progress events (Arc for cloning into nested callbacks)
+pub type ProgressCallback = Arc<dyn Fn(ProgressEvent) + Send + Sync>;
 
 /// Errors from RLM orchestration
 #[derive(Error, Debug)]
@@ -733,8 +755,60 @@ If no matches found:
             executor = executor.with_llm_delegate_callback(llm_delegate_cb);
         }
 
+        // Set up progress callback for llm_reduce (tracks current step atomically)
+        let current_step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        if progress.is_some() {
+            use crate::commands::CommandProgress;
+            // Clone the Arc'd callback for use in the closure
+            let progress_arc: Arc<dyn Fn(ProgressEvent) + Send + Sync> = match &progress {
+                Some(cb) => Arc::clone(cb),
+                None => unreachable!(),
+            };
+            let step_ref = Arc::clone(&current_step);
+            let cmd_progress_cb: crate::commands::CommandProgressCallback =
+                Arc::new(move |event: CommandProgress| {
+                    let step = step_ref.load(std::sync::atomic::Ordering::Relaxed);
+                    match event {
+                        CommandProgress::LlmReduceStart {
+                            num_chunks,
+                            total_chars,
+                            directive_preview,
+                        } => progress_arc(ProgressEvent::LlmReduceStart {
+                            step,
+                            num_chunks,
+                            total_chars,
+                            directive_preview,
+                        }),
+                        CommandProgress::LlmReduceChunkStart {
+                            chunk_num,
+                            total_chunks,
+                            chunk_chars,
+                        } => progress_arc(ProgressEvent::LlmReduceChunkStart {
+                            step,
+                            chunk_num,
+                            total_chunks,
+                            chunk_chars,
+                        }),
+                        CommandProgress::LlmReduceChunkComplete {
+                            chunk_num,
+                            total_chunks,
+                            duration_ms,
+                            result_preview,
+                        } => progress_arc(ProgressEvent::LlmReduceChunkComplete {
+                            step,
+                            chunk_num,
+                            total_chunks,
+                            duration_ms,
+                            result_preview,
+                        }),
+                    }
+                });
+            executor.set_progress_callback(cmd_progress_cb);
+        }
+
         for iteration in 0..self.config.max_iterations {
             let step = iteration + 1;
+            current_step.store(step, std::sync::atomic::Ordering::Relaxed);
             info!(iteration = step, "Starting RLM iteration");
             emit(ProgressEvent::IterationStart { step });
 

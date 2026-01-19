@@ -263,6 +263,28 @@ pub enum StreamEvent {
         output_preview: String,
         has_error: bool,
     },
+    #[serde(rename = "llm_reduce_start")]
+    LlmReduceStart {
+        step: usize,
+        num_chunks: usize,
+        total_chars: usize,
+        directive_preview: String,
+    },
+    #[serde(rename = "llm_reduce_chunk_start")]
+    LlmReduceChunkStart {
+        step: usize,
+        chunk_num: usize,
+        total_chunks: usize,
+        chunk_chars: usize,
+    },
+    #[serde(rename = "llm_reduce_chunk_complete")]
+    LlmReduceChunkComplete {
+        step: usize,
+        chunk_num: usize,
+        total_chunks: usize,
+        duration_ms: u64,
+        result_preview: String,
+    },
     #[serde(rename = "command_complete")]
     CommandComplete {
         step: usize,
@@ -621,7 +643,7 @@ async fn stream_query(
         let query_start = std::time::Instant::now();
         // Create a progress callback that sends events to the channel
         let tx_clone = tx.clone();
-        let callback = Box::new(move |event: ProgressEvent| {
+        let callback = Arc::new(move |event: ProgressEvent| {
             tracing::debug!("Progress event: {:?}", event);
             let stream_event = match event {
                 ProgressEvent::QueryStart {
@@ -703,6 +725,41 @@ async fn stream_query(
                     commands_preview,
                     output_preview,
                     has_error,
+                },
+                ProgressEvent::LlmReduceStart {
+                    step,
+                    num_chunks,
+                    total_chars,
+                    directive_preview,
+                } => StreamEvent::LlmReduceStart {
+                    step,
+                    num_chunks,
+                    total_chars,
+                    directive_preview,
+                },
+                ProgressEvent::LlmReduceChunkStart {
+                    step,
+                    chunk_num,
+                    total_chunks,
+                    chunk_chars,
+                } => StreamEvent::LlmReduceChunkStart {
+                    step,
+                    chunk_num,
+                    total_chunks,
+                    chunk_chars,
+                },
+                ProgressEvent::LlmReduceChunkComplete {
+                    step,
+                    chunk_num,
+                    total_chunks,
+                    duration_ms,
+                    result_preview,
+                } => StreamEvent::LlmReduceChunkComplete {
+                    step,
+                    chunk_num,
+                    total_chunks,
+                    duration_ms,
+                    result_preview,
                 },
                 ProgressEvent::CommandComplete {
                     step,
@@ -2677,6 +2734,28 @@ Line 7: ERROR - Invalid input received</textarea>
                         ? event.commands_preview.substring(0, 40)
                         : event.llm_response_preview.substring(0, 40);
                     logProgress(status, `${indent}[Worker step ${event.step}] ${preview}...`, event.has_error ? 'event-error' : 'event-nested');
+                    break;
+                }
+                case 'llm_reduce_start': {
+                    const charsKb = (event.total_chars / 1024).toFixed(1);
+                    const preview = event.directive_preview.length > 60
+                        ? event.directive_preview.substring(0, 60) + '...'
+                        : event.directive_preview;
+                    logProgress('📊', `LLM Reduce: ${event.num_chunks} chunks (${charsKb}KB) - "${preview}"`, 'event-llm4');
+                    break;
+                }
+                case 'llm_reduce_chunk_start': {
+                    const charsKb = (event.chunk_chars / 1024).toFixed(1);
+                    logProgress('⏳', `  Chunk ${event.chunk_num}/${event.total_chunks} (${charsKb}KB)...`, 'event-nested');
+                    document.getElementById('progressStatus').textContent = `Processing chunk ${event.chunk_num}/${event.total_chunks}...`;
+                    break;
+                }
+                case 'llm_reduce_chunk_complete': {
+                    const durSec = (event.duration_ms / 1000).toFixed(1);
+                    const preview = event.result_preview.length > 50
+                        ? event.result_preview.substring(0, 50) + '...'
+                        : event.result_preview;
+                    logProgress('✓', `  Chunk ${event.chunk_num}/${event.total_chunks} done (${durSec}s)`, 'event-cmd');
                     break;
                 }
                 case 'command_complete':

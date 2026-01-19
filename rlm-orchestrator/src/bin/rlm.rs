@@ -35,7 +35,7 @@ fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
 
 /// Create a progress callback for real-time output based on verbosity level
 fn create_progress_callback(verbose: u8) -> ProgressCallback {
-    Box::new(move |event: ProgressEvent| {
+    Arc::new(move |event: ProgressEvent| {
         let mut stderr = std::io::stderr();
         match event {
             ProgressEvent::QueryStart {
@@ -314,6 +314,63 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
                 if verbose >= 1 {
                     let preview = truncate_to_char_boundary(&answer, 100);
                     eprintln!("{} {}", "✓ Final:".green().bold(), preview);
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::LlmReduceStart {
+                step: _,
+                num_chunks,
+                total_chars,
+                directive_preview,
+            } => {
+                if verbose >= 1 {
+                    let preview = truncate_to_char_boundary(&directive_preview, 50);
+                    eprintln!(
+                        "{}",
+                        format!(
+                            "  → LLM reduce: {} chunks ({} chars) - \"{}\"",
+                            num_chunks, total_chars, preview
+                        )
+                        .blue()
+                    );
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::LlmReduceChunkStart {
+                step: _,
+                chunk_num,
+                total_chunks,
+                chunk_chars,
+            } => {
+                if verbose >= 2 {
+                    eprintln!(
+                        "{}",
+                        format!(
+                            "    → Chunk {}/{} ({} chars)...",
+                            chunk_num, total_chunks, chunk_chars
+                        )
+                        .blue()
+                        .dimmed()
+                    );
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::LlmReduceChunkComplete {
+                step: _,
+                chunk_num,
+                total_chunks,
+                duration_ms,
+                result_preview: _,
+            } => {
+                if verbose >= 1 {
+                    eprintln!(
+                        "{}",
+                        format!(
+                            "    ✓ Chunk {}/{} done ({}ms)",
+                            chunk_num, total_chunks, duration_ms
+                        )
+                        .blue()
+                    );
                     let _ = stderr.flush();
                 }
             }
