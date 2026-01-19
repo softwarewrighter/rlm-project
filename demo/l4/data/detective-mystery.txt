@@ -1,0 +1,478 @@
+=== CASE FILE: THE ASHFORD MANOR MURDER ===
+
+INVESTIGATING OFFICER: Detective Inspector Sarah Blackwood
+CASE NUMBER: 2024-AMM-0847
+DATE: October 15, 2024
+
+================================================================================
+VICTIM PROFILE
+================================================================================
+
+NAME: Lord Edward Ashford III
+AGE: 67
+OCCUPATION: Retired industrialist, philanthropist
+RESIDENCE: Ashford Manor, Devonshire
+TIME OF DEATH: Between 10:00 PM and 11:00 PM, October 14, 2024
+CAUSE OF DEATH: Poisoning (belladonna extract) combined with blunt force trauma to the head
+LOCATION: The study, ground floor of Ashford Manor
+
+BACKGROUND:
+Lord Ashford was a wealthy and influential figure in British society. He made his fortune
+in textiles and manufacturing, retiring 15 years ago to manage his estates and charitable
+foundations. Known for his sharp business acumen but also for making enemies along the way.
+His health had been declining in recent years, leading to frequent arguments about the future
+of his estate.
+
+RECENT EVENTS:
+- Three weeks ago: Lord Ashford announced plans to change his will
+- Two weeks ago: Family meeting called to discuss estate matters
+- One week ago: Heated argument with business partner overheard by staff
+- Day of death: Dinner party with 6 guests at Ashford Manor
+
+================================================================================
+WITNESS STATEMENTS
+================================================================================
+
+--------------------------------------------------------------------------------
+[WITNESS 1: James Harrison - Butler, employed 25 years]
+--------------------------------------------------------------------------------
+
+I have served the Ashford family for a quarter century, and I can say with certainty
+that the tension in this house has never been higher than in these past few weeks.
+
+The evening began as any formal dinner would. Guests arrived at 7:00 PM sharp. I
+personally greeted each one at the door. The weather that evening was dreadful -
+heavy rain and strong winds from the north. I had to have extra towels ready for
+the guests' coats.
+
+The dinner itself was served at 7:30 PM in the main dining room. Mrs. Patterson,
+our cook, had prepared Lord Ashford's favorite - roast pheasant with seasonal
+vegetables. I noticed that Colonel Pemberton barely touched his food, which was
+unusual for him. He seemed preoccupied, constantly checking his pocket watch.
+
+At approximately 9:15 PM, I served after-dinner drinks in the drawing room. Lord
+Ashford took his usual brandy. I prepared it myself from the decanter in the
+drawing room - the same one that has been used for years. The decanter was full
+when I poured, and I noticed nothing unusual about its contents.
+
+Around 9:45 PM, I heard raised voices coming from the study. I recognized Lord
+Ashford's voice and what sounded like Colonel Pemberton. I could not make out the
+words, but the tone was angry. This was not the first time I had heard them argue
+recently.
+
+At 10:30 PM, I was polishing the silver in the pantry when Miss Eleanor came
+rushing in, quite distressed. She said she had found her father slumped over his
+desk in the study. I immediately went to investigate and found Lord Ashford as she
+described - deceased.
+
+I must note that Lord Ashford had been receiving threatening letters over the past
+month. He showed me one of them last week. It was typed and unsigned, warning him
+to "leave the past buried." He seemed more amused than concerned at the time.
+
+TIME UNACCOUNTED FOR: 10:00 PM - 10:30 PM (was alone in pantry)
+
+ADDITIONAL OBSERVATIONS:
+- The garden door near the study was unlocked when I checked it that night
+- Lord Ashford's safe was open when the body was discovered
+- I saw Colonel Pemberton near the garden door around 10:15 PM
+
+--------------------------------------------------------------------------------
+[WITNESS 2: Tom Fletcher - Head Gardener, employed 12 years]
+--------------------------------------------------------------------------------
+
+I wasn't at the fancy dinner, mind you. I was working late in the greenhouse,
+preparing the orchids for the autumn show. Lord Ashford was particular about his
+orchids - wanted them perfect for the county fair next month.
+
+The greenhouse is about 40 meters from the main house, but I have a clear view of
+the garden path and the side of the manor from there. The rain had let up by about
+9:30 PM, so I stepped outside for a smoke.
+
+That's when I saw something strange. A figure in dark clothing - looked like a long
+coat - walking quickly along the garden path toward the study's French doors. This
+was around 10:20 PM or thereabouts. I couldn't see the face clearly, but the walk
+was distinctive - a slight limp on the left side. Colonel Pemberton has that same
+limp from his war injury.
+
+After I finished my cigarette, maybe 10 minutes later, I saw the same figure
+hurrying back the way they came. They seemed agitated, walking faster despite the
+limp. They disappeared around the corner toward the front of the house.
+
+I thought nothing of it at the time - guests often take walks in the garden. But
+now, knowing what happened... it's got me worried.
+
+About the garden itself - I should mention that several of my medicinal herb plants
+have gone missing over the past month. Including the belladonna. I reported it to
+Lord Ashford two weeks ago, and he said he'd look into it. Never did find out what
+happened to those plants.
+
+TIMELINE:
+- 9:30 PM: Stepped outside greenhouse for cigarette
+- 10:20 PM: Saw dark figure heading toward study
+- 10:30-10:35 PM: Saw same figure returning from study direction
+- 10:45 PM: Heard commotion from main house, stayed in greenhouse
+
+--------------------------------------------------------------------------------
+[WITNESS 3: Dr. Marcus Whitfield - Family physician and dinner guest]
+--------------------------------------------------------------------------------
+
+I have been Lord Ashford's personal physician for the past eight years. I was
+invited to the dinner as both friend and medical advisor - Edward had been having
+some health concerns lately, primarily heart-related.
+
+The dinner was pleasant enough, though I noticed tensions between several of the
+guests. Eleanor seemed distant, barely speaking to her cousin William. Victoria
+Ashford - Lord Ashford's sister - made several pointed comments about the family
+inheritance that seemed to upset everyone.
+
+Lord Ashford himself appeared in good spirits during dinner. He ate well, drank
+moderately, and was engaged in conversation. There was no indication of any
+immediate health crisis. His color was good, pulse steady when I last checked
+earlier that day.
+
+After dinner, around 9:00 PM, I was in the library examining Lord Ashford's
+collection of medical curiosities - he had some fascinating antique surgical
+instruments. I was alone there until approximately 9:45 PM, when William Ashford
+came in looking for a particular book.
+
+At about 10:15 PM, I stepped out onto the terrace for some fresh air. The rain had
+stopped, and I wanted to clear my head. I could see lights in the study from where
+I stood, and I thought I heard voices, but I couldn't identify who was speaking.
+
+When Eleanor discovered her father at 10:30 PM, I was one of the first to respond.
+As a physician, I examined the body immediately. The symptoms suggested poisoning -
+dilated pupils, flushed skin, rapid pulse that would have preceded death. The blow
+to the head appeared to have been delivered post-mortem or very close to death.
+
+My professional opinion: Lord Ashford was poisoned first, then struck on the head
+either as he fell or immediately after. The poison was likely administered in the
+previous hour, given the progression of symptoms. Belladonna fits the profile
+perfectly.
+
+TIMELINE:
+- 7:00 PM - 9:00 PM: At dinner
+- 9:00 PM - 9:45 PM: Alone in library
+- 9:45 PM - 10:00 PM: Conversation with William Ashford in library
+- 10:00 PM - 10:15 PM: Still in library, reading
+- 10:15 PM - 10:30 PM: On terrace
+- 10:30 PM: Responded to Eleanor's discovery
+
+--------------------------------------------------------------------------------
+[WITNESS 4: Eleanor Ashford - Victim's daughter, age 34]
+--------------------------------------------------------------------------------
+
+My father and I had a complicated relationship. He could be stubborn, demanding,
+impossible at times. But he was still my father, and I loved him.
+
+The dinner was Father's idea - he wanted to gather the family and some close
+friends. He said he had important announcements to make. I assumed it was about
+the will changes he had been hinting at for weeks.
+
+During dinner, I sat across from Colonel Pemberton. He kept staring at Father in
+a way that made me uncomfortable. There was something different about him tonight -
+a coldness I hadn't seen before. When I asked if he was alright, he just smiled
+and said everything would be "sorted out soon."
+
+After dinner, I spent time with Aunt Victoria in the drawing room. She was telling
+me about her trip to Florence last spring - going on and on about the art museums.
+I confess I wasn't really listening. I was worried about what Father was planning
+to announce.
+
+Around 10:00 PM, I excused myself to use the powder room. On my way back, I passed
+the study and heard voices - Father's and someone else's. I heard Father say
+something like "I know what you did" and "I have proof." The other voice was too
+muffled to identify, but it sounded like a man.
+
+I didn't want to eavesdrop, so I returned to the drawing room. About 25 minutes
+later, I decided to check on Father. That's when I found him... slumped over his
+desk. His eyes were open but unseeing. The brandy glass was on the floor, broken.
+There was a brass candlestick next to his head, covered in...
+
+I screamed and ran to get help. The butler came first, then Dr. Whitfield. I
+couldn't look anymore.
+
+TIMELINE:
+- 7:00 PM - 9:00 PM: At dinner
+- 9:00 PM - 10:00 PM: In drawing room with Victoria Ashford
+- 10:00 PM - 10:05 PM: Powder room
+- 10:05 PM: Overheard conversation in study
+- 10:05 PM - 10:30 PM: Returned to drawing room
+- 10:30 PM: Discovered body
+
+IMPORTANT: Eleanor stands to inherit 60% of the estate under the old will, but
+would have received only 25% under the proposed new will.
+
+--------------------------------------------------------------------------------
+[WITNESS 5: Colonel Arthur Pemberton - Retired military, family friend]
+--------------------------------------------------------------------------------
+
+I've known Edward Ashford for over forty years. We served together in the military
+briefly, then became business partners in the textile trade. Our relationship has
+had its ups and downs, as any long partnership does.
+
+I won't pretend that things were smooth between us recently. Edward had discovered
+some... irregularities in our joint business dealings from years ago. He was
+threatening to go public with information that could damage my reputation. We had
+words about it, yes. But murder? I'm a decorated officer. I have my honor.
+
+During dinner, I was seated between Mrs. Helena Ashford - William's wife - and
+Victoria Ashford. The conversation was pleasant enough. I may have been distracted
+- I was thinking about how to resolve matters with Edward without public scandal.
+
+After dinner, I went to the billiard room with William Ashford. We played a few
+games. I am not a young man anymore, and my leg was bothering me - the old shrapnel
+wound from Suez acts up in damp weather. I stepped out around 9:45 PM for some air.
+
+I will admit I went to the study to speak with Edward. I arrived around 10:05 PM.
+He was alive and well when I arrived. We had a frank discussion about our
+differences. I offered to pay back the money in question. He seemed to be
+considering it. I left around 10:20 PM. He was sitting at his desk, very much
+alive, when I walked out.
+
+I did NOT kill Edward Ashford. Yes, we had disagreements. Yes, I was in the study.
+But I left him alive. Someone else must have entered after me.
+
+TIMELINE (SELF-REPORTED):
+- 7:00 PM - 9:00 PM: At dinner
+- 9:00 PM - 9:45 PM: Billiard room with William Ashford
+- 9:45 PM - 10:05 PM: Walking in garden (leg was bothering him)
+- 10:05 PM - 10:20 PM: In study with Lord Ashford
+- 10:20 PM - 10:30 PM: Returned to billiard room
+- 10:30 PM: Still in billiard room when commotion started
+
+NOTE: Gardener's sighting at 10:20 PM of limping figure matches Pemberton's
+movements. However, Pemberton claims he left at 10:20 PM, while gardener saw
+figure RETURNING at 10:30-10:35 PM.
+
+--------------------------------------------------------------------------------
+[WITNESS 6: William Ashford - Victim's nephew, age 42]
+--------------------------------------------------------------------------------
+
+Uncle Edward and I were never particularly close. He always favored Eleanor, his
+own daughter. But blood is blood, and family matters.
+
+I came to dinner because Uncle Edward insisted. He said he had important news
+about the family's future. Mother - that's Victoria Ashford - was quite anxious
+about what he might say. She's always worried about being left out of the will.
+
+The dinner was tense. Everyone pretending everything was normal when we all knew
+something was about to change. Uncle Edward enjoyed that, I think - keeping us all
+in suspense.
+
+After dinner, I played billiards with Colonel Pemberton for a while. He's a decent
+player, for a man his age, though his mind wasn't really on the game. He kept
+looking at his watch and seemed restless.
+
+Around 9:45 PM, the Colonel excused himself. Said his leg was bothering him and he
+needed to walk it off. I stayed in the billiard room, practicing shots by myself.
+Helena - my wife - came in around 10:00 PM and we talked for a bit about the
+renovations we're planning for our London flat.
+
+I didn't leave the billiard room until we heard Eleanor screaming. That must have
+been around 10:30 PM. I rushed to the study with everyone else and saw... Uncle
+Edward, dead at his desk.
+
+I had no love lost for Uncle Edward, but I didn't kill him. I stood to gain nothing
+from his death - under either the old or new will, my share was minimal.
+
+TIMELINE:
+- 7:00 PM - 9:00 PM: At dinner
+- 9:00 PM - 9:45 PM: Billiard room with Colonel Pemberton
+- 9:45 PM - 10:00 PM: Alone in billiard room
+- 10:00 PM - 10:30 PM: In billiard room with wife Helena
+- 10:30 PM: Heard Eleanor's scream, went to study
+
+--------------------------------------------------------------------------------
+[WITNESS 7: Victoria Ashford - Victim's sister, age 62]
+--------------------------------------------------------------------------------
+
+My brother Edward was a difficult man. Brilliant, yes, but difficult. We had our
+share of disagreements over the years, particularly about Father's estate and how
+Edward handled the family businesses.
+
+But murder? How could anyone think I would harm my own brother? We argued, like
+all siblings do. But I loved him, in my own way.
+
+The dinner was delightful, as usual. Edward always did know how to host a party.
+I was seated next to that charming Dr. Whitfield. We discussed Italian Renaissance
+art - I had just returned from Florence, you know. The Uffizi was magnificent.
+
+After dinner, I spent most of my time in the drawing room with Eleanor. Poor dear
+seemed so anxious all evening. I tried to distract her with stories from my
+travels. She excused herself around 10:00 PM, and I remained in the drawing room,
+reading a novel from Edward's library.
+
+I heard voices at some point - men arguing, it sounded like. But the drawing room
+is on the other side of the house from the study. I couldn't make out who it was
+or what they were saying.
+
+When Eleanor screamed, I nearly fainted. My heart condition, you know. Dr.
+Whitfield had to attend to me before he could even examine poor Edward.
+
+TIMELINE:
+- 7:00 PM - 9:00 PM: At dinner
+- 9:00 PM - 10:30 PM: Drawing room (with Eleanor until 10:00 PM, alone after)
+- 10:30 PM: Heard Eleanor's scream
+
+NOTE: Victoria Ashford was set to receive a significant increase in her
+inheritance under the new will - from 10% to 30%.
+
+================================================================================
+PHYSICAL EVIDENCE
+================================================================================
+
+[EVIDENCE 1: Murder Weapon - Brass Candlestick]
+Location: Found next to victim's body
+Description: Heavy brass candlestick, approximately 30cm tall, from the study mantelpiece
+Fingerprints: Smudged, multiple partials - being analyzed
+Blood: Type matches victim (O positive)
+Other: Traces of brass polish detected - recently cleaned
+
+[EVIDENCE 2: Poisoned Brandy]
+Location: Brandy glass fragments on study floor, decanter on side table
+Contents: Belladonna extract (Atropa belladonna) detected in glass residue
+Concentration: Lethal dose (estimated 50ml of concentrated extract)
+Decanter: Clean - poison was added directly to the glass
+Other: Glass was the victim's personal glass, kept in the study
+
+[EVIDENCE 3: Threatening Letter Fragment]
+Location: Found in victim's desk drawer
+Description: Partially burned letter, edges charred
+Legible text: "...you think you can bury the past... but I know... the money from '98...
+you will pay for..."
+Paper type: Standard printer paper, no watermark
+Fingerprints: Victim's prints only
+
+[EVIDENCE 4: Muddy Footprints]
+Location: On carpet near study's garden door
+Description: Partial shoe prints, mud consistent with garden soil
+Size: Approximately men's UK size 10
+Pattern: Distinctive heel wear on left shoe - suggests limping gait
+Note: Colonel Pemberton wears size 10 and walks with a left-sided limp
+
+[EVIDENCE 5: Open Safe]
+Location: Behind portrait in study
+Status: Open, not forced
+Contents missing: Unknown - inventory being compiled with Eleanor's help
+Access: Combination known only to victim and Eleanor (she claims)
+
+[EVIDENCE 6: Belladonna Plants]
+Location: Gardener's report - missing from greenhouse medicinal garden
+Quantity: Approximately 3-4 plants removed
+Timeline: Noticed missing 2 weeks ago
+Access: Greenhouse unlocked during daytime hours
+
+================================================================================
+BACKGROUND INFORMATION
+================================================================================
+
+FAMILY RELATIONSHIPS:
+
+Lord Edward Ashford (Deceased)
+|
++-- Eleanor Ashford (Daughter) - Primary heir
+|
++-- Victoria Ashford (Sister) - Secondary heir
+    |
+    +-- William Ashford (Son/Edward's nephew)
+        |
+        +-- Helena Ashford (William's wife)
+
+FINANCIAL MATTERS:
+
+OLD WILL (still in effect at time of death):
+- Eleanor Ashford: 60%
+- Victoria Ashford: 10%
+- William Ashford: 5%
+- Various charities: 25%
+
+PROPOSED NEW WILL (never signed):
+- Eleanor Ashford: 25%
+- Victoria Ashford: 30%
+- William Ashford: 5%
+- Colonel Pemberton: 15% (reportedly to settle debts quietly)
+- Various charities: 25%
+
+MOTIVE ANALYSIS:
+
+1. COLONEL PEMBERTON - Financial fraud exposure
+   - Embezzled funds from joint business (est. 200,000)
+   - Lord Ashford had evidence
+   - Threatened to go public
+   - Would have received 15% in new will to stay quiet
+   - But if exposed, faced criminal charges and disgrace
+
+2. ELEANOR ASHFORD - Inheritance dispute
+   - Would lose 35% of inheritance under new will
+   - Heard arguing with father about "family matters"
+   - Knew safe combination
+   - First to discover body
+
+3. VICTORIA ASHFORD - Gains from new will
+   - Would gain 20% under new will
+   - But old will (in effect) gives her only 10%
+   - Had heart condition - physical murder unlikely
+
+4. WILLIAM ASHFORD - Minimal motive
+   - No change in inheritance either way
+   - No known grudges against uncle
+
+THE 1998 INCIDENT:
+
+Based on the threatening letter and Colonel Pemberton's statement, there appears
+to have been a financial irregularity in 1998 involving joint Ashford-Pemberton
+business dealings. Investigation of historical records suggests:
+
+- In 1998, Ashford-Pemberton Textiles reported a significant loss
+- Insurance claim was filed for "inventory damage"
+- Later investigation was dropped for lack of evidence
+- Lord Ashford retained documents suggesting the claim was fraudulent
+- Colonel Pemberton was the primary beneficiary of the insurance payout
+
+If Lord Ashford exposed this fraud, Colonel Pemberton would face:
+- Criminal prosecution
+- Disgrace and ruin
+- Possible imprisonment
+
+================================================================================
+CASE SUMMARY
+================================================================================
+
+Lord Edward Ashford was murdered between 10:00 PM and 10:30 PM on October 14, 2024.
+
+The murder method was two-fold:
+1. Poisoning with belladonna extract (administered via brandy)
+2. Blunt force trauma to the head (brass candlestick)
+
+Key observations:
+- The garden door was unlocked
+- Muddy footprints with limping gait pattern lead to and from garden
+- Colonel Pemberton admits to being in the study at 10:05-10:20 PM
+- Gardener saw limping figure at 10:20 PM going TO study and 10:30-35 PM returning
+- The poison was in the victim's personal brandy glass
+- Belladonna plants were stolen from the garden 2 weeks prior
+- Colonel Pemberton had both motive (exposure of fraud) and opportunity
+
+The evidence strongly suggests the sequence of events:
+1. Poison was placed in the brandy glass before or during the evening
+2. Colonel Pemberton visited the study at 10:05 PM
+3. An argument ensued ("I know what you did... I have proof")
+4. Lord Ashford consumed poisoned brandy during the confrontation
+5. As the poison took effect, he was struck with the candlestick
+6. Colonel Pemberton fled via the garden door around 10:30 PM
+7. Eleanor discovered the body at 10:30 PM
+
+PRIME SUSPECT: Colonel Arthur Pemberton
+- Motive: Prevent exposure of 1998 insurance fraud
+- Opportunity: Admitted to being in study; gardener saw him leaving
+- Means: Access to garden (knew about belladonna), strength to wield candlestick
+- Physical evidence: Footprints match his gait pattern
+
+================================================================================
+[END OF CASE FILE]
+================================================================================
+
+INVESTIGATOR'S NOTE: The answer to "who killed Lord Ashford" should be:
+Colonel Arthur Pemberton - based on motive (fraud exposure), opportunity
+(admitted presence, gardener sighting), and physical evidence (footprints
+matching his distinctive limp).

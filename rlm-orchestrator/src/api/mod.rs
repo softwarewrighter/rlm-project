@@ -32,8 +32,14 @@ pub struct ApiState {
 pub struct QueryRequest {
     /// The query to process
     pub query: String,
-    /// The context to analyze
+    /// The context to analyze (inline)
+    #[serde(default)]
     pub context: String,
+    /// Optional: File path to load context from (server-side)
+    /// When provided, context from this file is used instead of inline context.
+    /// This allows processing large files without loading them into browser memory.
+    #[serde(default)]
+    pub context_path: Option<String>,
     /// Optional: Override root model (e.g., "glm-4.7", "deepseek-chat")
     #[serde(default)]
     pub root_model: Option<String>,
@@ -145,6 +151,54 @@ pub struct HealthResponse {
     pub version: String,
     pub wasm_enabled: bool,
     pub rust_wasm_enabled: bool,
+}
+
+/// Resolve context from a QueryRequest.
+/// If context_path is provided, read from file; otherwise use inline context.
+/// Returns (context, source_description) where source_description is either "inline" or the file path.
+fn resolve_context(request: &QueryRequest) -> Result<(String, String), (StatusCode, String)> {
+    if let Some(ref path) = request.context_path {
+        // Validate path - only allow specific directories for security
+        let allowed_prefixes = [
+            "demo/",
+            "../demo/",
+            "/Users/mike/github/softwarewrighter/rlm-project/demo/",
+            "/Users/mike/Downloads/",
+        ];
+
+        let path_allowed = allowed_prefixes.iter().any(|prefix| path.starts_with(prefix));
+        if !path_allowed {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "context_path must be in allowed directories: {:?}",
+                    allowed_prefixes
+                ),
+            ));
+        }
+
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                tracing::info!(
+                    "Loaded context from file: {} ({} chars)",
+                    path,
+                    content.len()
+                );
+                Ok((content, path.clone()))
+            }
+            Err(e) => Err((
+                StatusCode::BAD_REQUEST,
+                format!("Failed to read context_path '{}': {}", path, e),
+            )),
+        }
+    } else if !request.context.is_empty() {
+        Ok((request.context.clone(), "inline".to_string()))
+    } else {
+        Err((
+            StatusCode::BAD_REQUEST,
+            "Either 'context' or 'context_path' must be provided".to_string(),
+        ))
+    }
 }
 
 /// SSE event for streaming progress
@@ -474,9 +528,10 @@ async fn process_query(
     State(state): State<Arc<ApiState>>,
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, (StatusCode, String)> {
+    let (context, _source) = resolve_context(&request)?;
     match state
         .orchestrator
-        .process(&request.query, &request.context)
+        .process(&request.query, &context)
         .await
     {
         Ok(result) => Ok(Json(result.into())),
@@ -489,12 +544,13 @@ async fn debug_query(
     State(state): State<Arc<ApiState>>,
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<DebugResponse>, (StatusCode, String)> {
-    let context_length = request.context.len();
+    let (context, _source) = resolve_context(&request)?;
+    let context_length = context.len();
     let query = request.query.clone();
 
     match state
         .orchestrator
-        .process(&request.query, &request.context)
+        .process(&request.query, &context)
         .await
     {
         Ok(result) => {
@@ -533,15 +589,35 @@ async fn stream_query(
     Json(request): Json<QueryRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
     let (tx, rx) = mpsc::channel::<StreamEvent>(100);
-    let context_length = request.context.len();
 
-    // Spawn the processing task
+    // Resolve context from inline or file path
+    let context_result = resolve_context(&request);
+
+    // Spawn the processing task (handles both success and error cases)
     let orchestrator = state.orchestrator.clone();
     let query = request.query.clone();
-    let context = request.context.clone();
     let force_rlm = request.force_rlm;
 
     tokio::spawn(async move {
+        // Handle context resolution error
+        let (context, context_source) = match context_result {
+            Ok((ctx, src)) => (ctx, src),
+            Err((_, err_msg)) => {
+                let _ = tx
+                    .send(StreamEvent::Error {
+                        message: err_msg.clone(),
+                    })
+                    .await;
+                return;
+            }
+        };
+
+        let context_length = context.len();
+        tracing::info!(
+            "Processing query with context from {} ({} chars)",
+            context_source,
+            context_length
+        );
         let query_start = std::time::Instant::now();
         // Create a progress callback that sends events to the channel
         let tx_clone = tx.clone();
@@ -1591,6 +1667,10 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
                             <option value="l4_detective">L4: Detective Mystery (semantic analysis)</option>
                             <option value="war_peace_family">War and Peace: Family Tree (3.2MB)</option>
                         </optgroup>
+                        <optgroup label="Server-Side File Processing (Large Files)">
+                            <option value="file_detective">📁 File: Detective Mystery (22 KB)</option>
+                            <option value="file_war_peace">📁 File: War & Peace Characters (3.2 MB)</option>
+                        </optgroup>
                     </select>
                     <div class="example-tags" id="exampleTags"></div>
 
@@ -1798,6 +1878,7 @@ Line 7: ERROR - Invalid input received</textarea>
         let currentData = null;
         let eventSource = null;
         let startTime = null;
+        let currentContextPath = null;  // For server-side file loading
 
         // Initialize on load
         document.addEventListener('DOMContentLoaded', () => {
@@ -2199,6 +2280,33 @@ Line 7: ERROR - Invalid input received</textarea>
                 level: 'Level 4 (Recursive LLM)',
                 maxIterations: 20,
                 description: 'S-NIAH: Find scattered character mentions in 3.2MB text. Requires multi-hop LLM reasoning.'
+            },
+
+            // ========================================
+            // SERVER-SIDE FILE PROCESSING (Large Files)
+            // These examples load files server-side, not in browser
+            // ========================================
+            file_detective: {
+                query: "Who murdered Lord Ashford? Cross-reference the witness statements with the physical evidence and identify the killer.",
+                context: null,
+                contextPath: '../demo/l4/data/detective-mystery.txt',
+                fileSize: '22 KB',
+                tags: ['file-based', 'llm-delegation', 'semantic'],
+                benchmark: 'Multi-hop',
+                level: 'Level 4 (Recursive LLM)',
+                maxIterations: 15,
+                description: 'File-based: Server loads file directly. Demonstrates large file processing without browser memory usage.'
+            },
+            file_war_peace: {
+                query: "Extract all character names from this text. List each unique character only once.",
+                context: null,
+                contextPath: '/Users/mike/Downloads/war-and-peace-tolstoy-clean.txt',
+                fileSize: '3.2 MB',
+                tags: ['file-based', 'llm', 'large-context'],
+                benchmark: 'S-NIAH',
+                level: 'Level 4 (Recursive LLM)',
+                maxIterations: 20,
+                description: 'File-based: 3.2MB file processed server-side. Shows token savings vs sending full context.'
             }
         };
 
@@ -2369,8 +2477,15 @@ Line 7: ERROR - Invalid input received</textarea>
 
                 document.getElementById('infoDesc').textContent = example.description || '';
 
-                // Load context - either from URL or use static value
-                if (example.loadUrl) {
+                // Load context - from file path (server-side), URL, or static value
+                if (example.contextPath) {
+                    // Server-side file loading - don't load into browser
+                    currentContextPath = example.contextPath;
+                    const fileInfo = example.fileSize ? ` (${example.fileSize})` : '';
+                    document.getElementById('context').value = `[Server-side file: ${example.contextPath}${fileInfo}]\n\nThis file will be loaded directly on the server.\nNo browser memory used for large files.\n\nClick "Run RLM Query" to process.`;
+                    updateContextStats();
+                } else if (example.loadUrl) {
+                    currentContextPath = null;
                     document.getElementById('context').value = 'Loading large context...';
                     updateContextStats();
                     try {
@@ -2384,6 +2499,7 @@ Line 7: ERROR - Invalid input received</textarea>
                         updateContextStats();
                     }
                 } else {
+                    currentContextPath = null;
                     document.getElementById('context').value = example.context;
                     updateContextStats();
                 }
@@ -2431,10 +2547,14 @@ Line 7: ERROR - Invalid input received</textarea>
             try {
                 // Use fetch to POST and get SSE stream
                 // force_rlm bypasses small-context optimization to ensure WASM demos work
+                // If currentContextPath is set, use server-side file loading
+                const requestBody = currentContextPath
+                    ? { query, context_path: currentContextPath, force_rlm: true }
+                    : { query, context, force_rlm: true };
                 const response = await fetch('/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query, context, force_rlm: true })
+                    body: JSON.stringify(requestBody)
                 });
 
                 if (!response.ok) {
