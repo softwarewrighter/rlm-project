@@ -8,7 +8,7 @@
 //!   rlm large-log.txt "How many ERROR lines?" --model llama3.2:3b
 
 use anyhow::{Context, Result};
-use colored::Colorize;
+use colored::{control, Colorize};
 use rlm::orchestrator::RlmOrchestrator;
 use rlm::pool::{LlmPool, LoadBalanceStrategy, ProviderRole};
 use rlm::provider::{LiteLLMProvider, OllamaProvider};
@@ -31,6 +31,88 @@ fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
         end -= 1;
     }
     &s[..end]
+}
+
+/// Format markdown text for terminal output using ANSI colors.
+/// Converts:
+/// - `**text**` to bold
+/// - `### heading` to bold green
+/// - `* bullet` keeps the bullet but bolds the first phrase
+fn format_terminal_markdown(text: &str) -> String {
+    let mut result = String::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        // Handle markdown headers (###, ##, #)
+        if trimmed.starts_with("###") {
+            let header_text = trimmed.trim_start_matches('#').trim();
+            result.push_str(&format!("{}\n", header_text.bold().green()));
+            continue;
+        }
+        if trimmed.starts_with("##") {
+            let header_text = trimmed.trim_start_matches('#').trim();
+            result.push_str(&format!("{}\n", header_text.bold().green()));
+            continue;
+        }
+        if trimmed.starts_with('#') && !trimmed.starts_with("##") {
+            let header_text = trimmed.trim_start_matches('#').trim();
+            result.push_str(&format!("{}\n", header_text.bold().green()));
+            continue;
+        }
+
+        // Process inline **bold** markers
+        let formatted_line = format_inline_bold(line);
+        result.push_str(&formatted_line);
+        result.push('\n');
+    }
+
+    // Remove trailing newline if original didn't have one
+    if !text.ends_with('\n') && result.ends_with('\n') {
+        result.pop();
+    }
+
+    result
+}
+
+/// Format inline **bold** markers in a line of text.
+fn format_inline_bold(line: &str) -> String {
+    let mut result = String::new();
+    let mut chars = line.chars().peekable();
+    let mut in_bold = false;
+    let mut current_segment = String::new();
+
+    while let Some(c) = chars.next() {
+        if c == '*' && chars.peek() == Some(&'*') {
+            // Consume the second asterisk
+            chars.next();
+
+            if in_bold {
+                // End bold - apply formatting
+                result.push_str(&current_segment.bold().to_string());
+                current_segment.clear();
+                in_bold = false;
+            } else {
+                // Start bold - flush current segment
+                result.push_str(&current_segment);
+                current_segment.clear();
+                in_bold = true;
+            }
+        } else {
+            current_segment.push(c);
+        }
+    }
+
+    // Flush remaining segment
+    if in_bold {
+        // Unclosed bold marker - just add asterisks back
+        result.push_str("**");
+        result.push_str(&current_segment);
+    } else {
+        result.push_str(&current_segment);
+    }
+
+    result
 }
 
 /// Create a progress callback for real-time output based on verbosity level
@@ -826,7 +908,10 @@ fn print_results(
         "{}",
         "════════════════════════════════════════════════════════════════".green()
     );
-    println!("{answer}");
+    // Enable colors for answer formatting even when piped
+    control::set_override(true);
+    println!("{}", format_terminal_markdown(answer));
+    control::unset_override();
     eprintln!(
         "{}",
         "════════════════════════════════════════════════════════════════".green()
