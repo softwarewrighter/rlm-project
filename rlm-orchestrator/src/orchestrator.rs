@@ -513,11 +513,11 @@ impl RlmOrchestrator {
             commands.push_str(
                 r#"
 ## Level 1: DSL (Text Operations)
-- {{"op": "regex", "pattern": "...", "store": "matches"}} - Find patterns
-- {{"op": "find", "text": "...", "store": "results"}} - Find text
-- {{"op": "lines", "start": N, "end": M}} - Get line range
-- {{"op": "count", "what": "lines"}} - Count lines/chars/words
-- {{"op": "len"}} - Get context length
+- {"op": "regex", "pattern": "...", "store": "matches"} - Find patterns
+- {"op": "find", "text": "...", "store": "results"} - Find text
+- {"op": "lines", "start": N, "end": M} - Get line range
+- {"op": "count", "what": "lines"} - Count lines/chars/words
+- {"op": "len"} - Get context length
 "#,
             );
         }
@@ -527,7 +527,7 @@ impl RlmOrchestrator {
             commands.push_str(
                 r#"
 ## Level 3: CLI (Native Computation) - PREFERRED for complex analysis
-- {{"op": "rust_cli_intent", "intent": "...", "store": "result"}} - Run native code
+- {"op": "rust_cli_intent", "intent": "...", "store": "result"} - Run native code
 
 USE rust_cli_intent FOR:
 - Counting frequencies, unique values, top-N rankings
@@ -542,11 +542,11 @@ USE rust_cli_intent FOR:
         commands.push_str(
             r#"
 ## Semantic Check
-- {{"op": "llm_query", "prompt": "...", "store": "result"}} - Simple yes/no question
+- {"op": "llm_query", "prompt": "...", "store": "result"} - Simple yes/no question
 
 ## Finishing
-- {{"op": "final", "answer": "..."}} - Return your analysis
-- {{"op": "final_var", "name": "result"}} - Return computed variable
+- {"op": "final", "answer": "..."} - Return your analysis
+- {"op": "final_var", "name": "result"} - Return computed variable
 "#,
         );
 
@@ -1133,14 +1133,14 @@ If no matches found:
             commands_section.push_str(
                 r#"
 ### Level 1: DSL Operations (text extraction and search) [ENABLED]
-- {{"op": "slice", "start": 0, "end": 1000}} - Get characters [start:end]
-- {{"op": "lines", "start": 0, "end": 100}} - Get lines [start:end]
-- {{"op": "len"}} - Get context length
-- {{"op": "count", "what": "lines"}} - Count lines/chars/words
-- {{"op": "regex", "pattern": "class \\w+"}} - Find regex matches
-- {{"op": "find", "text": "error"}} - Find text occurrences
-- {{"op": "set", "name": "x", "value": "..."}} - Set variable
-- {{"op": "get", "name": "x"}} - Get variable value
+- {"op": "slice", "start": 0, "end": 1000} - Get characters [start:end]
+- {"op": "lines", "start": 0, "end": 100} - Get lines [start:end]
+- {"op": "len"} - Get context length
+- {"op": "count", "what": "lines"} - Count lines/chars/words
+- {"op": "regex", "pattern": "class \\w+"} - Find regex matches
+- {"op": "find", "text": "error"} - Find text occurrences
+- {"op": "set", "name": "x", "value": "..."} - Set variable
+- {"op": "get", "name": "x"} - Get variable value
 
 DSL is for: Finding/extracting specific text, counting occurrences of ONE pattern
 DSL CANNOT: Count frequencies of MULTIPLE items, compute statistics, sort results
@@ -1156,11 +1156,11 @@ DSL CANNOT: Count frequencies of MULTIPLE items, compute statistics, sort result
 TWO WASM OPERATIONS - choose the right one:
 
 1. rust_wasm_mapreduce - SIMPLE per-line extraction + ONE aggregation:
-   {{"op": "rust_wasm_mapreduce", "intent": "EXTRACT something from each line", "combiner": "count|unique|sum", "store": "result"}}
+   {"op": "rust_wasm_mapreduce", "intent": "EXTRACT something from each line", "combiner": "count|unique|sum", "store": "result"}
    Use ONLY for: simple frequency OR simple unique count OR simple sum (ONE thing)
 
 2. rust_wasm_intent - COMPLEX queries, multiple requirements, sorting, ranking:
-   {{"op": "rust_wasm_intent", "intent": "FULL ANALYSIS DESCRIPTION", "store": "result"}}
+   {"op": "rust_wasm_intent", "intent": "FULL ANALYSIS DESCRIPTION", "store": "result"}
    Use for: ANY query asking for multiple things, top N, ranking, percentiles, sorting
 
 CHOOSING - IMPORTANT:
@@ -1183,7 +1183,7 @@ EXAMPLES:
             commands_section.push_str(
                 r#"
 ### Level 3: CLI Computation (native binary, PREFERRED for analysis) [ENABLED]
-- {{"op": "rust_cli_intent", "intent": "what to compute", "store": "result"}}
+- {"op": "rust_cli_intent", "intent": "what to compute", "store": "result"}
   Full Rust stdlib (HashMap, HashSet, contains, split, sort). Fast and reliable.
 
 USE CLI FOR:
@@ -1215,52 +1215,52 @@ You are a COORDINATOR. You do NOT process data directly. You delegate ALL tasks 
 YOUR TOOLS:
 
 1. **llm_reduce** - Extract information from chunks (PREFERRED for large contexts):
-   {{"op": "llm_reduce", "directive": "Extract names, claims, and evidence from each section", "store": "result"}}
+   {"op": "llm_reduce", "directive": "Extract names, claims, and evidence from each section", "store": "result"}
 
    This splits the document into ~10K-char chunks and processes each sequentially.
    Each worker extracts information and accumulates findings.
    Use this first to systematically extract information from the entire document.
 
 2. **llm_query** - Analyze extracted data (PREFERRED for reasoning):
-   {{"op": "llm_query", "prompt": "Based on these findings: ${{case_data}}\n\nQuestion: Who is the murderer?", "store": "answer"}}
+   {"op": "llm_query", "prompt": "Based on these findings: ${case_data}\n\nQuestion: Who is the murderer?", "store": "answer"}
 
    Use AFTER llm_reduce to reason about the extracted findings.
-   Include the extracted variable in your prompt with ${{variable_name}} syntax.
+   Include the extracted variable in your prompt with ${variable_name} syntax.
    This is a simple LLM call - no commands, just reasoning.
 
 3. **final** / **final_var** - Return your answer:
-   {{"op": "final", "answer": "Based on the analysis: Colonel Pemberton is the murderer because..."}}
-   {{"op": "final_var", "name": "answer"}}
+   {"op": "final", "answer": "Based on the analysis: Colonel Pemberton is the murderer because..."}
+   {"op": "final_var", "name": "answer"}
 
 ## WORKFLOW FOR LARGE DOCUMENTS
 
 Step 1 - EXTRACT (use llm_reduce):
-{{"op": "llm_reduce", "directive": "Extract: witness names and statements, physical evidence, alibis, timelines, motives", "store": "findings"}}
+{"op": "llm_reduce", "directive": "Extract: witness names and statements, physical evidence, alibis, timelines, motives", "store": "findings"}
 
 Step 2 - ANALYZE (use llm_query with extracted data):
-{{"op": "llm_query", "prompt": "Analyze these findings from a murder investigation:\n\n${{findings}}\n\nCross-reference witness statements with physical evidence. Find contradictions. Who had motive, means, and opportunity? Name the murderer with supporting evidence.", "store": "conclusion"}}
+{"op": "llm_query", "prompt": "Analyze these findings from a murder investigation:\n\n${findings}\n\nCross-reference witness statements with physical evidence. Find contradictions. Who had motive, means, and opportunity? Name the murderer with supporting evidence.", "store": "conclusion"}
 
 Step 3 - RETURN:
-{{"op": "final_var", "name": "conclusion"}}
+{"op": "final_var", "name": "conclusion"}
 
 ## EXAMPLE: Murder Mystery
 
 ```json
-{{"op": "llm_reduce", "directive": "Extract: (1) witness names and their statements, (2) physical evidence, (3) alibis and timelines, (4) motives mentioned", "store": "case_data"}}
+{"op": "llm_reduce", "directive": "Extract: (1) witness names and their statements, (2) physical evidence, (3) alibis and timelines, (4) motives mentioned", "store": "case_data"}
 ```
 
 ```json
-{{"op": "llm_query", "prompt": "Based on this murder case data:\n\n${{case_data}}\n\nAnalyze the evidence. Cross-reference witness statements. Identify contradictions. Who had motive, means, and opportunity? Name the murderer.", "store": "answer"}}
+{"op": "llm_query", "prompt": "Based on this murder case data:\n\n${case_data}\n\nAnalyze the evidence. Cross-reference witness statements. Identify contradictions. Who had motive, means, and opportunity? Name the murderer.", "store": "answer"}
 ```
 
 ```json
-{{"op": "final_var", "name": "answer"}}
+{"op": "final_var", "name": "answer"}
 ```
 
 ## CRITICAL RULES
 
 - Use llm_reduce FIRST to extract data from the document
-- Use llm_query to ANALYZE extracted data (include ${{variable}} in prompt)
+- Use llm_query to ANALYZE extracted data (include ${variable} in prompt)
 - NEVER try to read or extract data yourself - ALWAYS use llm_reduce
 "#,
                 );
@@ -1284,15 +1284,15 @@ RECOGNIZING SEMANTIC TASKS:
 
 COMMANDS:
 1. llm_delegate - Nested RLM with reasoning capabilities:
-   {{"op": "llm_delegate", "task": "Analyze this evidence and identify contradictions", "on": "extracted_data", "store": "analysis"}}
+   {"op": "llm_delegate", "task": "Analyze this evidence and identify contradictions", "on": "extracted_data", "store": "analysis"}
 
 2. llm_query - Quick semantic check (no tools):
-   {{"op": "llm_query", "prompt": "Does this text mention Colonel Pemberton?", "store": "check"}}
+   {"op": "llm_query", "prompt": "Does this text mention Colonel Pemberton?", "store": "check"}
 
 WORKFLOW FOR SEMANTIC REASONING:
-1. Extract the relevant section(s) with DSL: {{"op": "regex", "pattern": "CASE SUMMARY.*?END", "store": "summary"}}
-2. Delegate analysis: {{"op": "llm_delegate", "task": "Based on this summary, who is the murderer and why?", "on": "summary", "store": "result"}}
-3. Return: {{"op": "final_var", "name": "result"}}
+1. Extract the relevant section(s) with DSL: {"op": "regex", "pattern": "CASE SUMMARY.*?END", "store": "summary"}
+2. Delegate analysis: {"op": "llm_delegate", "task": "Based on this summary, who is the murderer and why?", "on": "summary", "store": "result"}
+3. Return: {"op": "final_var", "name": "result"}
 
 IMPORTANT: If the query asks WHO/WHY/WHAT (semantic), use llm_delegate.
 If the query asks HOW MANY/RANK/SORT (computation), use rust_cli_intent.
@@ -1330,15 +1330,15 @@ COMPUTATION (use rust_cli_intent):
 ## Example: Frequency Analysis (use rust_cli_intent)
 
 ```json
-{{"op": "rust_cli_intent", "intent": "Count each error type and rank by frequency", "store": "counts"}}
-{{"op": "final_var", "name": "counts"}}
+{"op": "rust_cli_intent", "intent": "Count each error type and rank by frequency", "store": "counts"}
+{"op": "final_var", "name": "counts"}
 ```
 
 ## Example: Top-N with Percentiles
 
 ```json
-{{"op": "rust_cli_intent", "intent": "Find top 10 most active IPs and calculate p50, p95, p99 response times", "store": "analysis"}}
-{{"op": "final_var", "name": "analysis"}}
+{"op": "rust_cli_intent", "intent": "Find top 10 most active IPs and calculate p50, p95, p99 response times", "store": "analysis"}
+{"op": "final_var", "name": "analysis"}
 ```"#
         } else if self.config.wasm.enabled {
             r#"
@@ -1351,20 +1351,20 @@ COMPUTATION (use rust_cli_intent):
 
 Simple unique count (ONE thing):
 ```json
-{{"op": "rust_wasm_mapreduce", "intent": "Extract the word after 'from ' from each line", "combiner": "unique", "store": "result"}}
-{{"op": "final_var", "name": "result"}}
+{"op": "rust_wasm_mapreduce", "intent": "Extract the word after 'from ' from each line", "combiner": "unique", "store": "result"}
+{"op": "final_var", "name": "result"}
 ```
 
 Combined query - unique count AND top 10 (use rust_wasm_intent for MULTIPLE requirements):
 ```json
-{{"op": "rust_wasm_intent", "intent": "Extract IP after 'from ', count unique IPs, also count frequency of each IP and return top 10 most active", "store": "result"}}
-{{"op": "final_var", "name": "result"}}
+{"op": "rust_wasm_intent", "intent": "Extract IP after 'from ', count unique IPs, also count frequency of each IP and return top 10 most active", "store": "result"}
+{"op": "final_var", "name": "result"}
 ```
 
 Percentiles (needs sorting - use rust_wasm_intent):
 ```json
-{{"op": "rust_wasm_intent", "intent": "Extract the number before 'ms' from each line, sort all numbers, compute p50 p95 p99 percentiles", "store": "result"}}
-{{"op": "final_var", "name": "result"}}
+{"op": "rust_wasm_intent", "intent": "Extract the number before 'ms' from each line, sort all numbers, compute p50 p95 p99 percentiles", "store": "result"}
+{"op": "final_var", "name": "result"}
 ```"#
         } else {
             r#"
@@ -1376,8 +1376,8 @@ Percentiles (needs sorting - use rust_wasm_intent):
 ## Example: Finding Content
 
 ```json
-{{"op": "find", "text": "error", "store": "matches"}}
-{{"op": "final_var", "name": "matches"}}
+{"op": "find", "text": "error", "store": "matches"}
+{"op": "final_var", "name": "matches"}
 ```"#
         };
 
