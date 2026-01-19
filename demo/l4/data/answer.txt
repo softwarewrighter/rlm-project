@@ -1,0 +1,48 @@
+=== SOLUTION: THE ASHFORD MANOR MURDER ===
+
+THIS FILE IS FOR HUMAN REFERENCE ONLY.
+DO NOT PROVIDE THIS FILE TO THE LLM.
+
+The LLM should deduce this answer from the witness statements,
+physical evidence, and background information in detective-mystery.txt.
+
+--------------------------------------------------------------------------------
+ANSWER: Colonel Arthur Pemberton
+--------------------------------------------------------------------------------
+
+REASONING:
+
+1. MOTIVE: Prevent exposure of 1998 insurance fraud
+   - Lord Ashford had evidence of embezzlement
+   - Pemberton faced criminal charges and disgrace if exposed
+   - The threatening letter references "the money from '98"
+
+2. OPPORTUNITY: Admitted presence in study at time of death
+   - Pemberton admits being in the study 10:05-10:20 PM
+   - Gardener saw limping figure going TO study at 10:20 PM
+   - Gardener saw same figure RETURNING at 10:30-35 PM
+   - Pemberton claims he left at 10:20 PM - this contradicts gardener's sighting
+
+3. MEANS: Access to poison and physical capability
+   - Belladonna plants stolen from garden 2 weeks prior
+   - Pemberton knew the garden (walks there for his leg)
+   - Strong enough to wield candlestick despite age
+
+4. PHYSICAL EVIDENCE: Footprints match his gait pattern
+   - Muddy footprints show limping gait (left side)
+   - Men's UK size 10 - matches Pemberton
+   - Trail leads to/from garden door
+
+SEQUENCE OF EVENTS:
+1. Poison placed in brandy glass before or during evening
+2. Pemberton visited study at 10:05 PM for "frank discussion"
+3. Argument: "I know what you did... I have proof"
+4. Lord Ashford drank poisoned brandy during confrontation
+5. As poison took effect, struck with candlestick
+6. Pemberton fled via garden door around 10:30 PM
+7. Eleanor discovered body at 10:30 PM
+
+KEY CONTRADICTIONS:
+- Pemberton says he left at 10:20 PM
+- Gardener saw limping figure RETURNING at 10:30-35 PM
+- This 10-15 minute gap is when the murder occurred

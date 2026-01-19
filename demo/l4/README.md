@@ -22,33 +22,60 @@ Level 4 introduces **recursive LLM delegation** - the ability to create nested R
 
 ## Demo: Detective Mystery
 
-**File:** `detective-demo.sh`
+A murder mystery case file with 7 witnesses, physical evidence, and background information. The LLM must cross-reference testimonies and evidence to identify the killer.
 
-A murder mystery case file with 7 witnesses, physical evidence, and background information. The LLM must:
+### Usage
 
-1. Extract witness statements (L1 regex)
-2. Analyze each witness for key claims and contradictions (L4 delegate)
-3. Cross-reference with physical evidence
-4. Identify the murderer with reasoning
-
-**Running:**
+**Direct CLI Command:**
 ```bash
-# Requires LLM delegation enabled
+# Load environment and run directly
+export $(cat ~/.env | grep -v '^#' | xargs)
+./rlm-orchestrator/target/release/rlm \
+    demo/l4/data/detective-mystery.txt \
+    "Who murdered Lord Ashford? Analyze ALL witness statements and ALL physical evidence. Identify the killer." \
+    --enable-llm-delegation \
+    --coordinator-mode \
+    --litellm \
+    -m deepseek-coder \
+    --max-iterations 15 \
+    -v
+```
+
+**Flags explained:**
+- `--enable-llm-delegation`: Enable L4 LLM commands (llm_reduce, llm_query, llm_delegate)
+- `--coordinator-mode`: Use llm_reduce for chunk-based extraction (preferred for large contexts)
+- `--litellm`: Use LiteLLM gateway for API access
+- `-m deepseek-coder`: Model to use
+- `--max-iterations 15`: Sufficient for this demo (typically completes in 3-5)
+
+**Using the Demo Script:**
+```bash
 export $(cat ~/.env | grep -v '^#' | xargs)
 ./demo/l4/detective-demo.sh
 ```
 
-**Expected Answer:** Colonel Arthur Pemberton
+### Expected Answer
+
+**Colonel Arthur Pemberton** - based on:
+- Motive: Fraud exposure from 1998 incident
+- Opportunity: Admitted presence in study; gardener saw him leaving
+- Physical evidence: Footprints matching his distinctive limp
+- Timeline contradiction: Claims he left at 10:20 but was seen at 10:30+
+
+See `data/answer.txt` for the full solution (human reference only - not provided to LLM).
 
 ### Data Structure
 
 ```
 demo/l4/
   data/
-    detective-mystery.txt   # 30KB case file
+    detective-mystery.txt   # Case file (no answer - LLM must deduce)
+    answer.txt              # Solution for human reference only
   detective-demo.sh         # CLI demo script
   README.md                 # This file
 ```
+
+**Important:** The mystery file does NOT contain the answer. The LLM must deduce it from the evidence.
 
 ## Future: War & Peace (Planned)
 

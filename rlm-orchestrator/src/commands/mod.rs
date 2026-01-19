@@ -749,6 +749,8 @@ pub struct CommandExecutor {
     last_delegate_depth: usize,
     /// Progress callback for real-time updates during long operations
     progress_callback: Option<CommandProgressCallback>,
+    /// Maximum chunks allowed for llm_reduce (fail fast if exceeded)
+    max_llm_reduce_chunks: usize,
 }
 
 impl CommandExecutor {
@@ -892,6 +894,7 @@ impl CommandExecutor {
             last_nested_history: Vec::new(),
             last_delegate_depth: 0,
             progress_callback: None,
+            max_llm_reduce_chunks: 100, // Default, can be overridden
         }
     }
 
