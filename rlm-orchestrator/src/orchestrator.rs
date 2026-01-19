@@ -2,7 +2,8 @@
 
 use crate::RlmConfig;
 use crate::commands::{
-    CommandExecutor, ExecutionResult, LlmQueryCallback, extract_commands, extract_final,
+    CommandExecutor, ExecutionResult, LlmDelegateCallback, LlmDelegateParams, LlmDelegateResult,
+    LlmQueryCallback, NestedIterationSummary, extract_commands, extract_final,
 };
 use crate::pool::LlmPool;
 use crate::provider::{LlmRequest, ProviderError};
@@ -50,6 +51,29 @@ pub enum ProgressEvent {
     CliCompileComplete { step: usize, duration_ms: u64 },
     /// CLI execution complete
     CliRunComplete { step: usize, duration_ms: u64 },
+    /// LLM delegation starting (nested RLM)
+    LlmDelegateStart {
+        step: usize,
+        task_preview: String,
+        context_len: usize,
+        depth: usize,
+    },
+    /// LLM delegation complete (nested RLM)
+    LlmDelegateComplete {
+        step: usize,
+        duration_ms: u64,
+        nested_iterations: usize,
+        success: bool,
+    },
+    /// Nested RLM iteration (shows what worker is doing)
+    NestedIteration {
+        depth: usize,
+        step: usize,
+        llm_response_preview: String,
+        commands_preview: String,
+        output_preview: String,
+        has_error: bool,
+    },
     /// Command execution complete
     CommandComplete {
         step: usize,
@@ -211,6 +235,366 @@ impl RlmOrchestrator {
         })
     }
 
+    /// Create the llm_delegate callback for nested RLM calls
+    fn create_llm_delegate_callback(
+        &self,
+        total_sub_calls: Arc<AtomicUsize>,
+    ) -> LlmDelegateCallback {
+        let pool = Arc::clone(&self.pool);
+        let config = self.config.clone();
+        let max_sub_calls = self.config.max_sub_calls;
+        let max_recursion_depth = self.config.llm_delegation.max_recursion_depth;
+
+        Arc::new(move |params: LlmDelegateParams| {
+            // Check recursion depth
+            if params.current_depth > max_recursion_depth {
+                return Err(format!(
+                    "Max recursion depth ({}) exceeded",
+                    max_recursion_depth
+                ));
+            }
+
+            // Check max sub-calls
+            let current = total_sub_calls.load(Ordering::Relaxed);
+            if current >= max_sub_calls {
+                return Err(format!("Max sub-calls ({}) exceeded", max_sub_calls));
+            }
+
+            // Get the current tokio runtime handle
+            let handle = tokio::runtime::Handle::try_current()
+                .map_err(|e| format!("No tokio runtime available: {}", e))?;
+
+            let pool = Arc::clone(&pool);
+            let config = config.clone();
+            let total_sub_calls = Arc::clone(&total_sub_calls);
+            let task = params.task.clone();
+            let context = params.context.clone();
+            let max_iterations = params.max_iterations;
+            let current_depth = params.current_depth;
+            let levels = params.levels.clone();
+
+            // Use block_in_place to allow blocking within the async runtime
+            let result = tokio::task::block_in_place(|| {
+                handle.block_on(async {
+                    // Create a nested orchestrator with restricted config
+                    let mut nested_config = config.clone();
+                    nested_config.max_iterations = max_iterations;
+                    nested_config.level_priority = levels.clone();
+
+                    // Disable llm_delegate in nested instances to prevent infinite recursion
+                    // Keep llm_query enabled for simple semantic checks
+                    nested_config.llm_delegation.enabled = true; // Keep enabled for llm_query
+
+                    let nested_orchestrator = RlmOrchestrator::new(nested_config, pool);
+
+                    // Run the nested RLM with depth tracking
+                    // Note: We force RLM mode for nested calls (no bypass)
+                    nested_orchestrator
+                        .process_nested(&task, &context, current_depth, &levels)
+                        .await
+                })
+            });
+
+            total_sub_calls.fetch_add(1, Ordering::Relaxed);
+
+            match result {
+                Ok(rlm_result) => {
+                    // Convert history to nested iteration summaries
+                    let nested_history: Vec<NestedIterationSummary> = rlm_result
+                        .history
+                        .iter()
+                        .map(|record| NestedIterationSummary {
+                            step: record.step,
+                            llm_response_preview: record.llm_response.chars().take(100).collect(),
+                            commands_preview: record.commands.chars().take(100).collect(),
+                            output_preview: record.output.chars().take(100).collect(),
+                            has_error: record.error.is_some(),
+                        })
+                        .collect();
+
+                    Ok(LlmDelegateResult {
+                        answer: rlm_result.answer,
+                        iterations: rlm_result.iterations,
+                        success: rlm_result.success,
+                        nested_history,
+                    })
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        })
+    }
+
+    /// Process a nested RLM call (called from llm_delegate)
+    async fn process_nested(
+        &self,
+        query: &str,
+        context: &str,
+        depth: usize,
+        _levels: &[String],
+    ) -> Result<RlmResult, OrchestratorError> {
+        info!(
+            depth = depth,
+            context_len = context.len(),
+            query_len = query.len(),
+            "Processing nested RLM call"
+        );
+
+        let mut history = Vec::new();
+        let total_sub_calls = Arc::new(AtomicUsize::new(0));
+        let mut total_prompt_tokens: u32 = 0;
+        let mut total_completion_tokens: u32 = 0;
+        let context_chars = context.len();
+
+        // Build system prompt for nested context (simpler, focused on the task)
+        let system_prompt = self.build_nested_system_prompt(context.len());
+
+        // Create callbacks (no delegation in nested calls to prevent infinite recursion)
+        let llm_query_cb = self.create_llm_query_callback(Arc::clone(&total_sub_calls));
+
+        // Create command executor without delegation callback (prevents nested delegation)
+        let mut executor = CommandExecutor::with_wasm_config(
+            context.to_string(),
+            self.config.max_sub_calls,
+            &self.config.wasm,
+        )
+        .with_llm_callback(llm_query_cb)
+        .with_recursion_depth(depth)
+        .with_max_recursion_depth(self.config.llm_delegation.max_recursion_depth);
+
+        for iteration in 0..self.config.max_iterations {
+            let step = iteration + 1;
+            debug!(iteration = step, depth = depth, "Nested RLM iteration");
+
+            // Build the prompt with history
+            let prompt = self.build_prompt(query, context, &history);
+
+            // Call the LLM
+            let request = LlmRequest::new(&system_prompt, &prompt).with_max_tokens(2048);
+            let response = self.pool.complete(&request, false).await?;
+
+            // Track token usage
+            let iter_tokens = response
+                .usage
+                .as_ref()
+                .map(|u| IterationTokens {
+                    prompt_tokens: u.prompt_tokens,
+                    completion_tokens: u.completion_tokens,
+                })
+                .unwrap_or_default();
+            total_prompt_tokens += iter_tokens.prompt_tokens;
+            total_completion_tokens += iter_tokens.completion_tokens;
+
+            let llm_response = response.content.clone();
+
+            // Log the worker LLM response for debugging
+            debug!(
+                depth = depth,
+                step = step,
+                response_len = response.content.len(),
+                response_preview = %response.content.chars().take(200).collect::<String>(),
+                "Worker LLM response"
+            );
+
+            // Try to extract JSON commands
+            let commands_json = extract_commands(&response.content);
+
+            debug!(
+                depth = depth,
+                step = step,
+                has_commands = commands_json.is_some(),
+                "Worker command extraction"
+            );
+
+            if let Some(json) = commands_json {
+                let exec_result = executor.execute_json(&json);
+
+                match exec_result {
+                    Ok(ExecutionResult::Final {
+                        answer,
+                        sub_calls: _,
+                    }) => {
+                        return Ok(RlmResult {
+                            answer,
+                            iterations: step,
+                            history,
+                            total_sub_calls: total_sub_calls.load(Ordering::Relaxed),
+                            success: true,
+                            error: None,
+                            total_prompt_tokens,
+                            total_completion_tokens,
+                            context_chars,
+                            bypassed: false,
+                        });
+                    }
+                    Ok(ExecutionResult::Continue { output, sub_calls }) => {
+                        let record = IterationRecord {
+                            step,
+                            llm_response,
+                            commands: json,
+                            output: self.truncate_output(&output),
+                            error: None,
+                            sub_calls,
+                            tokens: iter_tokens,
+                            timing: IterationTiming::default(),
+                        };
+                        history.push(record);
+                    }
+                    Err(e) => {
+                        let record = IterationRecord {
+                            step,
+                            llm_response,
+                            commands: json,
+                            output: String::new(),
+                            error: Some(e.to_string()),
+                            sub_calls: 0,
+                            tokens: iter_tokens,
+                            timing: IterationTiming::default(),
+                        };
+                        history.push(record);
+                    }
+                }
+            } else {
+                // Check for FINAL in plain text
+                if let Some(final_answer) = extract_final(&response.content) {
+                    return Ok(RlmResult {
+                        answer: final_answer,
+                        iterations: step,
+                        history,
+                        total_sub_calls: total_sub_calls.load(Ordering::Relaxed),
+                        success: true,
+                        error: None,
+                        total_prompt_tokens,
+                        total_completion_tokens,
+                        context_chars,
+                        bypassed: false,
+                    });
+                }
+
+                let record = IterationRecord {
+                    step,
+                    llm_response: response.content,
+                    commands: String::new(),
+                    output: String::new(),
+                    error: Some("No JSON commands found".to_string()),
+                    sub_calls: 0,
+                    tokens: iter_tokens,
+                    timing: IterationTiming::default(),
+                };
+                history.push(record);
+            }
+        }
+
+        // Max iterations reached
+        Ok(RlmResult {
+            answer: String::new(),
+            iterations: self.config.max_iterations,
+            history,
+            total_sub_calls: total_sub_calls.load(Ordering::Relaxed),
+            success: false,
+            error: Some(format!(
+                "Nested RLM: Max iterations ({}) exceeded",
+                self.config.max_iterations
+            )),
+            total_prompt_tokens,
+            total_completion_tokens,
+            context_chars,
+            bypassed: false,
+        })
+    }
+
+    /// Build system prompt for nested RLM calls (simpler than root)
+    fn build_nested_system_prompt(&self, context_len: usize) -> String {
+        let nested_levels = &self.config.llm_delegation.nested_levels;
+
+        let mut commands = String::new();
+
+        // Add DSL commands if enabled
+        if nested_levels.contains(&"dsl".to_string()) || self.config.dsl.enabled {
+            commands.push_str(
+                r#"
+## Level 1: DSL (Text Operations)
+- {{"op": "regex", "pattern": "...", "store": "matches"}} - Find patterns
+- {{"op": "find", "text": "...", "store": "results"}} - Find text
+- {{"op": "lines", "start": N, "end": M}} - Get line range
+- {{"op": "count", "what": "lines"}} - Count lines/chars/words
+- {{"op": "len"}} - Get context length
+"#,
+            );
+        }
+
+        // Add CLI commands if enabled in nested_levels
+        if nested_levels.contains(&"cli".to_string()) && self.config.cli.enabled {
+            commands.push_str(
+                r#"
+## Level 3: CLI (Native Computation) - PREFERRED for complex analysis
+- {{"op": "rust_cli_intent", "intent": "...", "store": "result"}} - Run native code
+
+USE rust_cli_intent FOR:
+- Counting frequencies, unique values, top-N rankings
+- Statistics (percentiles, averages)
+- Complex aggregations
+- Large data processing
+"#,
+            );
+        }
+
+        // Add llm_query for semantic checks
+        commands.push_str(
+            r#"
+## Semantic Check
+- {{"op": "llm_query", "prompt": "...", "store": "result"}} - Simple yes/no question
+
+## Finishing
+- {{"op": "final", "answer": "..."}} - Return your analysis
+- {{"op": "final_var", "name": "result"}} - Return computed variable
+"#,
+        );
+
+        format!(
+            r#"You are a WORKER RLM agent analyzing data.
+The context has {context_len} characters.
+
+CRITICAL: You have LIMITED iterations (max 10). Work efficiently!
+
+{commands}
+
+## WORKFLOW (follow this order)
+
+### Step 1: Explore the Data First (REQUIRED)
+Before extracting, ALWAYS peek at the data structure:
+- Use {{"op": "lines", "start": 1, "end": 50}} to see the beginning
+- Use {{"op": "count", "what": "lines"}} to understand size
+- Look for section markers, headers, dividers
+
+### Step 2: Extract with Flexible Patterns
+If first pattern fails, TRY ALTERNATIVES:
+- Broad pattern first: {{"op": "regex", "pattern": "witness|statement"}}
+- Then narrow down: {{"op": "regex", "pattern": "WITNESS.*?:"}}
+- Use find for exact text: {{"op": "find", "text": "Evidence"}}
+
+### Step 3: Analyze and Summarize
+- Use CLI for computation: {{"op": "rust_cli_intent", "intent": "count unique names"}}
+- Use llm_query for semantic checks: {{"op": "llm_query", "prompt": "Is this reliable?"}}
+
+### Step 4: Return a CONCISE Result
+- {{"op": "final", "answer": "Your summary here"}} - Return directly
+- {{"op": "final_var", "name": "result"}} - Return stored variable
+
+## CRITICAL RULES
+1. EXPLORE before EXTRACT - peek at data structure first
+2. If pattern not found, try simpler patterns or substrings
+3. DO NOT return raw data - SUMMARIZE your findings
+4. Keep final answer under 1000 chars
+5. Finish in 3-5 iterations if possible
+
+## DEBUGGING
+If no matches found:
+1. Check first 50 lines to see actual format
+2. Try case-insensitive or partial matches
+3. Look for different delimiters (===, ---, ***, etc.)"#
+        )
+    }
+
     /// Check if bypass should be used for this context size
     pub fn should_bypass(&self, context_len: usize) -> bool {
         self.config.bypass_enabled && context_len < self.config.bypass_threshold
@@ -338,7 +722,16 @@ impl RlmOrchestrator {
             self.config.max_sub_calls,
             &self.config.wasm,
         )
-        .with_llm_callback(llm_query_cb);
+        .with_llm_callback(llm_query_cb)
+        .with_recursion_depth(0) // Root level
+        .with_max_recursion_depth(self.config.llm_delegation.max_recursion_depth)
+        .with_nested_levels(self.config.llm_delegation.nested_levels.clone());
+
+        // Add llm_delegate callback if LLM delegation is enabled
+        if self.config.llm_delegation.enabled {
+            let llm_delegate_cb = self.create_llm_delegate_callback(Arc::clone(&total_sub_calls));
+            executor = executor.with_llm_delegate_callback(llm_delegate_cb);
+        }
 
         for iteration in 0..self.config.max_iterations {
             let step = iteration + 1;
@@ -408,15 +801,38 @@ impl RlmOrchestrator {
                     commands: json.clone(),
                 });
 
-                // Check if this might involve code compilation
+                // Check if this might involve code compilation or LLM delegation
                 let is_cli = json.contains("rust_cli_intent");
                 let is_wasm = json.contains("rust_wasm");
+                let is_llm_delegate = json.contains("llm_delegate");
+
                 if is_cli {
                     // CLI: emit codegen start (LLM call to generate code)
                     emit(ProgressEvent::CliCodegenStart { step });
                 } else if is_wasm {
                     emit(ProgressEvent::WasmCompileStart { step });
+                } else if is_llm_delegate {
+                    // Extract task preview from JSON for progress event
+                    let task_preview =
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json) {
+                            parsed
+                                .get("task")
+                                .and_then(|t| t.as_str())
+                                .map(|s| s.chars().take(50).collect::<String>())
+                                .unwrap_or_else(|| "...".to_string())
+                        } else {
+                            "...".to_string()
+                        };
+                    emit(ProgressEvent::LlmDelegateStart {
+                        step,
+                        task_preview,
+                        context_len: context.len(), // Will be overridden if "on" is used
+                        depth: 1,                   // Will be adjusted based on actual depth
+                    });
                 }
+
+                // Clear nested history before execution
+                executor.clear_nested_history();
 
                 // Execute the commands (with timing)
                 let exec_start = Instant::now();
@@ -468,6 +884,30 @@ impl RlmOrchestrator {
                     emit(ProgressEvent::WasmRunComplete {
                         step,
                         duration_ms: wasm_run_ms,
+                    });
+                }
+
+                // Emit nested iteration events for llm_delegate visibility
+                let nested_history = executor.last_nested_history();
+                if !nested_history.is_empty() {
+                    let depth = executor.last_delegate_depth();
+                    for summary in nested_history {
+                        emit(ProgressEvent::NestedIteration {
+                            depth,
+                            step: summary.step,
+                            llm_response_preview: summary.llm_response_preview.clone(),
+                            commands_preview: summary.commands_preview.clone(),
+                            output_preview: summary.output_preview.clone(),
+                            has_error: summary.has_error,
+                        });
+                    }
+                    // Emit delegate complete with success based on last iteration
+                    let success = nested_history.last().map(|s| !s.has_error).unwrap_or(false);
+                    emit(ProgressEvent::LlmDelegateComplete {
+                        step,
+                        duration_ms: exec_ms,
+                        nested_iterations: nested_history.len(),
+                        success,
                     });
                 }
 
@@ -658,18 +1098,22 @@ impl RlmOrchestrator {
     }
 
     fn build_system_prompt(&self, context_len: usize) -> String {
+        // Check if we're in coordinator mode (base LLM only delegates)
+        let coordinator_mode =
+            self.config.llm_delegation.enabled && self.config.llm_delegation.coordinator_mode;
+
         // Build level status strings
-        let dsl_status = if self.config.dsl.enabled {
+        let dsl_status = if self.config.dsl.enabled && !coordinator_mode {
             "ENABLED"
         } else {
             "DISABLED"
         };
-        let wasm_status = if self.config.wasm.enabled {
+        let wasm_status = if self.config.wasm.enabled && !coordinator_mode {
             "ENABLED"
         } else {
             "DISABLED"
         };
-        let cli_status = if self.config.cli.enabled {
+        let cli_status = if self.config.cli.enabled && !coordinator_mode {
             "ENABLED"
         } else {
             "DISABLED"
@@ -683,8 +1127,9 @@ impl RlmOrchestrator {
         // Build available commands section based on enabled levels
         let mut commands_section = String::new();
 
-        // Level 1: DSL commands (always shown if enabled)
-        if self.config.dsl.enabled {
+        // In coordinator mode, skip L1/L2/L3 - base LLM only delegates
+        // Level 1: DSL commands (always shown if enabled and not in coordinator mode)
+        if self.config.dsl.enabled && !coordinator_mode {
             commands_section.push_str(
                 r#"
 ### Level 1: DSL Operations (text extraction and search) [ENABLED]
@@ -703,8 +1148,8 @@ DSL CANNOT: Count frequencies of MULTIPLE items, compute statistics, sort result
             );
         }
 
-        // Level 2: WASM commands
-        if self.config.wasm.enabled {
+        // Level 2: WASM commands (not in coordinator mode)
+        if self.config.wasm.enabled && !coordinator_mode {
             commands_section.push_str(r#"
 ### Level 2: WASM Computation (sandboxed code execution) [ENABLED]
 
@@ -733,8 +1178,8 @@ EXAMPLES:
 "#);
         }
 
-        // Level 3: CLI commands
-        if self.config.cli.enabled {
+        // Level 3: CLI commands (not in coordinator mode)
+        if self.config.cli.enabled && !coordinator_mode {
             commands_section.push_str(
                 r#"
 ### Level 3: CLI Computation (native binary, PREFERRED for analysis) [ENABLED]
@@ -759,28 +1204,128 @@ WASM LIMITATIONS (why CLI is better for complex tasks):
 
         // Level 4: LLM Delegation
         if self.config.llm_delegation.enabled {
-            commands_section.push_str(
-                r#"
-### Level 4: LLM Delegation (semantic analysis) [ENABLED]
-- {{"op": "llm_query", "prompt": "Analyze: ${{var}}", "store": "result"}}
-  IMPORTANT: Sub-LLM has NO access to original context!
-  You MUST extract content first, then pass via ${{var}}.
+            if coordinator_mode {
+                // Coordinator mode: Base LLM only delegates, doesn't process data directly
+                commands_section.push_str(
+                    r#"
+### COORDINATOR MODE: Your Role
+
+You are a COORDINATOR. You do NOT process data directly. You delegate ALL tasks to sub-LLMs.
+
+YOUR TOOLS:
+
+1. **llm_reduce** - Extract information from chunks (PREFERRED for large contexts):
+   {{"op": "llm_reduce", "directive": "Extract names, claims, and evidence from each section", "store": "result"}}
+
+   This splits the document into ~10K-char chunks and processes each sequentially.
+   Each worker extracts information and accumulates findings.
+   Use this first to systematically extract information from the entire document.
+
+2. **llm_query** - Analyze extracted data (PREFERRED for reasoning):
+   {{"op": "llm_query", "prompt": "Based on these findings: ${{case_data}}\n\nQuestion: Who is the murderer?", "store": "answer"}}
+
+   Use AFTER llm_reduce to reason about the extracted findings.
+   Include the extracted variable in your prompt with ${{variable_name}} syntax.
+   This is a simple LLM call - no commands, just reasoning.
+
+3. **final** / **final_var** - Return your answer:
+   {{"op": "final", "answer": "Based on the analysis: Colonel Pemberton is the murderer because..."}}
+   {{"op": "final_var", "name": "answer"}}
+
+## WORKFLOW FOR LARGE DOCUMENTS
+
+Step 1 - EXTRACT (use llm_reduce):
+{{"op": "llm_reduce", "directive": "Extract: witness names and statements, physical evidence, alibis, timelines, motives", "store": "findings"}}
+
+Step 2 - ANALYZE (use llm_query with extracted data):
+{{"op": "llm_query", "prompt": "Analyze these findings from a murder investigation:\n\n${{findings}}\n\nCross-reference witness statements with physical evidence. Find contradictions. Who had motive, means, and opportunity? Name the murderer with supporting evidence.", "store": "conclusion"}}
+
+Step 3 - RETURN:
+{{"op": "final_var", "name": "conclusion"}}
+
+## EXAMPLE: Murder Mystery
+
+```json
+{{"op": "llm_reduce", "directive": "Extract: (1) witness names and their statements, (2) physical evidence, (3) alibis and timelines, (4) motives mentioned", "store": "case_data"}}
+```
+
+```json
+{{"op": "llm_query", "prompt": "Based on this murder case data:\n\n${{case_data}}\n\nAnalyze the evidence. Cross-reference witness statements. Identify contradictions. Who had motive, means, and opportunity? Name the murderer.", "store": "answer"}}
+```
+
+```json
+{{"op": "final_var", "name": "answer"}}
+```
+
+## CRITICAL RULES
+
+- Use llm_reduce FIRST to extract data from the document
+- Use llm_query to ANALYZE extracted data (include ${{variable}} in prompt)
+- NEVER try to read or extract data yourself - ALWAYS use llm_reduce
 "#,
-            );
+                );
+            } else {
+                // Normal mode: Base LLM has access to all tools including delegation
+                commands_section.push_str(
+                    r#"
+### Level 4: LLM Delegation (semantic reasoning) [ENABLED]
+
+USE llm_delegate WHEN THE QUERY REQUIRES:
+- Understanding meaning (who, why, what happened)
+- Cross-referencing information
+- Identifying contradictions or relationships
+- Reasoning about content (not just extracting or counting)
+
+RECOGNIZING SEMANTIC TASKS:
+- "Who did X?" -> llm_delegate (requires reasoning)
+- "Cross-reference A with B" -> llm_delegate (requires understanding)
+- "Find contradictions" -> llm_delegate (requires semantic comparison)
+- "Identify the killer/culprit" -> llm_delegate (requires multi-hop reasoning)
+
+COMMANDS:
+1. llm_delegate - Nested RLM with reasoning capabilities:
+   {{"op": "llm_delegate", "task": "Analyze this evidence and identify contradictions", "on": "extracted_data", "store": "analysis"}}
+
+2. llm_query - Quick semantic check (no tools):
+   {{"op": "llm_query", "prompt": "Does this text mention Colonel Pemberton?", "store": "check"}}
+
+WORKFLOW FOR SEMANTIC REASONING:
+1. Extract the relevant section(s) with DSL: {{"op": "regex", "pattern": "CASE SUMMARY.*?END", "store": "summary"}}
+2. Delegate analysis: {{"op": "llm_delegate", "task": "Based on this summary, who is the murderer and why?", "on": "summary", "store": "result"}}
+3. Return: {{"op": "final_var", "name": "result"}}
+
+IMPORTANT: If the query asks WHO/WHY/WHAT (semantic), use llm_delegate.
+If the query asks HOW MANY/RANK/SORT (computation), use rust_cli_intent.
+"#,
+                );
+            }
         }
 
         // Build workflow section based on available levels
-        let workflow = if self.config.cli.enabled {
+        let workflow = if coordinator_mode {
+            // In coordinator mode, workflow is already explained in the L4 section
+            ""
+        } else if self.config.llm_delegation.enabled && self.config.cli.enabled {
             r#"
-## Workflow
-1. **Simple queries**: Use find/regex/lines to extract, then final
-2. **Aggregation/analysis**: Use rust_cli_intent (PREFERRED) for counting, ranking
-3. **Semantic analysis**: Extract content first, then use llm_query
+## CRITICAL: Match Tool to Task Type
 
-## Dataset Size Guidance
-- Small (<500 lines): DSL commands (find, regex, lines) work well
-- Medium (500-2000 lines): WASM works but CLI is faster
-- Large (2000+ lines): ALWAYS use rust_cli_intent - WASM may timeout
+SEMANTIC REASONING (use llm_delegate):
+- Questions starting with WHO, WHY, WHAT HAPPENED
+- Tasks requiring cross-referencing, contradiction detection
+- Analysis needing understanding of meaning
+- Example: "Who murdered X?" -> extract evidence, then llm_delegate
+
+COMPUTATION (use rust_cli_intent):
+- Questions starting with HOW MANY, RANK, TOP N
+- Tasks requiring counting, sorting, aggregating
+- Analysis of patterns/frequencies
+- Example: "Count unique IPs" -> rust_cli_intent
+
+## Standard Workflow
+1. Extract relevant data with DSL (regex, find, lines)
+2. For semantic analysis: llm_delegate on extracted data
+3. For computation: rust_cli_intent on extracted data
+4. Return result with final or final_var
 
 ## Example: Frequency Analysis (use rust_cli_intent)
 

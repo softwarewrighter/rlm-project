@@ -11,20 +11,22 @@ max_iterations = 20
 max_sub_calls = 50
 output_limit = 10000
 
-# Smart bypass: skip RLM for small contexts
-bypass_enabled = true
+# Smart bypass: skip RLM for small contexts (off by default)
+# Set bypass_enabled = true for production to skip RLM on small contexts
+# bypass_enabled = true
 bypass_threshold = 4000
 
-# Level priority order
-level_priority = ["dsl", "wasm", "cli", "llm_delegation"]
+# Level priority order (L1 DSL, L3 CLI, L4 LLM - no WASM for L4 demos)
+level_priority = ["dsl", "cli", "llm_delegation"]
 
-# Level 1: DSL (enabled by default)
+# Level 1: DSL (enabled)
 [dsl]
 enabled = true
 
-# Level 2: WASM (enabled)
+# Level 2: WASM (disabled for L4 demos - keeps things simpler)
+# Note: rust_wasm_enabled = true is needed for CLI code generation even when WASM is disabled
 [wasm]
-enabled = true
+enabled = false
 rust_wasm_enabled = true
 fuel_limit = 1000000
 memory_limit = 67108864
@@ -47,9 +49,14 @@ allow_network = false
 allow_process_spawn = false
 allow_unsafe = false
 
-# Level 4: LLM Delegation (disabled by default)
+# Level 4: LLM Delegation (enabled for L4 demos)
 [llm_delegation]
-enabled = false
+enabled = true
+max_recursion_depth = 3
+# Coordinator mode: Base LLM only delegates, sub-LLMs do actual data work
+coordinator_mode = true
+# Sub-LLMs get DSL and CLI tools (WASM disabled in this config)
+nested_levels = ["dsl", "cli"]
 
 # Root LLM via LiteLLM - DeepSeek Chat
 [[providers]]

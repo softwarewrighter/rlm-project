@@ -60,10 +60,11 @@ fetch_sample() {
 
 # Function to run a demo with timing
 # Uses DeepSeek via LiteLLM gateway for both base and codegen LLMs
+# Usage: run_demo <context_file> <query> [extra_flags...]
 run_demo() {
     local context_file="$1"
     local query="$2"
-    local verbose="${3:--vv}"
+    shift 2  # Remove first two args, rest are extra flags
 
     echo ""
     echo "Query: $query"
@@ -73,7 +74,7 @@ run_demo() {
     echo "Running..."
     echo "----------------------------------------"
 
-    time "$RLM_BIN" "$context_file" "$query" $verbose \
+    time "$RLM_BIN" "$context_file" "$query" "$@" \
         --litellm \
         --litellm-url "$LITELLM_URL" \
         --model "$LITELLM_MODEL" \

@@ -38,6 +38,99 @@ fn to_ascii(s: &str) -> String {
         .collect()
 }
 
+/// Split text into chunks with semantic awareness.
+///
+/// This function tries to break at natural boundaries (paragraphs, sections)
+/// to avoid splitting mid-sentence or mid-thought. With semantic breaks,
+/// overlap is not needed to preserve context.
+///
+/// Strategy:
+/// 1. Split on double newlines (paragraphs) or section markers (===, ---, etc.)
+/// 2. Group paragraphs into chunks up to target_size
+/// 3. If a single paragraph exceeds target_size, include it as-is (don't split mid-paragraph)
+fn split_into_chunks(text: &str, target_size: usize, _step_size: usize) -> Vec<String> {
+    // Find paragraph boundaries: double newlines, or section markers
+    let paragraph_patterns = ["\n\n", "\n===", "\n---", "\n***", "\n["];
+
+    // Split into paragraphs/sections
+    let mut paragraphs: Vec<&str> = Vec::new();
+    let mut last_end = 0;
+    let mut pos = 0;
+
+    while pos < text.len() {
+        // Find the next paragraph break
+        let mut found_break = None;
+        for pattern in &paragraph_patterns {
+            if let Some(idx) = text[pos..].find(pattern) {
+                let abs_idx = pos + idx;
+                if found_break.is_none() || abs_idx < found_break.unwrap() {
+                    found_break = Some(abs_idx);
+                }
+            }
+        }
+
+        match found_break {
+            Some(break_idx) => {
+                // Include up to the break point
+                if break_idx > last_end {
+                    paragraphs.push(&text[last_end..break_idx]);
+                }
+                // Skip the break pattern (find where content resumes)
+                pos = break_idx + 1;
+                while pos < text.len() && text[pos..].starts_with('\n') {
+                    pos += 1;
+                }
+                last_end = pos;
+            }
+            None => {
+                // No more breaks, take the rest
+                if last_end < text.len() {
+                    paragraphs.push(&text[last_end..]);
+                }
+                break;
+            }
+        }
+    }
+
+    // Group paragraphs into chunks up to target_size
+    let mut chunks: Vec<String> = Vec::new();
+    let mut current_chunk = String::new();
+
+    for para in paragraphs {
+        let para_trimmed = para.trim();
+        if para_trimmed.is_empty() {
+            continue;
+        }
+
+        // If adding this paragraph would exceed target, start a new chunk
+        // But always include at least one paragraph per chunk
+        if !current_chunk.is_empty() && current_chunk.len() + para_trimmed.len() + 2 > target_size {
+            chunks.push(current_chunk);
+            current_chunk = String::new();
+        }
+
+        if !current_chunk.is_empty() {
+            current_chunk.push_str("\n\n");
+        }
+        current_chunk.push_str(para_trimmed);
+    }
+
+    // Don't forget the last chunk
+    if !current_chunk.is_empty() {
+        chunks.push(current_chunk);
+    }
+
+    // If we ended up with no chunks (unusual), just do simple splitting
+    if chunks.is_empty() && !text.is_empty() {
+        let chars: Vec<char> = text.chars().collect();
+        for chunk in chars.chunks(target_size) {
+            chunks.push(chunk.iter().collect());
+        }
+    }
+
+    chunks
+}
+
 /// Errors from command execution
 #[derive(Error, Debug)]
 pub enum CommandError {
@@ -83,6 +176,12 @@ pub enum CommandError {
 
     #[error("Code generation LLM not configured")]
     CodeGenNotConfigured,
+
+    #[error("Max recursion depth ({0}) exceeded")]
+    MaxRecursionDepth(usize),
+
+    #[error("LLM delegate callback not configured")]
+    LlmDelegateNotConfigured,
 }
 
 /// A single command that can be executed
@@ -171,6 +270,66 @@ pub enum Command {
     /// Call sub-LM: {"op": "llm_query", "prompt": "Summarize: ..."}
     LlmQuery {
         prompt: String,
+        #[serde(default)]
+        store: Option<String>,
+    },
+
+    /// Recursive LLM delegation: {"op": "llm_delegate", "task": "Analyze relationships", "on": "extracted_data"}
+    ///
+    /// Creates a nested RLM instance with full tool access (L1-L3) on a subset of data.
+    /// Unlike llm_query (which is just a simple LLM call), llm_delegate runs a full
+    /// RLM loop with iteration, variable storage, and command execution.
+    ///
+    /// Use cases:
+    /// - Semantic analysis of extracted data chunks
+    /// - Cross-referencing information across sections
+    /// - Complex reasoning that requires tool access
+    ///
+    /// Example: {"op": "llm_delegate", "task": "Summarize key claims from each witness", "on": "witnesses", "store": "summary"}
+    LlmDelegate {
+        /// Task description for the nested RLM instance
+        task: String,
+        /// Source variable to use as context (None = full original context)
+        #[serde(default)]
+        on: Option<String>,
+        /// Maximum iterations for the nested RLM (default: 5)
+        #[serde(default = "default_delegate_iterations")]
+        max_iterations: Option<usize>,
+        /// Capability levels for nested RLM (default: ["dsl", "wasm"])
+        /// Note: llm_delegate is NOT available in nested RLM to prevent infinite recursion
+        #[serde(default)]
+        levels: Option<Vec<String>>,
+        /// Store result in variable
+        #[serde(default)]
+        store: Option<String>,
+    },
+
+    /// Chunked reduce over context: {"op": "llm_reduce", "directive": "Extract names and claims", "store": "result"}
+    ///
+    /// Processes the context in chunks, passing accumulated state through each:
+    /// 1. Split context into chunks of `chunk_size` (default: 10000 chars) with optional overlap
+    /// 2. For each chunk, call worker LLM with: directive + previous_result + chunk
+    /// 3. Worker returns updated accumulated result, passed to next chunk
+    /// 4. Final accumulated result stored in variable
+    ///
+    /// Use cases:
+    /// - Processing large documents that don't fit in worker context
+    /// - Accumulating information across sections (like map-reduce)
+    /// - Summarizing or extracting from long texts
+    LlmReduce {
+        /// Directive for each worker (what to extract/analyze from each chunk)
+        directive: String,
+        /// Chunk size in characters (default: 10000)
+        #[serde(default = "default_chunk_size")]
+        chunk_size: Option<usize>,
+        /// Overlap between chunks in characters (default: 500)
+        /// Helps preserve context across chunk boundaries
+        #[serde(default = "default_overlap")]
+        overlap: Option<usize>,
+        /// Source variable to use as context (None = full original context)
+        #[serde(default)]
+        on: Option<String>,
+        /// Store result in variable
         #[serde(default)]
         store: Option<String>,
     },
@@ -370,6 +529,18 @@ fn default_wasm_function() -> String {
     "analyze".to_string()
 }
 
+fn default_delegate_iterations() -> Option<usize> {
+    Some(10) // Increased from 5 to give workers more time
+}
+
+fn default_chunk_size() -> Option<usize> {
+    Some(10000) // 10K characters per chunk
+}
+
+fn default_overlap() -> Option<usize> {
+    Some(500) // 500 char overlap between chunks for context continuity
+}
+
 impl Command {
     /// Get the capability level required for this command
     ///
@@ -403,7 +574,9 @@ impl Command {
             Command::RustCliIntent { .. } => "cli",
 
             // Level 4: LLM Delegation - Chunk-based LLM analysis
-            Command::LlmQuery { .. } => "llm_delegation",
+            Command::LlmQuery { .. }
+            | Command::LlmDelegate { .. }
+            | Command::LlmReduce { .. } => "llm_delegation",
         }
     }
 
@@ -421,6 +594,8 @@ impl Command {
             Command::Get { .. } => "get",
             Command::Print { .. } => "print",
             Command::LlmQuery { .. } => "llm_query",
+            Command::LlmDelegate { .. } => "llm_delegate",
+            Command::LlmReduce { .. } => "llm_reduce",
             Command::Final { .. } => "final",
             Command::FinalVar { .. } => "final_var",
             Command::Wasm { .. } => "wasm",
@@ -457,6 +632,48 @@ pub enum ExecutionResult {
 /// Callback type for llm_query
 pub type LlmQueryCallback = Arc<dyn Fn(&str) -> Result<String, String> + Send + Sync>;
 
+/// Parameters for llm_delegate callback
+#[derive(Debug, Clone)]
+pub struct LlmDelegateParams {
+    /// The task/query for the nested RLM instance
+    pub task: String,
+    /// The context data for the nested RLM
+    pub context: String,
+    /// Maximum iterations for the nested RLM
+    pub max_iterations: usize,
+    /// Capability levels for the nested RLM (e.g., ["dsl", "wasm"])
+    pub levels: Vec<String>,
+    /// Current recursion depth (for tracking/limiting)
+    pub current_depth: usize,
+}
+
+/// Summary of a nested iteration (for progress reporting)
+#[derive(Debug, Clone)]
+pub struct NestedIterationSummary {
+    pub step: usize,
+    pub llm_response_preview: String,
+    pub commands_preview: String,
+    pub output_preview: String,
+    pub has_error: bool,
+}
+
+/// Result from llm_delegate callback
+#[derive(Debug)]
+pub struct LlmDelegateResult {
+    /// The final answer from the nested RLM
+    pub answer: String,
+    /// Number of iterations the nested RLM took
+    pub iterations: usize,
+    /// Whether the nested RLM succeeded
+    pub success: bool,
+    /// Summary of each nested iteration (for progress visibility)
+    pub nested_history: Vec<NestedIterationSummary>,
+}
+
+/// Callback type for llm_delegate (runs nested RLM instance)
+pub type LlmDelegateCallback =
+    Arc<dyn Fn(LlmDelegateParams) -> Result<LlmDelegateResult, String> + Send + Sync>;
+
 /// Command executor with variable store
 pub struct CommandExecutor {
     /// Variable store
@@ -467,6 +684,14 @@ pub struct CommandExecutor {
     last_result: String,
     /// Callback for llm_query
     llm_callback: Option<LlmQueryCallback>,
+    /// Callback for llm_delegate (nested RLM)
+    llm_delegate_callback: Option<LlmDelegateCallback>,
+    /// Current recursion depth (0 = root, 1 = first nested, etc.)
+    recursion_depth: usize,
+    /// Maximum allowed recursion depth
+    max_recursion_depth: usize,
+    /// Default capability levels for nested RLM
+    nested_levels: Vec<String>,
     /// Sub-call counter
     sub_calls: usize,
     /// Max sub-calls allowed
@@ -491,6 +716,10 @@ pub struct CommandExecutor {
     code_generator: Option<CodeGenerator>,
     /// Directory for CLI binary cache
     cli_binary_cache_dir: std::path::PathBuf,
+    /// Last nested history from llm_delegate (for progress visibility)
+    last_nested_history: Vec<NestedIterationSummary>,
+    /// Last llm_delegate depth (for progress events)
+    last_delegate_depth: usize,
 }
 
 impl CommandExecutor {
@@ -615,6 +844,10 @@ impl CommandExecutor {
             context,
             last_result: String::new(),
             llm_callback: None,
+            llm_delegate_callback: None,
+            recursion_depth: 0,
+            max_recursion_depth: 3,
+            nested_levels: vec!["dsl".to_string(), "wasm".to_string()],
             sub_calls: 0,
             max_sub_calls,
             wasm_executor,
@@ -627,6 +860,8 @@ impl CommandExecutor {
             last_cli_run_time_ms: 0,
             code_generator,
             cli_binary_cache_dir,
+            last_nested_history: Vec::new(),
+            last_delegate_depth: 0,
         }
     }
 
@@ -650,6 +885,22 @@ impl CommandExecutor {
         self.last_cli_run_time_ms
     }
 
+    /// Get the last nested history from llm_delegate (for progress visibility)
+    pub fn last_nested_history(&self) -> &[NestedIterationSummary] {
+        &self.last_nested_history
+    }
+
+    /// Get the last delegate depth (for progress events)
+    pub fn last_delegate_depth(&self) -> usize {
+        self.last_delegate_depth
+    }
+
+    /// Clear the nested history (call before each command execution)
+    pub fn clear_nested_history(&mut self) {
+        self.last_nested_history.clear();
+        self.last_delegate_depth = 0;
+    }
+
     /// Check if Rust WASM compilation is available
     pub fn rust_wasm_available(&self) -> bool {
         self.rust_compiler.is_some() && self.wasm_executor.is_some()
@@ -658,6 +909,30 @@ impl CommandExecutor {
     /// Set the LLM callback
     pub fn with_llm_callback(mut self, callback: LlmQueryCallback) -> Self {
         self.llm_callback = Some(callback);
+        self
+    }
+
+    /// Set the LLM delegate callback for nested RLM instances
+    pub fn with_llm_delegate_callback(mut self, callback: LlmDelegateCallback) -> Self {
+        self.llm_delegate_callback = Some(callback);
+        self
+    }
+
+    /// Set the current recursion depth (for nested RLM instances)
+    pub fn with_recursion_depth(mut self, depth: usize) -> Self {
+        self.recursion_depth = depth;
+        self
+    }
+
+    /// Set the maximum recursion depth
+    pub fn with_max_recursion_depth(mut self, depth: usize) -> Self {
+        self.max_recursion_depth = depth;
+        self
+    }
+
+    /// Set the default nested levels for llm_delegate
+    pub fn with_nested_levels(mut self, levels: Vec<String>) -> Self {
+        self.nested_levels = levels;
         self
     }
 
@@ -713,22 +988,29 @@ impl CommandExecutor {
         let commands: Vec<Command> = if json.trim().starts_with('[') {
             serde_json::from_str(json)?
         } else {
-            // Try parsing multiple JSON objects (one per line)
-            let mut cmds = Vec::new();
-            for line in json.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with("//") {
-                    continue;
-                }
-                if line.starts_with('{') {
-                    cmds.push(serde_json::from_str(line)?);
-                }
-            }
-            if cmds.is_empty() {
-                // Try as single object
-                vec![serde_json::from_str(json)?]
+            // First, try to parse as a single multi-line object
+            if let Ok(cmd) = serde_json::from_str::<Command>(json) {
+                vec![cmd]
             } else {
-                cmds
+                // Try parsing multiple JSON objects (one per line - single-line format)
+                let mut cmds = Vec::new();
+                for line in json.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || line.starts_with("//") {
+                        continue;
+                    }
+                    // Only try single-line JSON (starts AND ends with braces)
+                    if line.starts_with('{') && line.ends_with('}')
+                        && let Ok(cmd) = serde_json::from_str(line) {
+                            cmds.push(cmd);
+                        }
+                }
+                if cmds.is_empty() {
+                    // Nothing worked, return the error from trying to parse the whole thing
+                    vec![serde_json::from_str(json)?]
+                } else {
+                    cmds
+                }
             }
         };
 
@@ -1025,6 +1307,226 @@ impl CommandExecutor {
                 Ok(ExecutionResult::Continue {
                     output: result,
                     sub_calls: 1,
+                })
+            }
+
+            Command::LlmDelegate {
+                task,
+                on,
+                max_iterations,
+                levels,
+                store,
+            } => {
+                // Check recursion depth limit
+                if self.recursion_depth >= self.max_recursion_depth {
+                    return Err(CommandError::MaxRecursionDepth(self.max_recursion_depth));
+                }
+
+                // Get the delegate callback
+                let callback = self
+                    .llm_delegate_callback
+                    .as_ref()
+                    .ok_or(CommandError::LlmDelegateNotConfigured)?;
+
+                // Resolve the context for the nested RLM
+                let nested_context = match on {
+                    Some(var_name) => self
+                        .variables
+                        .get(var_name)
+                        .ok_or_else(|| CommandError::VariableNotFound(var_name.clone()))?
+                        .clone(),
+                    None => self.context.clone(),
+                };
+
+                // Determine capability levels (use provided or defaults)
+                let capability_levels =
+                    levels.clone().unwrap_or_else(|| self.nested_levels.clone());
+
+                // Build delegate parameters
+                let params = LlmDelegateParams {
+                    task: self.expand_vars(task),
+                    context: nested_context,
+                    max_iterations: max_iterations.unwrap_or(5),
+                    levels: capability_levels,
+                    current_depth: self.recursion_depth + 1,
+                };
+
+                // Save depth before params is moved
+                let delegate_depth = params.current_depth;
+
+                tracing::info!(
+                    task = %params.task,
+                    context_len = params.context.len(),
+                    depth = params.current_depth,
+                    levels = ?params.levels,
+                    "Starting nested RLM delegation"
+                );
+
+                // Execute the nested RLM
+                let result = callback(params)
+                    .map_err(|e| CommandError::LlmError(format!("LLM delegation failed: {}", e)))?;
+
+                tracing::info!(
+                    answer_len = result.answer.len(),
+                    iterations = result.iterations,
+                    success = result.success,
+                    nested_steps = result.nested_history.len(),
+                    "Nested RLM delegation complete"
+                );
+
+                // Store nested history for progress visibility
+                self.last_nested_history = result.nested_history;
+                self.last_delegate_depth = delegate_depth;
+
+                // Store the result
+                self.store_result(store, result.answer.clone());
+                self.sub_calls += 1;
+
+                let output = if result.success {
+                    format!(
+                        "[Nested RLM completed in {} iterations]\n{}",
+                        result.iterations, result.answer
+                    )
+                } else {
+                    format!(
+                        "[Nested RLM failed after {} iterations]\n{}",
+                        result.iterations, result.answer
+                    )
+                };
+
+                Ok(ExecutionResult::Continue {
+                    output,
+                    sub_calls: 1,
+                })
+            }
+
+            Command::LlmReduce {
+                directive,
+                chunk_size,
+                overlap,
+                on,
+                store,
+            } => {
+                // Use llm_query callback for simple LLM calls (more reliable than full RLM)
+                let llm_callback = self
+                    .llm_callback
+                    .as_ref()
+                    .ok_or(CommandError::LlmDelegateNotConfigured)?;
+
+                // Resolve the source context
+                let source_context = match on {
+                    Some(var_name) => self
+                        .variables
+                        .get(var_name)
+                        .ok_or_else(|| CommandError::VariableNotFound(var_name.clone()))?
+                        .clone(),
+                    None => self.context.clone(),
+                };
+
+                // Chunking parameters
+                let chunk_sz = chunk_size.unwrap_or(10000);
+                let overlap_sz = overlap.unwrap_or(500);
+                let step_sz = chunk_sz.saturating_sub(overlap_sz).max(1000); // Minimum step of 1000
+
+                // Split into overlapping chunks, trying to break at paragraph boundaries
+                let chunks = split_into_chunks(&source_context, chunk_sz, step_sz);
+
+                let num_chunks = chunks.len();
+                tracing::info!(
+                    directive = %directive,
+                    chunk_size = chunk_sz,
+                    overlap = overlap_sz,
+                    step_size = step_sz,
+                    num_chunks = num_chunks,
+                    total_len = source_context.len(),
+                    "Starting LLM reduce over chunks (simple LLM mode)"
+                );
+
+                // Process chunks sequentially, accumulating results
+                // Use simple LLM calls instead of full RLM for reliability
+                let mut accumulated_result = String::new();
+
+                for (i, chunk) in chunks.iter().enumerate() {
+                    let chunk_num = i + 1;
+
+                    // Build a prompt that includes the chunk directly
+                    // CRITICAL: Ask for COMPLETE accumulated findings, not just delta
+                    let prompt = if accumulated_result.is_empty() {
+                        format!(
+                            r#"You are analyzing chunk {chunk_num} of {num_chunks} from a larger document.
+
+TASK: {directive}
+
+DOCUMENT CHUNK:
+{chunk}
+
+---
+INSTRUCTIONS:
+1. Extract information relevant to the task above
+2. Be concise and well-structured (use bullet points or sections)
+3. If no relevant information, respond: "No relevant information found."
+
+Provide your findings:"#
+                        )
+                    } else {
+                        format!(
+                            r#"You are analyzing chunk {chunk_num} of {num_chunks} from a larger document.
+
+TASK: {directive}
+
+ACCUMULATED FINDINGS SO FAR:
+{accumulated_result}
+
+NEW DOCUMENT CHUNK:
+{chunk}
+
+---
+INSTRUCTIONS:
+1. Review the accumulated findings above
+2. Check this new chunk for any ADDITIONAL relevant information
+3. Output the COMPLETE UPDATED FINDINGS (previous + new combined)
+4. If no new information, output the previous findings unchanged
+5. Keep the same format and structure
+
+IMPORTANT: Output ALL accumulated findings, not just new additions.
+
+Complete updated findings:"#
+                        )
+                    };
+
+                    tracing::debug!(
+                        chunk = chunk_num,
+                        of = num_chunks,
+                        chunk_len = chunk.len(),
+                        prompt_len = prompt.len(),
+                        "Processing chunk with simple LLM call"
+                    );
+
+                    // Make simple LLM call
+                    let result = llm_callback(&prompt)
+                        .map_err(|e| CommandError::LlmError(format!("LLM reduce chunk {} failed: {}", chunk_num, e)))?;
+
+                    accumulated_result = result;
+                }
+
+                tracing::info!(
+                    num_chunks = num_chunks,
+                    result_len = accumulated_result.len(),
+                    "LLM reduce complete (simple mode)"
+                );
+
+                // Store the result
+                self.store_result(store, accumulated_result.clone());
+                self.sub_calls += num_chunks;
+
+                let output = format!(
+                    "[LLM reduce complete: {} chunks processed]\n{}",
+                    num_chunks, accumulated_result
+                );
+
+                Ok(ExecutionResult::Continue {
+                    output,
+                    sub_calls: num_chunks,
                 })
             }
 
@@ -2015,6 +2517,35 @@ pub fn extract_commands(response: &str) -> Option<String> {
         let line = line.trim();
         if line.starts_with('{') && line.ends_with('}') {
             return Some(line.to_string());
+        }
+    }
+
+    // Try to find multi-line JSON object (without code fence)
+    // Look for a line starting with '{' and find the matching '}'
+    let trimmed = response.trim();
+    if trimmed.starts_with('{') {
+        // Find the matching closing brace
+        let mut depth = 0;
+        let mut end_idx = None;
+        for (i, c) in trimmed.char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_idx = Some(i + 1);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(end) = end_idx {
+            let json = &trimmed[..end];
+            // Verify it's valid JSON by trying to check basic structure
+            if json.contains("\"op\"") {
+                return Some(json.to_string());
+            }
         }
     }
 

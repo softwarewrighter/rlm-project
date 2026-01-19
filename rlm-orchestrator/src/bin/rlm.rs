@@ -202,6 +202,71 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
                     let _ = stderr.flush();
                 }
             }
+            ProgressEvent::LlmDelegateStart {
+                step: _,
+                task_preview,
+                context_len,
+                depth,
+            } => {
+                if verbose >= 1 {
+                    eprint!(
+                        "{} {}",
+                        "│".cyan(),
+                        format!(
+                            "🔀 Starting nested RLM (depth {}, {} chars): {}...",
+                            depth,
+                            context_len,
+                            truncate_to_char_boundary(&task_preview, 50)
+                        )
+                        .magenta()
+                    );
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::LlmDelegateComplete {
+                step: _,
+                duration_ms,
+                nested_iterations,
+                success,
+            } => {
+                if verbose >= 1 {
+                    let status = if success { "✓" } else { "✗" };
+                    eprintln!(
+                        " {}",
+                        format!(
+                            "{} ({}ms, {} iters)",
+                            status, duration_ms, nested_iterations
+                        )
+                        .green()
+                    );
+                    let _ = stderr.flush();
+                }
+            }
+            ProgressEvent::NestedIteration {
+                depth,
+                step,
+                llm_response_preview,
+                commands_preview,
+                output_preview: _,
+                has_error,
+            } => {
+                if verbose >= 2 {
+                    // Indent based on depth
+                    let indent = "  ".repeat(depth);
+                    let icon = if has_error { "✗" } else { "▸" };
+                    let preview = if !commands_preview.is_empty() {
+                        truncate_to_char_boundary(&commands_preview, 50)
+                    } else {
+                        truncate_to_char_boundary(&llm_response_preview, 50)
+                    };
+                    eprintln!(
+                        "{} {}",
+                        "│".cyan(),
+                        format!("{}[worker step {}] {} {}", indent, step, icon, preview).magenta()
+                    );
+                    let _ = stderr.flush();
+                }
+            }
             ProgressEvent::CommandComplete {
                 step: _,
                 output_preview,
@@ -313,6 +378,7 @@ fn print_usage() {
                                 Available: dsl, wasm, cli, llm_delegation
     --enable-cli                Enable Level 3 CLI (native binaries, no sandbox)
     --enable-llm-delegation     Enable Level 4 LLM Delegation (chunk-based LLM)
+    --coordinator-mode          Base LLM only delegates (no direct data access)
     --enable-all                Enable all capability levels
     --disable-dsl               Disable Level 1 DSL (text operations)
     --disable-wasm              Disable Level 2 WASM (sandboxed computation)
@@ -371,6 +437,7 @@ struct CliArgs {
     dsl_enabled: bool,
     cli_enabled: bool,
     llm_delegation_enabled: bool,
+    coordinator_mode: bool,
     level_priority: Vec<String>,
 }
 
@@ -407,6 +474,7 @@ fn parse_args() -> Result<CliArgs> {
     let mut dsl_enabled = true;
     let mut cli_enabled = false;
     let mut llm_delegation_enabled = false;
+    let mut coordinator_mode = false;
     let mut level_priority: Vec<String> = vec![
         "dsl".to_string(),
         "wasm".to_string(),
@@ -480,6 +548,10 @@ fn parse_args() -> Result<CliArgs> {
             }
             "--enable-llm-delegation" | "--enable-llm" => {
                 llm_delegation_enabled = true;
+            }
+            "--coordinator-mode" | "--coordinator" => {
+                llm_delegation_enabled = true;
+                coordinator_mode = true;
             }
             "--enable-all" => {
                 dsl_enabled = true;
@@ -563,6 +635,7 @@ fn parse_args() -> Result<CliArgs> {
         dsl_enabled,
         cli_enabled,
         llm_delegation_enabled,
+        coordinator_mode,
         level_priority,
     })
 }
@@ -801,6 +874,7 @@ async fn main() -> Result<()> {
         },
         llm_delegation: rlm::LlmDelegationConfig {
             enabled: args.llm_delegation_enabled,
+            coordinator_mode: args.coordinator_mode,
             ..Default::default()
         },
     };

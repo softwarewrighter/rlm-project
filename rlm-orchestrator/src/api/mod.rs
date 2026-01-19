@@ -186,6 +186,29 @@ pub enum StreamEvent {
     CliCompileComplete { step: usize, duration_ms: u64 },
     #[serde(rename = "cli_run_complete")]
     CliRunComplete { step: usize, duration_ms: u64 },
+    #[serde(rename = "llm_delegate_start")]
+    LlmDelegateStart {
+        step: usize,
+        task_preview: String,
+        context_len: usize,
+        depth: usize,
+    },
+    #[serde(rename = "llm_delegate_complete")]
+    LlmDelegateComplete {
+        step: usize,
+        duration_ms: u64,
+        nested_iterations: usize,
+        success: bool,
+    },
+    #[serde(rename = "nested_iteration")]
+    NestedIteration {
+        depth: usize,
+        step: usize,
+        llm_response_preview: String,
+        commands_preview: String,
+        output_preview: String,
+        has_error: bool,
+    },
     #[serde(rename = "command_complete")]
     CommandComplete {
         step: usize,
@@ -228,9 +251,11 @@ pub fn create_router(state: Arc<ApiState>) -> Router {
         .route("/debug", post(debug_query))
         .route("/stream", post(stream_query))
         .route("/visualize", get(visualize_page))
+        .route("/favicon.ico", get(serve_favicon))
         .route("/samples/war-and-peace", get(serve_war_and_peace))
         .route("/samples/large-logs", get(serve_large_logs))
         .route("/samples/response-times", get(serve_response_times))
+        .route("/samples/detective-mystery", get(serve_detective_mystery))
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10MB for large contexts
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -245,6 +270,16 @@ async fn health_check(State(state): State<Arc<ApiState>>) -> Json<HealthResponse
         wasm_enabled: state.wasm_enabled,
         rust_wasm_enabled: state.rust_wasm_enabled,
     })
+}
+
+/// Serve favicon
+async fn serve_favicon() -> impl axum::response::IntoResponse {
+    // Embedded favicon - red "RL" rotated 22 degrees
+    static FAVICON: &[u8] = include_bytes!("favicon.ico");
+    (
+        [(axum::http::header::CONTENT_TYPE, "image/x-icon")],
+        FAVICON,
+    )
 }
 
 /// Serve War and Peace text file for large context demos
@@ -385,6 +420,55 @@ async fn serve_response_times() -> String {
     lines
 }
 
+/// Serve detective mystery case file for L4 demo
+async fn serve_detective_mystery() -> String {
+    // Read the detective mystery file from the demo directory
+    match std::fs::read_to_string("demo/l4/data/detective-mystery.txt") {
+        Ok(content) => content,
+        Err(_) => {
+            // Fallback: try relative to crate root
+            match std::fs::read_to_string("../demo/l4/data/detective-mystery.txt") {
+                Ok(content) => content,
+                Err(_) => {
+                    // Generate a minimal case file if file not found
+                    r#"=== CASE FILE: THE ASHFORD MANOR MURDER ===
+
+VICTIM: Lord Edward Ashford
+TIME OF DEATH: Between 10:00 PM and 11:00 PM
+
+[WITNESS 1: James Harrison - Butler]
+Saw Colonel Pemberton near the study at 10:15 PM.
+Heard angry voices from the study around 9:45 PM.
+
+[WITNESS 2: Tom Fletcher - Gardener]
+Saw a limping figure at 10:20 PM going toward the study.
+Saw the same figure returning at 10:30-35 PM.
+
+[WITNESS 3: Eleanor Ashford - Daughter]
+Found the body at 10:30 PM.
+Overheard "I know what you did" and "I have proof" from study.
+
+[WITNESS 4: Colonel Pemberton]
+Claims to have left the study at 10:20 PM.
+Has a distinctive limp from war injury.
+
+[EVIDENCE: Muddy Footprints]
+Size 10, with distinctive left-side wear matching a limp.
+Colonel Pemberton wears size 10.
+
+[MOTIVE]
+Colonel Pemberton embezzled funds in 1998.
+Lord Ashford had evidence and threatened to expose him.
+
+THE MURDERER IS: Colonel Arthur Pemberton
+"#
+                    .to_string()
+                }
+            }
+        }
+    }
+}
+
 /// Process a query
 async fn process_query(
     State(state): State<Arc<ApiState>>,
@@ -507,6 +591,43 @@ async fn stream_query(
                 ProgressEvent::CliRunComplete { step, duration_ms } => {
                     StreamEvent::CliRunComplete { step, duration_ms }
                 }
+                ProgressEvent::LlmDelegateStart {
+                    step,
+                    task_preview,
+                    context_len,
+                    depth,
+                } => StreamEvent::LlmDelegateStart {
+                    step,
+                    task_preview,
+                    context_len,
+                    depth,
+                },
+                ProgressEvent::LlmDelegateComplete {
+                    step,
+                    duration_ms,
+                    nested_iterations,
+                    success,
+                } => StreamEvent::LlmDelegateComplete {
+                    step,
+                    duration_ms,
+                    nested_iterations,
+                    success,
+                },
+                ProgressEvent::NestedIteration {
+                    depth,
+                    step,
+                    llm_response_preview,
+                    commands_preview,
+                    output_preview,
+                    has_error,
+                } => StreamEvent::NestedIteration {
+                    depth,
+                    step,
+                    llm_response_preview,
+                    commands_preview,
+                    output_preview,
+                    has_error,
+                },
                 ProgressEvent::CommandComplete {
                     step,
                     output_preview,
@@ -617,6 +738,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             --color-wasm: #ff7f0e;     /* Orange - L2 WASM */
             --color-cli: #9467bd;      /* Purple - L3 CLI */
             --color-llm4: #e377c2;     /* Pink - L4 LLM delegation */
+            --color-nested: #c49bb8;   /* Muted pink - nested worker steps */
             --color-done: #2ca02c;     /* Green - success */
             --color-error: #d62728;    /* Red - error */
         }
@@ -932,6 +1054,8 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
         .progress-log .event-wasm { color: var(--color-wasm); }
         .progress-log .event-cli { color: var(--color-cli); }
         .progress-log .event-cmd { color: var(--color-dsl); }
+        .progress-log .event-llm4 { color: var(--color-llm4); }
+        .progress-log .event-nested { color: var(--color-nested); font-style: italic; }
         .progress-log .event-done { color: var(--color-done); }
         .progress-log .event-error { color: var(--color-error); }
 
@@ -1464,6 +1588,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
                             <option value="cli_word_frequency">CLI: Word frequency analysis</option>
                         </optgroup>
                         <optgroup label="Level 4: Recursive LLM (Multi-hop Reasoning)">
+                            <option value="l4_detective">L4: Detective Mystery (semantic analysis)</option>
                             <option value="war_peace_family">War and Peace: Family Tree (3.2MB)</option>
                         </optgroup>
                     </select>
@@ -2055,6 +2180,16 @@ Line 7: ERROR - Invalid input received</textarea>
             // ========================================
             // LEVEL 4: Recursive LLM (Multi-hop Reasoning)
             // ========================================
+            l4_detective: {
+                query: "Who murdered Lord Ashford? Cross-reference the witness statements with the physical evidence and identify the killer. Provide your conclusion with supporting evidence.",
+                context: null,
+                loadUrl: '/samples/detective-mystery',
+                tags: ['llm-delegation', 'semantic', 'recursive'],
+                benchmark: 'Multi-hop',
+                level: 'Level 4 (Recursive LLM)',
+                maxIterations: 15,
+                description: 'Multi-hop reasoning: Semantic analysis of witness statements requiring llm_delegate for cross-referencing contradictions and evidence.'
+            },
             war_peace_family: {
                 query: "Build a family tree for the main characters. Identify characters who appear multiple times and are related to each other (by blood or marriage). Show the relationships in a structured format.",
                 context: null,
@@ -2380,7 +2515,8 @@ Line 7: ERROR - Invalid input received</textarea>
                     const cmdTypes = formatCommandTypes(event.commands);
                     const isWasmCmd = event.commands.includes('rust_wasm');
                     const isCliCmd = event.commands.includes('rust_cli_intent');
-                    const cssClass = isCliCmd ? 'event-cli' : (isWasmCmd ? 'event-wasm' : 'event-cmd');
+                    const isLlm4Cmd = event.commands.includes('llm_delegate') || event.commands.includes('llm_query');
+                    const cssClass = isLlm4Cmd ? 'event-llm4' : (isCliCmd ? 'event-cli' : (isWasmCmd ? 'event-wasm' : 'event-cmd'));
                     logProgress('▶', `Executing: ${cmdTypes}`, cssClass);
                     break;
                 case 'wasm_compile_start':
@@ -2407,6 +2543,22 @@ Line 7: ERROR - Invalid input received</textarea>
                 case 'cli_run_complete':
                     logProgress('⚡', `CLI executed (${event.duration_ms}ms)`, 'event-cli');
                     break;
+                case 'llm_delegate_start':
+                    logProgress('🔀', `Delegating to nested LLM (depth ${event.depth}): "${event.task_preview.substring(0, 60)}..."`, 'event-llm4');
+                    break;
+                case 'llm_delegate_complete':
+                    logProgress('✓', `Delegation complete (${event.duration_ms}ms, ${event.nested_iterations} nested iterations, ${event.success ? 'success' : 'failed'})`, 'event-llm4');
+                    break;
+                case 'nested_iteration': {
+                    // Display nested iteration with indentation based on depth
+                    const indent = '  '.repeat(event.depth);
+                    const status = event.has_error ? '❌' : '▸';
+                    const preview = event.commands_preview.length > 0
+                        ? event.commands_preview.substring(0, 40)
+                        : event.llm_response_preview.substring(0, 40);
+                    logProgress(status, `${indent}[Worker step ${event.step}] ${preview}...`, event.has_error ? 'event-error' : 'event-nested');
+                    break;
+                }
                 case 'command_complete':
                     logProgress('◀', `Output (${event.exec_ms}ms): ${event.output_preview.substring(0, 50)}...`, 'event-cmd');
                     break;

@@ -91,7 +91,7 @@ fn default_output_limit() -> usize {
     10000
 }
 fn default_bypass_enabled() -> bool {
-    true
+    false // Off by default for demos; enable in config for production
 }
 fn default_bypass_threshold() -> usize {
     4000
@@ -258,7 +258,7 @@ fn default_cli_cache_size() -> usize {
 /// Non-deterministic. Disabled by default.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct LlmDelegationConfig {
-    /// Enable LLM delegation commands (llm_query, llm_delegate_chunks)
+    /// Enable LLM delegation commands (llm_query, llm_delegate)
     #[serde(default)]
     pub enabled: bool,
 
@@ -286,6 +286,23 @@ pub struct LlmDelegationConfig {
     #[serde(default = "default_rate_limit")]
     pub rate_limit_per_minute: usize,
 
+    /// Maximum recursion depth for nested llm_delegate calls
+    /// Default: 3 (root -> nested1 -> nested2 -> nested3, but nested3 cannot delegate further)
+    #[serde(default = "default_max_recursion_depth")]
+    pub max_recursion_depth: usize,
+
+    /// Default capability levels for nested RLM instances
+    /// Note: llm_delegate is automatically excluded from nested instances to prevent infinite recursion
+    #[serde(default = "default_nested_levels")]
+    pub nested_levels: Vec<String>,
+
+    /// Coordinator mode: Base LLM only uses llm_delegate/llm_query, sub-LLMs do actual data work
+    /// When enabled, the base LLM acts as a pure task decomposer/coordinator, while nested
+    /// RLM instances use the nested_levels (dsl, cli, etc.) to process data.
+    /// Default: false (base LLM has access to all configured levels)
+    #[serde(default)]
+    pub coordinator_mode: bool,
+
     /// Dedicated provider for delegation (optional, falls back to root provider)
     pub provider: Option<DelegationProviderConfig>,
 }
@@ -300,6 +317,9 @@ impl Default for LlmDelegationConfig {
             privacy_mode: "local".to_string(),
             max_concurrent: 5,
             rate_limit_per_minute: 60,
+            max_recursion_depth: 3,
+            nested_levels: vec!["dsl".to_string(), "wasm".to_string()],
+            coordinator_mode: false,
             provider: None,
         }
     }
@@ -339,6 +359,12 @@ fn default_max_concurrent() -> usize {
 }
 fn default_rate_limit() -> usize {
     60
+}
+fn default_max_recursion_depth() -> usize {
+    3
+}
+fn default_nested_levels() -> Vec<String> {
+    vec!["dsl".to_string(), "wasm".to_string()]
 }
 
 /// Configuration for a single LLM provider
