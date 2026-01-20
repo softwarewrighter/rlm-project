@@ -8,7 +8,7 @@
 //!   rlm large-log.txt "How many ERROR lines?" --model llama3.2:3b
 
 use anyhow::{Context, Result};
-use colored::{control, Colorize};
+use colored::{Colorize, control};
 use rlm::orchestrator::RlmOrchestrator;
 use rlm::pool::{LlmPool, LoadBalanceStrategy, ProviderRole};
 use rlm::provider::{LiteLLMProvider, OllamaProvider};
@@ -481,6 +481,51 @@ fn create_progress_callback(verbose: u8) -> ProgressCallback {
                         .yellow()
                         .dimmed()
                     );
+                }
+                let _ = stderr.flush();
+            }
+            ProgressEvent::PhasedStart {
+                context_chars,
+                phase_count,
+            } => {
+                eprintln!(
+                    "{}",
+                    format!(
+                        "📋 Phased processing: {} chars, {} phases",
+                        context_chars, phase_count
+                    )
+                    .magenta()
+                    .bold()
+                );
+                let _ = stderr.flush();
+            }
+            ProgressEvent::PhaseStart {
+                phase,
+                name,
+                description,
+            } => {
+                eprintln!(
+                    "{}",
+                    format!("┌─ Phase {}: {} - {}", phase, name, description).cyan()
+                );
+                let _ = stderr.flush();
+            }
+            ProgressEvent::PhaseComplete {
+                phase,
+                name,
+                duration_ms,
+                result_preview,
+            } => {
+                if verbose >= 1 {
+                    eprintln!(
+                        "{}",
+                        format!("└─ Phase {} ({}) complete: {}ms", phase, name, duration_ms)
+                            .green()
+                    );
+                    if verbose >= 2 && !result_preview.is_empty() {
+                        let preview = truncate_to_char_boundary(&result_preview, 200);
+                        eprintln!("   Preview: {}", preview.dimmed());
+                    }
                 }
                 let _ = stderr.flush();
             }
@@ -989,6 +1034,9 @@ async fn main() -> Result<()> {
         output_limit: 10000,
         bypass_enabled: false, // Always use RLM for demo
         bypass_threshold: 0,
+        phased_threshold: 500000, // 500KB threshold for phased processing
+        target_analysis_size: 100000, // 100KB target after reduction
+        max_reduction_passes: 3,  // Max iterative reduction passes
         level_priority: args.level_priority.clone(),
         providers: vec![ProviderConfig {
             provider_type,

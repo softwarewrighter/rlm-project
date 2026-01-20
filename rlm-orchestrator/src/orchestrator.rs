@@ -13,6 +13,18 @@ use std::time::Instant;
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
+/// Safe UTF-8 string truncation
+fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if max_bytes >= s.len() {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Progress events emitted during RLM processing for real-time feedback
 #[derive(Debug, Clone)]
 pub enum ProgressEvent {
@@ -114,6 +126,24 @@ pub enum ProgressEvent {
         iterations: usize,
         success: bool,
         total_duration_ms: u64,
+    },
+    /// Phased processing starting (for large contexts)
+    PhasedStart {
+        context_chars: usize,
+        phase_count: usize,
+    },
+    /// Starting a specific phase
+    PhaseStart {
+        phase: usize,
+        name: String,
+        description: String,
+    },
+    /// Phase completed
+    PhaseComplete {
+        phase: usize,
+        name: String,
+        duration_ms: u64,
+        result_preview: String,
     },
 }
 
@@ -724,6 +754,18 @@ If no matches found:
             return self.process_direct(query, context).await;
         }
 
+        // Check if we should use phased processing for very large contexts
+        // Phased processing guides the LLM through: assess -> index -> select -> retrieve -> analyze
+        // Skip if force_rlm is set (to prevent infinite recursion from Phase 5)
+        if !force_rlm && context.len() > self.config.phased_threshold && self.config.cli.enabled {
+            info!(
+                context_len = context.len(),
+                threshold = self.config.phased_threshold,
+                "Using phased processing for large context"
+            );
+            return self.process_phased(query, context, progress.clone()).await;
+        }
+
         let mut history = Vec::new();
         let total_sub_calls = Arc::new(AtomicUsize::new(0));
         let mut total_prompt_tokens: u32 = 0;
@@ -1177,6 +1219,613 @@ If no matches found:
         })
     }
 
+    /// Process a large context using phased approach:
+    /// 1. Assessment: Sample the data to understand format and encoding
+    /// 2. Strategy: Develop a reduction strategy based on the query
+    /// 3. Reduction: Use CLI/DSL to filter relevant data
+    /// 4. Analysis: Process reduced data with LLM delegation
+    async fn process_phased(
+        &self,
+        query: &str,
+        context: &str,
+        progress: Option<ProgressCallback>,
+    ) -> Result<RlmResult, OrchestratorError> {
+        let query_start = Instant::now();
+        let context_chars = context.len();
+        let mut total_prompt_tokens: u32 = 0;
+        let mut total_completion_tokens: u32 = 0;
+        let total_sub_calls = Arc::new(AtomicUsize::new(0));
+
+        // Helper to emit progress events
+        let emit = |event: ProgressEvent| {
+            if let Some(ref cb) = progress {
+                cb(event);
+            }
+        };
+
+        emit(ProgressEvent::PhasedStart {
+            context_chars,
+            phase_count: 5,
+        });
+
+        info!(
+            context_chars = context_chars,
+            query_len = query.len(),
+            "Starting phased processing for large context"
+        );
+
+        // ========================================================================
+        // PHASE 1: ASSESSMENT - Sample the data to understand its format
+        // ========================================================================
+        emit(ProgressEvent::PhaseStart {
+            phase: 1,
+            name: "Assessment".to_string(),
+            description: "Sampling data to understand format and patterns".to_string(),
+        });
+        let phase1_start = Instant::now();
+
+        // Sample first 100 lines and middle 50 lines
+        let lines: Vec<&str> = context.lines().collect();
+        let total_lines = lines.len();
+        let first_sample: String = lines
+            .iter()
+            .take(100)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mid_start = total_lines / 2;
+        let mid_sample: String = lines
+            .iter()
+            .skip(mid_start)
+            .take(50)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let assessment_prompt = format!(
+            r#"You are analyzing a large document ({} chars, {} lines) to understand its format before processing.
+
+SAMPLES FROM THE DOCUMENT:
+
+=== FIRST 100 LINES ===
+{}
+
+=== MIDDLE 50 LINES (starting at line {}) ===
+{}
+
+QUESTIONS TO ANSWER:
+1. What type of document is this? (novel, logs, data file, etc.)
+2. What character encoding patterns do you notice? (accented characters, special symbols, etc.)
+3. What are the key structural patterns? (chapters, sections, timestamps, etc.)
+4. If looking for names/entities, what patterns would identify them? (capitalization, titles like "Prince", "Count", etc.)
+
+Provide a brief assessment (2-3 sentences per question). This will inform how to filter the data."#,
+            context_chars, total_lines, first_sample, mid_start, mid_sample
+        );
+
+        let assessment_request = LlmRequest::new(
+            "You are a document analyst. Analyze the provided samples and answer the questions concisely.",
+            &assessment_prompt,
+        )
+        .with_max_tokens(1024);
+
+        eprintln!("   ⏳ Calling LLM for assessment...");
+        let assessment_response = self.pool.complete(&assessment_request, false).await?;
+        eprintln!("   ✓ Assessment LLM call complete");
+        if let Some(usage) = &assessment_response.usage {
+            total_prompt_tokens += usage.prompt_tokens;
+            total_completion_tokens += usage.completion_tokens;
+        }
+        total_sub_calls.fetch_add(1, Ordering::Relaxed);
+
+        let assessment = assessment_response.content.clone();
+        let phase1_duration = phase1_start.elapsed().as_millis() as u64;
+
+        emit(ProgressEvent::PhaseComplete {
+            phase: 1,
+            name: "Assessment".to_string(),
+            duration_ms: phase1_duration,
+            result_preview: if assessment.len() > 200 {
+                format!("{}...", truncate_to_char_boundary(&assessment, 200))
+            } else {
+                assessment.clone()
+            },
+        });
+
+        info!(
+            duration_ms = phase1_duration,
+            "Phase 1 (Assessment) complete"
+        );
+
+        // ========================================================================
+        // PHASE 2: INDEXING - Build term index using index_terms DSL command
+        // ========================================================================
+        emit(ProgressEvent::PhaseStart {
+            phase: 2,
+            name: "Indexing".to_string(),
+            description: "Building term index (proper nouns, titles)".to_string(),
+        });
+        let phase2_start = Instant::now();
+
+        eprintln!("   ⏳ Building proper noun index...");
+
+        // Run index_terms command to extract proper nouns
+        let index_cmd = crate::commands::Command::IndexTerms {
+            pattern: "proper_nouns".to_string(),
+            min_count: 3,         // At least 3 occurrences
+            max_terms: 300,       // Top 300 terms
+            include_lines: false, // Compact format
+            on: None,
+            store: Some("term_index".to_string()),
+        };
+
+        let mut executor = CommandExecutor::new(context.to_string(), self.config.max_sub_calls);
+        let index_result = executor.execute_one(&index_cmd);
+
+        let term_index = match index_result {
+            Ok(_) => executor
+                .get_variable("term_index")
+                .cloned()
+                .unwrap_or_else(|| "No terms found".to_string()),
+            Err(e) => {
+                warn!("Index building failed: {}", e);
+                "Index building failed".to_string()
+            }
+        };
+
+        // Also get titles index
+        let titles_cmd = crate::commands::Command::IndexTerms {
+            pattern: "titles".to_string(),
+            min_count: 1,
+            max_terms: 100,
+            include_lines: false,
+            on: None,
+            store: Some("titles_index".to_string()),
+        };
+        let mut executor2 = CommandExecutor::new(context.to_string(), self.config.max_sub_calls);
+        let _ = executor2.execute_one(&titles_cmd);
+        let titles_index = executor2
+            .get_variable("titles_index")
+            .cloned()
+            .unwrap_or_default();
+
+        let phase2_duration = phase2_start.elapsed().as_millis() as u64;
+
+        let index_preview = if term_index.len() > 500 {
+            format!("{}...", &term_index[..500])
+        } else {
+            term_index.clone()
+        };
+
+        eprintln!("   ✓ Index built: {} chars", term_index.len());
+
+        emit(ProgressEvent::PhaseComplete {
+            phase: 2,
+            name: "Indexing".to_string(),
+            duration_ms: phase2_duration,
+            result_preview: index_preview.clone(),
+        });
+
+        info!(
+            duration_ms = phase2_duration,
+            index_size = term_index.len(),
+            "Phase 2 (Indexing) complete"
+        );
+
+        // ========================================================================
+        // PHASE 3: SELECTION - LLM selects relevant terms from index
+        // ========================================================================
+        emit(ProgressEvent::PhaseStart {
+            phase: 3,
+            name: "Selection".to_string(),
+            description: "LLM selecting relevant terms from index".to_string(),
+        });
+        let phase3_start = Instant::now();
+
+        let selection_prompt = format!(
+            r#"You have a term index from a large document ({} chars).
+
+DOCUMENT ASSESSMENT:
+{}
+
+USER'S QUERY:
+"{}"
+
+TERM INDEX (proper nouns sorted by frequency):
+{}
+
+TITLED CHARACTERS:
+{}
+
+YOUR TASK:
+Select the terms that are MOST RELEVANT to answering the query.
+
+OUTPUT FORMAT - List ONLY the relevant terms, one per line:
+SELECTED_TERMS:
+term1
+term2
+term3
+...
+
+GUIDELINES:
+- For family tree queries: select character names that appear frequently (>10 occurrences)
+- Include variations of names (e.g., both "Rostóv" and "Natásha")
+- Include relationship terms if present (father, mother, wife, son, daughter)
+- Aim for 20-50 key terms that will capture relevant passages
+- Be selective - we'll extract only lines containing these terms"#,
+            context_chars,
+            assessment,
+            query,
+            if term_index.len() > 8000 {
+                &term_index[..8000]
+            } else {
+                &term_index
+            },
+            if titles_index.len() > 2000 {
+                &titles_index[..2000]
+            } else {
+                &titles_index
+            }
+        );
+
+        let selection_request = LlmRequest::new(
+            "You are selecting relevant terms from an index. Output only the SELECTED_TERMS list.",
+            &selection_prompt,
+        )
+        .with_max_tokens(1024);
+
+        eprintln!("   ⏳ LLM selecting relevant terms...");
+        let selection_response = self.pool.complete(&selection_request, false).await?;
+        eprintln!("   ✓ Term selection complete");
+
+        if let Some(usage) = &selection_response.usage {
+            total_prompt_tokens += usage.prompt_tokens;
+            total_completion_tokens += usage.completion_tokens;
+        }
+        total_sub_calls.fetch_add(1, Ordering::Relaxed);
+
+        // Parse selected terms from response
+        let selection_content = &selection_response.content;
+        let selected_terms: Vec<String> = selection_content
+            .lines()
+            .skip_while(|line| !line.contains("SELECTED_TERMS"))
+            .skip(1) // Skip the SELECTED_TERMS: line itself
+            .filter(|line| {
+                !line.trim().is_empty() && !line.starts_with('#') && !line.starts_with('-')
+            })
+            .map(|line| line.trim().to_string())
+            .filter(|term| term.len() >= 3) // Skip very short terms
+            .take(100) // Max 100 terms
+            .collect();
+
+        let phase3_duration = phase3_start.elapsed().as_millis() as u64;
+
+        eprintln!("   ✓ Selected {} terms for filtering", selected_terms.len());
+
+        emit(ProgressEvent::PhaseComplete {
+            phase: 3,
+            name: "Selection".to_string(),
+            duration_ms: phase3_duration,
+            result_preview: format!(
+                "{} terms: {}",
+                selected_terms.len(),
+                selected_terms
+                    .iter()
+                    .take(10)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        });
+
+        info!(
+            duration_ms = phase3_duration,
+            term_count = selected_terms.len(),
+            "Phase 3 (Selection) complete"
+        );
+
+        // ========================================================================
+        // PHASE 4: RETRIEVAL - Extract lines containing selected terms
+        // ========================================================================
+        emit(ProgressEvent::PhaseStart {
+            phase: 4,
+            name: "Retrieval".to_string(),
+            description: format!(
+                "Extracting lines with {} selected terms",
+                selected_terms.len()
+            ),
+        });
+        let phase4_start = Instant::now();
+
+        eprintln!("   ⏳ Extracting lines containing selected terms...");
+
+        // Build regex pattern from selected terms
+        let filtered_data = if selected_terms.is_empty() {
+            eprintln!("   ⚠ No terms selected, using fallback filter");
+            self.fallback_filter(context, query)
+        } else {
+            // Escape regex special chars and join with |
+            let pattern_terms: Vec<String> =
+                selected_terms.iter().map(|t| regex::escape(t)).collect();
+            let combined_pattern = pattern_terms.join("|");
+
+            match regex::Regex::new(&combined_pattern) {
+                Ok(re) => {
+                    let matching_lines: Vec<&str> =
+                        context.lines().filter(|line| re.is_match(line)).collect();
+
+                    eprintln!("   ✓ Found {} matching lines", matching_lines.len());
+                    matching_lines.join("\n")
+                }
+                Err(e) => {
+                    eprintln!("   ⚠ Regex error: {}, using fallback", e);
+                    self.fallback_filter(context, query)
+                }
+            }
+        };
+
+        let phase4_duration = phase4_start.elapsed().as_millis() as u64;
+        let reduction_ratio = if context_chars > 0 {
+            ((context_chars - filtered_data.len()) as f64 / context_chars as f64 * 100.0) as u32
+        } else {
+            0
+        };
+
+        eprintln!(
+            "   ✓ Reduced {} -> {} chars ({}% reduction)",
+            context_chars,
+            filtered_data.len(),
+            reduction_ratio
+        );
+
+        emit(ProgressEvent::PhaseComplete {
+            phase: 4,
+            name: "Retrieval".to_string(),
+            duration_ms: phase4_duration,
+            result_preview: format!(
+                "{} -> {} chars ({}% reduction)",
+                context_chars,
+                filtered_data.len(),
+                reduction_ratio
+            ),
+        });
+
+        info!(
+            original_chars = context_chars,
+            filtered_chars = filtered_data.len(),
+            reduction_percent = reduction_ratio,
+            duration_ms = phase4_duration,
+            "Phase 4 (Retrieval) complete"
+        );
+
+        // Secondary reduction using paragraph-based chunking
+        // This preserves semantic context better than line-by-line scoring
+        let target_size = self.config.target_analysis_size;
+        let filtered_data = if filtered_data.len() > target_size * 2 {
+            eprintln!(
+                "   📉 Paragraph-based reduction: {} -> target ~{}K",
+                filtered_data.len(),
+                target_size / 1000
+            );
+
+            // Group lines into logical chunks
+            // Since retrieval gives us single lines, group consecutive lines
+            // that share character names into "pseudo-paragraphs"
+            let lines: Vec<&str> = filtered_data.lines().collect();
+            eprintln!("   Processing {} lines into chunks", lines.len());
+
+            // Just use individual lines as units for scoring
+            // This is more appropriate for line-by-line retrieved data
+            let paragraphs: Vec<&str> = lines.to_vec();
+
+            // Relationship terms that indicate explicit connections
+            let strong_terms = [
+                "father of",
+                "mother of",
+                "son of",
+                "daughter of",
+                "brother of",
+                "sister of",
+                "wife of",
+                "husband of",
+                "married to",
+                "married",
+                "child of",
+                "parent of",
+                "his father",
+                "her father",
+                "his mother",
+                "her mother",
+                "his son",
+                "her son",
+                "his daughter",
+                "her daughter",
+                "his wife",
+                "her husband",
+                "his brother",
+                "her sister",
+            ];
+            let weak_terms = [
+                "father", "mother", "son", "daughter", "brother", "sister", "wife", "husband",
+                "family", "child", "parent", "Prince", "Princess", "Count", "Countess",
+            ];
+
+            // Score each line by relationship term density
+            let mut scored_lines: Vec<(usize, &str)> = paragraphs
+                .iter()
+                .map(|para| {
+                    let lower = para.to_lowercase();
+                    // Strong terms worth 3 points, weak terms worth 1 point
+                    let strong_score: usize = strong_terms
+                        .iter()
+                        .filter(|term| lower.contains(*term))
+                        .count()
+                        * 3;
+                    let weak_score: usize = weak_terms
+                        .iter()
+                        .filter(|term| lower.contains(*term))
+                        .count();
+                    (strong_score + weak_score, *para)
+                })
+                .filter(|(score, _)| *score > 0)
+                .collect();
+
+            // Sort by score (descending)
+            scored_lines.sort_by(|a, b| b.0.cmp(&a.0));
+
+            // Take top lines until we hit target
+            let mut result = String::new();
+            let mut line_count = 0;
+            for (score, line) in scored_lines {
+                if result.len() + line.len() > target_size && !result.is_empty() {
+                    break;
+                }
+                if score > 1 {
+                    // Only lines with meaningful relationship content
+                    result.push_str(line.trim());
+                    result.push('\n');
+                    line_count += 1;
+                }
+            }
+
+            eprintln!(
+                "   ✓ Kept {} high-value lines: {} -> {} chars",
+                line_count,
+                filtered_data.len(),
+                result.len()
+            );
+            result
+        } else {
+            filtered_data
+        };
+
+        // ========================================================================
+        // PHASE 5: ANALYSIS - Process reduced data with normal RLM
+        // ========================================================================
+        emit(ProgressEvent::PhaseStart {
+            phase: 5,
+            name: "Analysis".to_string(),
+            description: format!("Processing {} chars with RLM", filtered_data.len()),
+        });
+        let phase5_start = Instant::now();
+
+        // Now run normal RLM on the filtered data
+        // Use process_with_options with force_rlm=true to skip phased check
+        eprintln!(
+            "   ⏳ Starting RLM analysis on {} chars...",
+            filtered_data.len()
+        );
+        let analysis_result = Box::pin(self.process_with_options(
+            query,
+            &filtered_data,
+            progress.clone(),
+            true, // force_rlm - don't re-trigger phased processing
+        ))
+        .await?;
+        eprintln!(
+            "   ✓ RLM analysis complete ({} iterations)",
+            analysis_result.iterations
+        );
+
+        let phase5_duration = phase5_start.elapsed().as_millis() as u64;
+
+        emit(ProgressEvent::PhaseComplete {
+            phase: 5,
+            name: "Analysis".to_string(),
+            duration_ms: phase5_duration,
+            result_preview: if analysis_result.answer.len() > 200 {
+                format!(
+                    "{}...",
+                    truncate_to_char_boundary(&analysis_result.answer, 200)
+                )
+            } else {
+                analysis_result.answer.clone()
+            },
+        });
+
+        // Combine results
+        let total_duration = query_start.elapsed().as_millis() as u64;
+
+        emit(ProgressEvent::Complete {
+            iterations: analysis_result.iterations,
+            success: analysis_result.success,
+            total_duration_ms: total_duration,
+        });
+
+        Ok(RlmResult {
+            answer: analysis_result.answer,
+            iterations: analysis_result.iterations,
+            history: analysis_result.history,
+            total_sub_calls: total_sub_calls.load(Ordering::Relaxed)
+                + analysis_result.total_sub_calls,
+            success: analysis_result.success,
+            error: analysis_result.error,
+            total_prompt_tokens: total_prompt_tokens + analysis_result.total_prompt_tokens,
+            total_completion_tokens: total_completion_tokens
+                + analysis_result.total_completion_tokens,
+            context_chars, // Original context size
+            bypassed: false,
+        })
+    }
+
+    /// Fallback filter for when CLI extraction fails
+    /// Extracts lines containing common relationship/entity patterns
+    fn fallback_filter(&self, context: &str, query: &str) -> String {
+        let query_lower = query.to_lowercase();
+        let lines: Vec<&str> = context.lines().collect();
+
+        // Common patterns to look for based on query keywords
+        let patterns: Vec<&str> = if query_lower.contains("family")
+            || query_lower.contains("tree")
+            || query_lower.contains("relationship")
+        {
+            vec![
+                "father", "mother", "son", "daughter", "brother", "sister", "wife", "husband",
+                "married", "family", "child", "parent", "Prince", "Princess", "Count", "Countess",
+                "Duke", "Duchess",
+            ]
+        } else if query_lower.contains("character") || query_lower.contains("name") {
+            vec![
+                "Prince", "Princess", "Count", "Countess", "Duke", "Duchess", "General", "Colonel",
+                "Captain", "Monsieur", "Madame",
+            ]
+        } else {
+            // Generic: keep lines with capitalized words (potential names/entities)
+            vec![]
+        };
+
+        let filtered: Vec<&str> = if patterns.is_empty() {
+            // Keep lines with multiple capitalized words
+            lines
+                .iter()
+                .filter(|line| {
+                    let caps: usize = line
+                        .split_whitespace()
+                        .filter(|w| {
+                            w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                                && w.len() > 2
+                        })
+                        .count();
+                    caps >= 2
+                })
+                .take(5000) // Limit to 5000 lines
+                .cloned()
+                .collect()
+        } else {
+            lines
+                .iter()
+                .filter(|line| {
+                    let lower = line.to_lowercase();
+                    patterns.iter().any(|p| lower.contains(&p.to_lowercase()))
+                })
+                .take(5000)
+                .cloned()
+                .collect()
+        };
+
+        filtered.join("\n")
+    }
+
     fn build_system_prompt(&self, context_len: usize) -> String {
         // Check if we're in coordinator mode (base LLM only delegates)
         let coordinator_mode =
@@ -1272,12 +1921,45 @@ USE CLI FOR:
 - Operations needing HashMap/HashSet
 - Sorting, percentiles, statistics
 - When WASM fails or produces errors
+- **CRITICAL: Data reduction for very large contexts** (see below)
 
 WASM LIMITATIONS (why CLI is better for complex tasks):
 - No HashMap/HashSet (use custom byte-level helpers)
 - 64MB memory limit
 - Fuel-based instruction limits
 - String methods can panic (TwoWaySearcher issue)
+
+## SMALL CONTEXTS (<50,000 chars): USE DSL + LLM COMMANDS
+
+For small contexts, prefer SIMPLE commands:
+1. Use regex/find to extract patterns
+2. Use llm_reduce for semantic extraction (splits into manageable chunks)
+3. Use llm_query for synthesis/reasoning
+4. AVOID rust_cli_intent - it's slow and can fail to compile
+
+Example for small context family tree extraction:
+{"op": "llm_reduce", "directive": "Extract all family relationships: who is related to whom (father, mother, son, daughter, spouse, sibling)", "store": "relationships"}
+{"op": "llm_query", "prompt": "Build family trees from these relationships: ${relationships}", "store": "trees"}
+{"op": "final_var", "name": "trees"}
+
+## VERY LARGE CONTEXTS (>500,000 chars): USE CLI TO REDUCE FIRST
+
+If the context is larger than ~500KB, you MUST use rust_cli_intent to FILTER/EXTRACT
+relevant data BEFORE using llm_reduce. Otherwise llm_reduce will create too many chunks
+and fail.
+
+STRATEGY FOR MASSIVE FILES (millions of characters):
+1. Identify what data is relevant to the query
+2. Use rust_cli_intent to extract ONLY relevant lines/sentences
+   Example: {"op": "rust_cli_intent", "intent": "Extract lines containing family relationship words (father, mother, son, daughter, brother, sister, married, wife, husband) near capitalized names", "store": "filtered"}
+3. THEN use llm_reduce on the filtered data (now much smaller)
+4. Use llm_query to synthesize final answer
+
+Example for family tree from a novel:
+{"op": "rust_cli_intent", "intent": "Extract sentences containing relationship words (father, mother, son, daughter, married, wife, husband, brother, sister) along with any capitalized proper names nearby. Also count name frequencies.", "store": "relationships"}
+{"op": "llm_reduce", "directive": "From these relationship sentences, extract family connections: who is related to whom and how", "on": "relationships", "store": "family_data"}
+{"op": "llm_query", "prompt": "Build family trees from: ${family_data}", "store": "trees"}
+{"op": "final_var", "name": "trees"}
 "#,
             );
         }

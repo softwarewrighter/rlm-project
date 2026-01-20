@@ -56,6 +56,24 @@ pub struct RlmConfig {
     #[serde(default = "default_bypass_threshold")]
     pub bypass_threshold: usize,
 
+    /// Context size threshold for phased processing (chars). Contexts larger than this
+    /// trigger a multi-phase approach: assess, strategize, reduce, then analyze.
+    /// Default: 500000 chars (~500KB)
+    #[serde(default = "default_phased_threshold")]
+    pub phased_threshold: usize,
+
+    /// Target size for data after reduction (chars). Iterative reduction continues
+    /// until data is below this threshold or max_reduction_passes is reached.
+    /// Default: 100000 chars (~100KB, ~25K tokens)
+    #[serde(default = "default_target_analysis_size")]
+    pub target_analysis_size: usize,
+
+    /// Maximum reduction passes in phased processing. Each pass attempts to
+    /// further reduce the data toward target_analysis_size.
+    /// Default: 3
+    #[serde(default = "default_max_reduction_passes")]
+    pub max_reduction_passes: usize,
+
     /// Level priority order for command selection
     /// Default: ["dsl", "wasm"] (safe levels only)
     #[serde(default = "default_level_priority")]
@@ -95,6 +113,15 @@ fn default_bypass_enabled() -> bool {
 }
 fn default_bypass_threshold() -> usize {
     4000
+}
+fn default_phased_threshold() -> usize {
+    500000 // 500KB - contexts larger than this use phased processing
+}
+fn default_target_analysis_size() -> usize {
+    100000 // 100KB - target size after reduction passes
+}
+fn default_max_reduction_passes() -> usize {
+    3 // Maximum number of reduction iterations
 }
 fn default_level_priority() -> Vec<String> {
     vec!["dsl".to_string(), "wasm".to_string()]

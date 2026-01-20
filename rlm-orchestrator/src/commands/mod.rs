@@ -183,7 +183,9 @@ pub enum CommandError {
     #[error("LLM delegate callback not configured")]
     LlmDelegateNotConfigured,
 
-    #[error("LLM reduce would require {chunks} chunks but max_iterations is {max_iterations}. Context too large ({context_size} chars) for this chunk size ({chunk_size}). Use L3 CLI to filter relevant content first, or increase max_iterations.")]
+    #[error(
+        "LLM reduce would require {chunks} chunks but max_iterations is {max_iterations}. Context too large ({context_size} chars) for this chunk size ({chunk_size}). Use L3 CLI to filter relevant content first, or increase max_iterations."
+    )]
     LlmReduceChunkLimitExceeded {
         chunks: usize,
         max_iterations: usize,
@@ -255,6 +257,31 @@ pub enum Command {
 
     /// Get length: {"op": "len"}
     Len {
+        #[serde(default)]
+        on: Option<String>,
+        #[serde(default)]
+        store: Option<String>,
+    },
+
+    /// Build term index: {"op": "index_terms", "pattern": "proper_nouns"}
+    /// Extracts terms matching a pattern and returns counts + line numbers
+    /// Patterns: "proper_nouns" (capitalized words), "titles" (Prince/Count/etc),
+    ///           "all_caps" (ACRONYMS), or a custom regex
+    /// Returns format: "term (count): line1, line2, ..." sorted by frequency
+    IndexTerms {
+        /// Pattern type or custom regex
+        /// Built-in: "proper_nouns", "titles", "all_caps"
+        #[serde(default = "default_index_pattern")]
+        pattern: String,
+        /// Minimum occurrences to include (default: 2)
+        #[serde(default = "default_min_count")]
+        min_count: usize,
+        /// Maximum terms to return (default: 500)
+        #[serde(default = "default_max_terms")]
+        max_terms: usize,
+        /// Include line numbers in output (default: false for compact output)
+        #[serde(default)]
+        include_lines: bool,
         #[serde(default)]
         on: Option<String>,
         #[serde(default)]
@@ -549,6 +576,18 @@ fn default_overlap() -> Option<usize> {
     Some(500) // 500 char overlap between chunks for context continuity
 }
 
+fn default_index_pattern() -> String {
+    "proper_nouns".to_string()
+}
+
+fn default_min_count() -> usize {
+    2 // Terms must appear at least twice
+}
+
+fn default_max_terms() -> usize {
+    500 // Return top 500 terms by frequency
+}
+
 impl Command {
     /// Get the capability level required for this command
     ///
@@ -563,6 +602,7 @@ impl Command {
             | Command::Count { .. }
             | Command::Split { .. }
             | Command::Len { .. }
+            | Command::IndexTerms { .. }
             | Command::Set { .. }
             | Command::Get { .. }
             | Command::Print { .. }
@@ -582,9 +622,9 @@ impl Command {
             Command::RustCliIntent { .. } => "cli",
 
             // Level 4: LLM Delegation - Chunk-based LLM analysis
-            Command::LlmQuery { .. }
-            | Command::LlmDelegate { .. }
-            | Command::LlmReduce { .. } => "llm_delegation",
+            Command::LlmQuery { .. } | Command::LlmDelegate { .. } | Command::LlmReduce { .. } => {
+                "llm_delegation"
+            }
         }
     }
 
@@ -598,6 +638,7 @@ impl Command {
             Command::Count { .. } => "count",
             Command::Split { .. } => "split",
             Command::Len { .. } => "len",
+            Command::IndexTerms { .. } => "index_terms",
             Command::Set { .. } => "set",
             Command::Get { .. } => "get",
             Command::Print { .. } => "print",
@@ -1059,10 +1100,12 @@ impl CommandExecutor {
                         continue;
                     }
                     // Only try single-line JSON (starts AND ends with braces)
-                    if line.starts_with('{') && line.ends_with('}')
-                        && let Ok(cmd) = serde_json::from_str(line) {
-                            cmds.push(cmd);
-                        }
+                    if line.starts_with('{')
+                        && line.ends_with('}')
+                        && let Ok(cmd) = serde_json::from_str(line)
+                    {
+                        cmds.push(cmd);
+                    }
                 }
                 if cmds.is_empty() {
                     // Nothing worked, return the error from trying to parse the whole thing
@@ -1110,7 +1153,7 @@ impl CommandExecutor {
     }
 
     /// Execute a single command
-    fn execute_one(&mut self, cmd: &Command) -> Result<ExecutionResult, CommandError> {
+    pub fn execute_one(&mut self, cmd: &Command) -> Result<ExecutionResult, CommandError> {
         match cmd {
             Command::Slice { start, end, store } => {
                 let len = self.context.len();
@@ -1126,10 +1169,37 @@ impl CommandExecutor {
                     (start_idx, end_idx)
                 };
 
-                let result = self.context[start_idx..end_idx].to_string();
-                self.store_result(store, result);
+                // Safe UTF-8 slicing
+                let result = {
+                    let mut safe_start = start_idx.min(self.context.len());
+                    let mut safe_end = end_idx.min(self.context.len());
+                    // Find valid char boundaries
+                    while safe_start > 0 && !self.context.is_char_boundary(safe_start) {
+                        safe_start -= 1;
+                    }
+                    while safe_end < self.context.len() && !self.context.is_char_boundary(safe_end)
+                    {
+                        safe_end += 1;
+                    }
+                    self.context[safe_start..safe_end].to_string()
+                };
+
+                // Store if requested
+                self.store_result(store, result.clone());
+
+                // Return result as output (truncated for display if very large)
+                let output = if result.len() > 5000 {
+                    format!(
+                        "[Slice result: {} chars]\n{}...\n[truncated]",
+                        result.len(),
+                        truncate_to_char_boundary(&result, 4500)
+                    )
+                } else {
+                    result
+                };
+
                 Ok(ExecutionResult::Continue {
-                    output: String::new(),
+                    output,
                     sub_calls: 0,
                 })
             }
@@ -1152,9 +1222,24 @@ impl CommandExecutor {
                 };
 
                 let result = lines[start_idx..end_idx].join("\n");
-                self.store_result(store, result);
+                self.store_result(store, result.clone());
+
+                // Return result as output (truncated for display if very large)
+                let output = if result.len() > 5000 {
+                    format!(
+                        "[Lines {}-{} of {}: {} chars]\n{}...\n[truncated]",
+                        start_idx,
+                        end_idx,
+                        len,
+                        result.len(),
+                        truncate_to_char_boundary(&result, 4500)
+                    )
+                } else {
+                    format!("[Lines {}-{} of {}]\n{}", start_idx, end_idx, len, result)
+                };
+
                 Ok(ExecutionResult::Continue {
-                    output: String::new(),
+                    output,
                     sub_calls: 0,
                 })
             }
@@ -1305,6 +1390,111 @@ impl CommandExecutor {
                 self.store_result(store, len.to_string());
                 Ok(ExecutionResult::Continue {
                     output: format!("{}", len),
+                    sub_calls: 0,
+                })
+            }
+
+            Command::IndexTerms {
+                pattern,
+                min_count,
+                max_terms,
+                include_lines,
+                on,
+                store,
+            } => {
+                let source = self.resolve_source(on)?.to_string();
+
+                // Build regex based on pattern type
+                let regex_pattern = match pattern.as_str() {
+                    "proper_nouns" => {
+                        // Match capitalized words (including Unicode letters)
+                        // Handles accented characters like Rostóv, Bolkónski
+                        r"[A-ZÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÄËÏÖÜÑÇØÅ][a-záéíóúàèìòùâêîôûäëïöüñçøåA-Z]{2,}"
+                    }
+                    "titles" => {
+                        // Match noble/military titles with following names
+                        r"(?:Prince|Princess|Count|Countess|Duke|Duchess|Baron|Baroness|General|Colonel|Captain|Major)\s+[A-ZÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÄËÏÖÜÑÇØÅ][a-záéíóúàèìòùâêîôûäëïöüñçøå]+"
+                    }
+                    "all_caps" => {
+                        // Match ALL CAPS words (acronyms, etc)
+                        r"\b[A-Z]{2,}\b"
+                    }
+                    custom => custom, // Use as-is if not a built-in pattern
+                };
+
+                let re = match regex::Regex::new(regex_pattern) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return Ok(ExecutionResult::Continue {
+                            output: format!("ERROR: Invalid regex pattern: {}", e),
+                            sub_calls: 0,
+                        });
+                    }
+                };
+
+                // Build term index: term -> (count, line_numbers)
+                use std::collections::HashMap;
+                let mut index: HashMap<String, (usize, Vec<usize>)> = HashMap::new();
+
+                for (line_num, line) in source.lines().enumerate() {
+                    for cap in re.find_iter(line) {
+                        let term = cap.as_str().to_string();
+                        let entry = index.entry(term).or_insert((0, Vec::new()));
+                        entry.0 += 1;
+                        if *include_lines && entry.1.len() < 10 {
+                            // Cap line numbers at 10 per term
+                            entry.1.push(line_num + 1);
+                        }
+                    }
+                }
+
+                // Filter by min_count and sort by frequency (descending)
+                let mut terms: Vec<_> = index
+                    .into_iter()
+                    .filter(|(_, (count, _))| *count >= *min_count)
+                    .collect();
+                terms.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+                terms.truncate(*max_terms);
+
+                // Format output
+                let total_terms = terms.len();
+                let result = if *include_lines {
+                    terms
+                        .iter()
+                        .map(|(term, (count, lines))| {
+                            let line_str = lines
+                                .iter()
+                                .map(|n| n.to_string())
+                                .collect::<Vec<_>>()
+                                .join(",");
+                            format!("{} ({}): {}", term, count, line_str)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                } else {
+                    // Compact format: just term (count)
+                    terms
+                        .iter()
+                        .map(|(term, (count, _))| format!("{} ({})", term, count))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+
+                self.store_result(store, result.clone());
+
+                let output = format!(
+                    "[Index: {} unique terms (min_count={})]\n{}",
+                    total_terms,
+                    min_count,
+                    if result.len() > 5000 {
+                        format!("{}...\n[truncated]", &result[..5000])
+                    } else {
+                        result
+                    }
+                );
+
+                Ok(ExecutionResult::Continue {
+                    output,
                     sub_calls: 0,
                 })
             }
@@ -1599,8 +1789,12 @@ Complete updated findings:"#
                     );
 
                     // Make simple LLM call
-                    let result = llm_callback(&prompt)
-                        .map_err(|e| CommandError::LlmError(format!("LLM reduce chunk {} failed: {}", chunk_num, e)))?;
+                    let result = llm_callback(&prompt).map_err(|e| {
+                        CommandError::LlmError(format!(
+                            "LLM reduce chunk {} failed: {}",
+                            chunk_num, e
+                        ))
+                    })?;
 
                     // Emit progress: chunk complete
                     let chunk_duration_ms = chunk_start.elapsed().as_millis() as u64;

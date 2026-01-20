@@ -1,13 +1,15 @@
 #!/bin/bash
 # Level 4: War and Peace Family Tree Demo
 #
-# Demonstrates efficient handling of large files (3.3MB → 57KB)
-# by using deterministic extraction BEFORE LLM processing.
+# Demonstrates RLM's ability to handle larger-than-context files by having
+# the LLM intelligently choose tools to reduce the data before analysis.
 #
-# Strategy:
-#   1. Pre-process: Extract character names + relationship sentences (L3 CLI)
-#   2. Analyze: Use LLM only on filtered data (L4 llm_reduce)
-#   3. Synthesize: Build family trees from relationships (L4 llm_query)
+# The LLM should recognize:
+#   1. The 3.3MB file is too large to analyze directly
+#   2. Use L3 CLI (rust_cli_intent) to extract relevant character/relationship data
+#   3. Use L4 LLM (llm_reduce) to analyze the filtered data semantically
+#
+# This is NOT pre-processed - RLM orchestrates the entire pipeline.
 
 set -e
 cd "$(dirname "$0")/../.."
@@ -20,8 +22,9 @@ CYAN='\033[0;36m'
 MAGENTA='\033[0;35m'
 NC='\033[0m'
 
-DATA_FILE="demo/l4/data/war-peace-characters.txt"
-QUERY="Build family trees for the main families in War and Peace. Identify the Rostov, Bolkonsky, Kuragin, and Bezukhov families. Show parent-child, spouse, and sibling relationships. Format as structured trees."
+# Use the FULL War and Peace file - RLM must figure out how to handle it
+DATA_FILE="/Users/mike/Downloads/war-and-peace-tolstoy-clean.txt"
+QUERY="Identify the main noble families in this novel and build their family trees. Show parent-child, spouse, and sibling relationships. Format as structured trees."
 
 clear
 echo ""
@@ -29,53 +32,41 @@ echo "================================================================"
 echo -e "${MAGENTA}    Level 4 Demo: War and Peace Family Tree${NC}"
 echo "================================================================"
 echo ""
-echo -e "${CYAN}Problem:${NC} Build family trees from 3.3MB novel (65,660 lines)"
-echo -e "${CYAN}Naive approach:${NC} 300+ LLM calls, 3385+ seconds, FAILS"
+echo -e "${CYAN}Challenge:${NC} Build family trees from 3.3MB novel (65,660 lines)"
 echo ""
-echo -e "${CYAN}Efficient approach (this demo):${NC}"
-echo "  1. ${GREEN}L3 CLI:${NC} Extract character names + relationship sentences"
-echo "     3.3MB → 57KB (98% reduction, <1 second)"
-echo "  2. ${GREEN}L4 LLM:${NC} Analyze relationships in filtered data"
-echo "     ~3-5 LLM calls on 57KB instead of 300+ on 3.3MB"
+echo -e "${CYAN}Why this is hard:${NC}"
+echo "  - File is WAY too large to send to an LLM directly"
+echo "  - Naive chunking would require 300+ LLM calls and still fail"
+echo "  - 98% of the text is NOT about family relationships"
+echo ""
+echo -e "${CYAN}RLM's approach (LLM-orchestrated):${NC}"
+echo "  1. LLM recognizes the file is too large"
+echo "  2. LLM uses ${GREEN}rust_cli_intent${NC} to generate extraction code"
+echo "     (extracts character names + relationship sentences)"
+echo "  3. LLM uses ${GREEN}llm_reduce${NC} on the filtered data"
+echo "  4. LLM synthesizes family trees from relationships"
+echo ""
+echo -e "${YELLOW}Key insight:${NC} The LLM decides HOW to process the data."
+echo "  RLM provides tools; the LLM orchestrates their use."
 echo ""
 
-# Check if data file exists
+# Check if source file exists
 if [ ! -f "$DATA_FILE" ]; then
-    echo -e "${YELLOW}Generating filtered data from War and Peace...${NC}"
-
-    # Check if source file exists
-    if [ ! -f "/Users/mike/Downloads/war-and-peace-tolstoy-clean.txt" ]; then
-        echo -e "${RED}Error: War and Peace source file not found${NC}"
-        echo "Expected at: /Users/mike/Downloads/war-and-peace-tolstoy-clean.txt"
-        exit 1
-    fi
-
-    # Compile extraction tool if needed
-    if [ ! -f "demo/l4/tools/extract-characters" ]; then
-        echo "  Compiling extraction tool..."
-        rustc -O demo/l4/tools/extract-characters.rs -o demo/l4/tools/extract-characters
-    fi
-
-    # Run extraction
-    echo "  Extracting characters and relationships..."
-    ./demo/l4/tools/extract-characters < /Users/mike/Downloads/war-and-peace-tolstoy-clean.txt > "$DATA_FILE"
+    echo -e "${RED}Error: War and Peace source file not found${NC}"
+    echo "Expected at: $DATA_FILE"
+    echo ""
+    echo "Download from Project Gutenberg or use a clean text version."
+    exit 1
 fi
 
 # Show file stats
-ORIG_SIZE=$(wc -c < /Users/mike/Downloads/war-and-peace-tolstoy-clean.txt 2>/dev/null || echo "3339794")
-FILT_SIZE=$(wc -c < "$DATA_FILE")
-FILT_LINES=$(wc -l < "$DATA_FILE")
-REDUCTION=$(echo "scale=1; (1 - $FILT_SIZE / $ORIG_SIZE) * 100" | bc)
+FILE_SIZE=$(wc -c < "$DATA_FILE")
+FILE_LINES=$(wc -l < "$DATA_FILE")
 
-echo -e "${YELLOW}Data reduction:${NC}"
-echo "  Original:  $(echo $ORIG_SIZE | awk '{printf "%\047d", $1}') bytes (65,660 lines)"
-echo "  Filtered:  $(echo $FILT_SIZE | awk '{printf "%\047d", $1}') bytes ($FILT_LINES lines)"
-echo "  Reduction: ${REDUCTION}%"
-echo ""
-
-echo -e "${YELLOW}Sample of extracted data:${NC}"
-head -20 "$DATA_FILE" | sed 's/^/  /'
-echo "  ..."
+echo -e "${YELLOW}Input file:${NC}"
+echo "  Path:  $DATA_FILE"
+echo "  Size:  $(echo $FILE_SIZE | awk '{printf "%\047d", $1}') bytes"
+echo "  Lines: $(echo $FILE_LINES | awk '{printf "%\047d", $1}')"
 echo ""
 
 echo -e "${CYAN}Query:${NC}"
@@ -83,17 +74,20 @@ echo "  $QUERY"
 echo ""
 
 echo "================================================================"
-echo -e "${GREEN}Running RLM on filtered data...${NC}"
+echo -e "${GREEN}Running RLM on full 3.3MB file...${NC}"
+echo -e "${YELLOW}Watch as the LLM decides how to handle this large input.${NC}"
 echo "================================================================"
 echo ""
 
-# Run RLM with coordinator mode on the filtered data
+# Run RLM with LLM delegation and CLI on the FULL file
+# CLI enables phased processing for large contexts
+# The LLM must figure out to use rust_cli_intent for extraction
 ./rlm-orchestrator/target/release/rlm "$DATA_FILE" "$QUERY" \
     --enable-llm-delegation \
-    --coordinator-mode \
+    --enable-cli \
     --litellm \
     -m deepseek-coder \
-    --max-iterations 10 \
+    --max-iterations 20 \
     -vv
 
 echo ""
@@ -101,11 +95,14 @@ echo "================================================================"
 echo -e "${MAGENTA}Demo Complete${NC}"
 echo "================================================================"
 echo ""
-echo -e "${CYAN}Key insight:${NC}"
-echo "  Don't send 3.3MB to LLMs. Extract relevant data first."
-echo "  98% of War and Peace is NOT about family relationships."
+echo -e "${CYAN}What happened:${NC}"
+echo "  1. RLM received 3.3MB input (too large for direct LLM processing)"
+echo "  2. The LLM recognized this and used rust_cli_intent to extract"
+echo "     only character names and relationship sentences"
+echo "  3. The LLM then used llm_reduce on the filtered data"
+echo "  4. Family trees were synthesized from the relationships"
 echo ""
-echo -e "${CYAN}This demo used:${NC}"
-echo "  - L3 CLI (Rust): Deterministic extraction (<1 second)"
-echo "  - L4 LLM: Semantic analysis only on filtered 57KB"
+echo -e "${CYAN}This demonstrates RLM's core value:${NC}"
+echo "  LLMs can process arbitrarily large files by intelligently"
+echo "  choosing which tools to use for data reduction."
 echo ""

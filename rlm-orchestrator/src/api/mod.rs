@@ -166,7 +166,9 @@ fn resolve_context(request: &QueryRequest) -> Result<(String, String), (StatusCo
             "/Users/mike/Downloads/",
         ];
 
-        let path_allowed = allowed_prefixes.iter().any(|prefix| path.starts_with(prefix));
+        let path_allowed = allowed_prefixes
+            .iter()
+            .any(|prefix| path.starts_with(prefix));
         if !path_allowed {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -303,6 +305,24 @@ pub enum StreamEvent {
     },
     #[serde(rename = "final_answer")]
     FinalAnswer { answer: String },
+    #[serde(rename = "phased_start")]
+    PhasedStart {
+        context_chars: usize,
+        phase_count: usize,
+    },
+    #[serde(rename = "phase_start")]
+    PhaseStart {
+        phase: usize,
+        name: String,
+        description: String,
+    },
+    #[serde(rename = "phase_complete")]
+    PhaseComplete {
+        phase: usize,
+        name: String,
+        duration_ms: u64,
+        result_preview: String,
+    },
     #[serde(rename = "complete")]
     Complete {
         success: bool,
@@ -332,7 +352,10 @@ pub fn create_router(state: Arc<ApiState>) -> Router {
         .route("/samples/large-logs", get(serve_large_logs))
         .route("/samples/response-times", get(serve_response_times))
         .route("/samples/detective-mystery", get(serve_detective_mystery))
-        .route("/samples/war-peace-characters", get(serve_war_peace_characters))
+        .route(
+            "/samples/war-peace-characters",
+            get(serve_war_peace_characters),
+        )
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10MB for large contexts
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -593,11 +616,7 @@ async fn process_query(
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, (StatusCode, String)> {
     let (context, _source) = resolve_context(&request)?;
-    match state
-        .orchestrator
-        .process(&request.query, &context)
-        .await
-    {
+    match state.orchestrator.process(&request.query, &context).await {
         Ok(result) => Ok(Json(result.into())),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
@@ -612,11 +631,7 @@ async fn debug_query(
     let context_length = context.len();
     let query = request.query.clone();
 
-    match state
-        .orchestrator
-        .process(&request.query, &context)
-        .await
-    {
+    match state.orchestrator.process(&request.query, &context).await {
         Ok(result) => {
             // Estimate baseline tokens: ~1 token per 4 chars for context + query overhead
             let baseline_tokens = (context_length as u32 / 4) + 200; // 200 for query/system prompt
@@ -824,6 +839,33 @@ async fn stream_query(
                     }
                 }
                 ProgressEvent::FinalAnswer { answer } => StreamEvent::FinalAnswer { answer },
+                ProgressEvent::PhasedStart {
+                    context_chars,
+                    phase_count,
+                } => StreamEvent::PhasedStart {
+                    context_chars,
+                    phase_count,
+                },
+                ProgressEvent::PhaseStart {
+                    phase,
+                    name,
+                    description,
+                } => StreamEvent::PhaseStart {
+                    phase,
+                    name,
+                    description,
+                },
+                ProgressEvent::PhaseComplete {
+                    phase,
+                    name,
+                    duration_ms,
+                    result_preview,
+                } => StreamEvent::PhaseComplete {
+                    phase,
+                    name,
+                    duration_ms,
+                    result_preview,
+                },
                 ProgressEvent::Complete { .. } => {
                     // We'll send the complete event with full data after process returns
                     return;
