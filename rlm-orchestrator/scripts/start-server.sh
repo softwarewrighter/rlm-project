@@ -21,7 +21,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [ "$1" = "--check" ]; then
     if pgrep -f "rlm-server" > /dev/null; then
         echo "Server is running (PID: $(pgrep -f 'rlm-server'))"
-        curl -s http://localhost:8080/health
+        curl -s http://localhost:4539/health
         exit 0
     else
         echo "Server is not running"

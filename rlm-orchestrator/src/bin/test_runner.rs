@@ -19,7 +19,7 @@ use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-const RLM_SERVER: &str = "http://localhost:8080";
+const RLM_SERVER: &str = "http://localhost:4539";
 const TIMEOUT_SECS: u64 = 120;
 
 /// Safely truncate a string at a valid UTF-8 character boundary.

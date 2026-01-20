@@ -24,7 +24,7 @@ NC='\033[0m' # No Color
 
 TEMP_FILE="/tmp/large-logs.txt"
 QUERY="Rank the error types from most to least frequent. Show the count for each error type."
-SERVER_URL="${SERVER_URL:-http://localhost:8080}"
+SERVER_URL="${SERVER_URL:-http://localhost:4539}"
 
 clear
 echo ""

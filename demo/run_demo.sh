@@ -95,7 +95,7 @@ echo "The LLM will issue search commands instead of reading everything."
 echo ""
 
 # Check if RLM server is running
-if ! curl -s http://localhost:8080/health > /dev/null 2>&1; then
+if ! curl -s http://localhost:4539/health > /dev/null 2>&1; then
     echo -e "${YELLOW}RLM server not running. Start it with:${NC}"
     echo ""
     echo "  cd rlm-orchestrator"
@@ -110,7 +110,7 @@ echo ""
 
 # Query via RLM
 CONTEXT_JSON=$(cat "$CONTEXT_FILE" | jq -Rs .)
-RLM_RESPONSE=$(curl -s --max-time 300 -X POST http://localhost:8080/debug \
+RLM_RESPONSE=$(curl -s --max-time 300 -X POST http://localhost:4539/debug \
   -H "Content-Type: application/json" \
   -d "{
     \"query\": \"$QUERY\",
@@ -142,7 +142,7 @@ else
     echo -e "${RED}[FAILED] RLM did not find the passphrase${NC}"
     echo ""
     echo "Debug: Check the iteration history with:"
-    echo "  curl -s http://localhost:8080/debug -X POST -H 'Content-Type: application/json' -d '{...}' | jq '.iterations_history'"
+    echo "  curl -s http://localhost:4539/debug -X POST -H 'Content-Type: application/json' -d '{...}' | jq '.iterations_history'"
 fi
 
 echo ""

@@ -29,7 +29,7 @@ if [ ! -f "$RLM_BIN" ]; then
 fi
 
 # Server URL for fetching sample data
-RLM_SERVER="${RLM_SERVER:-http://localhost:8080}"
+RLM_SERVER="${RLM_SERVER:-http://localhost:4539}"
 
 # LiteLLM gateway settings (for all LLM access)
 LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"

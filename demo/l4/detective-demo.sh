@@ -25,7 +25,7 @@ NC='\033[0m' # No Color
 DATA_FILE="demo/l4/data/detective-mystery.txt"
 # Query explicitly asks for ALL evidence to get consistent, complete responses
 QUERY="Who murdered Lord Ashford? Analyze ALL witness statements and ALL physical evidence. Identify the killer and provide your conclusion with COMPLETE supporting evidence including: motive, opportunity, physical evidence (footprints, weapon, poison), and any timeline contradictions."
-SERVER_URL="${SERVER_URL:-http://localhost:8080}"
+SERVER_URL="${SERVER_URL:-http://localhost:4539}"
 
 clear
 echo ""

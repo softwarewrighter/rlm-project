@@ -160,7 +160,7 @@ async fn main() -> Result<()> {
     let app = create_router(state);
 
     // Start server
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 4539));
     info!("Listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

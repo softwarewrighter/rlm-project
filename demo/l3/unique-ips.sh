@@ -24,7 +24,7 @@ NC='\033[0m' # No Color
 
 TEMP_FILE="/tmp/large-logs.txt"
 QUERY="How many unique IP addresses appear in these logs? List the top 10 most active IPs."
-SERVER_URL="${SERVER_URL:-http://localhost:8080}"
+SERVER_URL="${SERVER_URL:-http://localhost:4539}"
 
 clear
 echo ""

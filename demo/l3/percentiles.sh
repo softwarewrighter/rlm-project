@@ -24,7 +24,7 @@ NC='\033[0m' # No Color
 
 TEMP_FILE="/tmp/response-times.txt"
 QUERY="Calculate the p50, p95, and p99 response time percentiles."
-SERVER_URL="${SERVER_URL:-http://localhost:8080}"
+SERVER_URL="${SERVER_URL:-http://localhost:4539}"
 
 clear
 echo ""

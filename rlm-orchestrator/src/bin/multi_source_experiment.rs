@@ -15,7 +15,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-const RLM_SERVER: &str = "http://localhost:8080";
+const RLM_SERVER: &str = "http://localhost:4539";
 const CACHE_DIR: &str = "cache";
 
 #[derive(Debug, Deserialize)]

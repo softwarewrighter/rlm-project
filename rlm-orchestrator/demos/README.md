@@ -96,7 +96,7 @@ RLM supports 4 capability levels, each with different trade-offs:
 
 ### Web UI Visualizer
 
-1. Open http://localhost:8080/visualize
+1. Open http://localhost:4539/visualize
 2. Select a demo from the "Load Example" dropdown
 3. Click "Run RLM Query"
 4. Watch real-time progress and WASM execution

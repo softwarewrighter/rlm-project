@@ -112,7 +112,7 @@ pkill -9 -f rlm-server 2>/dev/null
 ./target/release/rlm-server config.toml &>/tmp/rlm-server.log &
 
 # Verify
-curl -s http://localhost:8080/health
+curl -s http://localhost:4539/health
 ```
 
 ### Run a Demo

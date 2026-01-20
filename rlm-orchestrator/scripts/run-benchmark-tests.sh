@@ -9,8 +9,8 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
 # Check if server is running
-if ! curl -s http://localhost:8080/health > /dev/null 2>&1; then
-    echo "Error: RLM server not running on http://localhost:8080"
+if ! curl -s http://localhost:4539/health > /dev/null 2>&1; then
+    echo "Error: RLM server not running on http://localhost:4539"
     echo "Start it first with: ./scripts/run-server.sh"
     exit 1
 fi
@@ -22,7 +22,7 @@ if [ ! -f "target/release/rlm-test" ]; then
 fi
 
 echo "Running benchmark tests..."
-echo "Server: http://localhost:8080"
+echo "Server: http://localhost:4539"
 echo ""
 
 exec ./target/release/rlm-test "$@"

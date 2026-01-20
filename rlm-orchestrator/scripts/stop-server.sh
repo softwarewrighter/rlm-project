@@ -1,7 +1,7 @@
 #!/bin/bash
-# Stop RLM server running on port 8080
+# Stop RLM server running on port 4539
 
-PORT=8080
+PORT=4539
 PID=$(lsof -ti :$PORT 2>/dev/null)
 
 if [ -n "$PID" ]; then

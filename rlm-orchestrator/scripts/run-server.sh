@@ -20,7 +20,7 @@ if [ ! -f "target/release/rlm-server" ]; then
     cargo build --release --bin rlm-server
 fi
 
-echo "Starting RLM server on http://localhost:8080"
+echo "Starting RLM server on http://localhost:4539"
 echo "Config: $PROJECT_DIR/config.toml"
 echo "Press Ctrl+C to stop"
 echo ""
