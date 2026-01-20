@@ -757,6 +757,13 @@ If no matches found:
         // Check if we should use phased processing for very large contexts
         // Phased processing guides the LLM through: assess -> index -> select -> retrieve -> analyze
         // Skip if force_rlm is set (to prevent infinite recursion from Phase 5)
+        debug!(
+            force_rlm = force_rlm,
+            context_len = context.len(),
+            phased_threshold = self.config.phased_threshold,
+            cli_enabled = self.config.cli.enabled,
+            "Checking phased processing conditions"
+        );
         if !force_rlm && context.len() > self.config.phased_threshold && self.config.cli.enabled {
             info!(
                 context_len = context.len(),

@@ -352,10 +352,6 @@ pub fn create_router(state: Arc<ApiState>) -> Router {
         .route("/samples/large-logs", get(serve_large_logs))
         .route("/samples/response-times", get(serve_response_times))
         .route("/samples/detective-mystery", get(serve_detective_mystery))
-        .route(
-            "/samples/war-peace-characters",
-            get(serve_war_peace_characters),
-        )
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10MB for large contexts
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -563,47 +559,6 @@ Lord Ashford had evidence and threatened to expose him.
 THE MURDERER IS: Colonel Arthur Pemberton
 "#
                     .to_string()
-                }
-            }
-        }
-    }
-}
-
-/// Serve pre-extracted War and Peace character data (57KB instead of 3.3MB)
-/// This file was created by deterministic extraction (L3 CLI) for efficient LLM processing
-async fn serve_war_peace_characters() -> String {
-    // Read the pre-extracted character data from the demo directory
-    match std::fs::read_to_string("demo/l4/data/war-peace-characters.txt") {
-        Ok(content) => content,
-        Err(_) => {
-            // Fallback: try relative to crate root
-            match std::fs::read_to_string("../demo/l4/data/war-peace-characters.txt") {
-                Ok(content) => content,
-                Err(_) => {
-                    // Minimal placeholder if file not found
-                    r#"=== MAIN CHARACTERS (by frequency) ===
-
-Pierre: 1784 mentions
-Prince: 1574 mentions
-Natasha: 1092 mentions
-Andrew: 1039 mentions
-Nicholas: 626 mentions
-Mary: 610 mentions
-Napoleon: 467 mentions
-
-=== RELATIONSHIP SENTENCES ===
-
-Prince Andrew was the son of old Prince Bolkonsky.
-Natasha was the daughter of Count and Countess Rostov.
-Pierre was the illegitimate son of Count Bezukhov.
-Princess Mary was Prince Andrew's sister.
-Nicholas was Natasha's elder brother.
-Sonya was the Rostovs' ward and Nicholas's cousin.
-Helene Kuragina married Pierre Bezukhov.
-Prince Vasili was Helene and Anatole's father.
-
-(Note: Full character data not found. Place war-peace-characters.txt in demo/l4/data/)"#
-                        .to_string()
                 }
             }
         }
@@ -1851,12 +1806,8 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
                             <option value="cli_word_frequency">CLI: Word frequency analysis</option>
                         </optgroup>
                         <optgroup label="Level 4: Recursive LLM (Multi-hop Reasoning)">
-                            <option value="l4_detective">L4: Detective Mystery (semantic analysis)</option>
-                            <option value="war_peace_family">War and Peace: Family Tree (57KB pre-extracted)</option>
-                        </optgroup>
-                        <optgroup label="Server-Side File Processing (Large Files)">
-                            <option value="file_detective">📁 File: Detective Mystery (22 KB)</option>
-                            <option value="file_war_peace">📁 File: War & Peace Characters (3.2 MB)</option>
+                            <option value="l4_detective">L4: Detective Mystery (22 KB)</option>
+                            <option value="l4_war_peace">L4: War & Peace Family Tree (3.2 MB)</option>
                         </optgroup>
                     </select>
                     <div class="example-tags" id="exampleTags"></div>
@@ -2452,49 +2403,24 @@ Line 7: ERROR - Invalid input received</textarea>
             l4_detective: {
                 query: "Who murdered Lord Ashford? Cross-reference the witness statements with the physical evidence and identify the killer. Provide your conclusion with supporting evidence.",
                 context: null,
-                loadUrl: '/samples/detective-mystery',
-                tags: ['llm-delegation', 'semantic', 'recursive'],
-                benchmark: 'Multi-hop',
-                level: 'Level 4 (Recursive LLM)',
-                maxIterations: 15,
-                description: 'Multi-hop reasoning: Semantic analysis of witness statements requiring llm_delegate for cross-referencing contradictions and evidence.'
-            },
-            war_peace_family: {
-                query: "Build family trees for the main families in War and Peace. Identify the Rostov, Bolkonsky, Kuragin, and Bezukhov families. Show parent-child, spouse, and sibling relationships. Format as structured trees.",
-                context: null,
-                loadUrl: '/samples/war-peace-characters',
-                tags: ['llm-delegation', 'semantic', 'efficient'],
-                benchmark: 'S-NIAH',
-                level: 'Level 4 (Recursive LLM)',
-                maxIterations: 10,
-                description: 'Efficient approach: Pre-extracted 57KB character data (from 3.3MB novel). Uses llm_reduce for chunked semantic analysis.'
-            },
-
-            // ========================================
-            // SERVER-SIDE FILE PROCESSING (Large Files)
-            // These examples load files server-side, not in browser
-            // ========================================
-            file_detective: {
-                query: "Who murdered Lord Ashford? Cross-reference the witness statements with the physical evidence and identify the killer.",
-                context: null,
                 contextPath: '../demo/l4/data/detective-mystery.txt',
                 fileSize: '22 KB',
-                tags: ['file-based', 'llm-delegation', 'semantic'],
+                tags: ['llm-delegation', 'semantic', 'multi-hop'],
                 benchmark: 'Multi-hop',
                 level: 'Level 4 (Recursive LLM)',
                 maxIterations: 15,
-                description: 'File-based: Server loads file directly. Demonstrates large file processing without browser memory usage.'
+                description: 'Multi-hop reasoning: Cross-reference witness statements with physical evidence to identify the killer.'
             },
-            file_war_peace: {
-                query: "Extract all character names from this text. List each unique character only once.",
+            l4_war_peace: {
+                query: "Build ASCII family tree diagrams for the main noble families: Rostov, Bolkonsky, Bezukhov, and Kuragin. Use tree notation with └── and ├── to show parent-child relationships. Mark spouses with (m. Name). Example format:\\n\\nROSTOV FAMILY\\n├── Count Ilya Rostov (m. Countess Natalya)\\n│   ├── Nikolai\\n│   ├── Natasha\\n│   └── Petya\\n\\nShow ALL family members found in the text.",
                 context: null,
                 contextPath: '/Users/mike/Downloads/war-and-peace-tolstoy-clean.txt',
                 fileSize: '3.2 MB',
-                tags: ['file-based', 'llm', 'large-context'],
-                benchmark: 'S-NIAH',
+                tags: ['llm-delegation', 'phased-processing', 'large-context'],
+                benchmark: 'Multi-hop',
                 level: 'Level 4 (Recursive LLM)',
                 maxIterations: 20,
-                description: 'File-based: 3.2MB file processed server-side. Shows token savings vs sending full context.'
+                description: '5-phase processing of 3.2MB novel: assess → index → select → retrieve → analyze. Demonstrates RLM handling larger-than-context files.'
             }
         };
 
@@ -2735,9 +2661,10 @@ Line 7: ERROR - Invalid input received</textarea>
             try {
                 // Use fetch to POST and get SSE stream
                 // force_rlm bypasses small-context optimization to ensure WASM demos work
-                // If currentContextPath is set, use server-side file loading
+                // But for server-side file loading (large files), we want phased processing
+                // If currentContextPath is set, use server-side file loading without force_rlm
                 const requestBody = currentContextPath
-                    ? { query, context_path: currentContextPath, force_rlm: true }
+                    ? { query, context_path: currentContextPath, force_rlm: false }
                     : { query, context, force_rlm: true };
                 const response = await fetch('/stream', {
                     method: 'POST',

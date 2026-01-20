@@ -24,7 +24,7 @@ NC='\033[0m'
 
 # Use the FULL War and Peace file - RLM must figure out how to handle it
 DATA_FILE="/Users/mike/Downloads/war-and-peace-tolstoy-clean.txt"
-QUERY="Identify the main noble families in this novel and build their family trees. Show parent-child, spouse, and sibling relationships. Format as structured trees."
+QUERY="Build ASCII family tree diagrams for the main noble families: Rostov, Bolkonsky, Bezukhov, and Kuragin. Use tree notation with └── and ├── to show parent-child relationships. Mark spouses with (m. Name). Show ALL family members found in the text."
 
 clear
 echo ""
