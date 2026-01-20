@@ -1577,7 +1577,7 @@ Complete updated findings:"#
                         total_chunks: num_chunks,
                         duration_ms: chunk_duration_ms,
                         result_preview: if result.len() > 200 {
-                            format!("{}...", &result[..200])
+                            format!("{}...", truncate_to_char_boundary(&result, 200))
                         } else {
                             result.clone()
                         },
