@@ -383,6 +383,9 @@ impl RlmOrchestrator {
         .with_recursion_depth(depth)
         .with_max_recursion_depth(self.config.llm_delegation.max_recursion_depth);
 
+        // Set max chunks for llm_reduce based on iteration limit (fail fast if too large)
+        executor.set_max_llm_reduce_chunks(self.config.max_iterations);
+
         for iteration in 0..self.config.max_iterations {
             let step = iteration + 1;
             debug!(iteration = step, depth = depth, "Nested RLM iteration");
@@ -748,6 +751,9 @@ If no matches found:
         .with_recursion_depth(0) // Root level
         .with_max_recursion_depth(self.config.llm_delegation.max_recursion_depth)
         .with_nested_levels(self.config.llm_delegation.nested_levels.clone());
+
+        // Set max chunks for llm_reduce based on iteration limit (fail fast if too large)
+        executor.set_max_llm_reduce_chunks(self.config.max_iterations);
 
         // Add llm_delegate callback if LLM delegation is enabled
         if self.config.llm_delegation.enabled {

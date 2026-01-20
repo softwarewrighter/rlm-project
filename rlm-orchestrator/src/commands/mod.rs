@@ -182,6 +182,14 @@ pub enum CommandError {
 
     #[error("LLM delegate callback not configured")]
     LlmDelegateNotConfigured,
+
+    #[error("LLM reduce would require {chunks} chunks but max_iterations is {max_iterations}. Context too large ({context_size} chars) for this chunk size ({chunk_size}). Use L3 CLI to filter relevant content first, or increase max_iterations.")]
+    LlmReduceChunkLimitExceeded {
+        chunks: usize,
+        max_iterations: usize,
+        context_size: usize,
+        chunk_size: usize,
+    },
 }
 
 /// A single command that can be executed
@@ -903,6 +911,12 @@ impl CommandExecutor {
         self.progress_callback = Some(callback);
     }
 
+    /// Set the maximum chunks allowed for llm_reduce (fail fast if exceeded)
+    /// This should typically be set to max_iterations from the orchestrator config
+    pub fn set_max_llm_reduce_chunks(&mut self, max_chunks: usize) {
+        self.max_llm_reduce_chunks = max_chunks;
+    }
+
     /// Emit a progress event if callback is set
     fn emit_progress(&self, event: CommandProgress) {
         if let Some(ref callback) = self.progress_callback {
@@ -1477,6 +1491,24 @@ impl CommandExecutor {
                 let chunks = split_into_chunks(&source_context, chunk_sz, step_sz);
 
                 let num_chunks = chunks.len();
+
+                // Sanity check: fail fast if chunks would exceed iteration limit
+                if num_chunks > self.max_llm_reduce_chunks {
+                    tracing::error!(
+                        num_chunks = num_chunks,
+                        max_chunks = self.max_llm_reduce_chunks,
+                        context_size = source_context.len(),
+                        chunk_size = chunk_sz,
+                        "LLM reduce would exceed chunk limit - context too large"
+                    );
+                    return Err(CommandError::LlmReduceChunkLimitExceeded {
+                        chunks: num_chunks,
+                        max_iterations: self.max_llm_reduce_chunks,
+                        context_size: source_context.len(),
+                        chunk_size: chunk_sz,
+                    });
+                }
+
                 tracing::info!(
                     directive = %directive,
                     chunk_size = chunk_sz,

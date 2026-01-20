@@ -332,6 +332,7 @@ pub fn create_router(state: Arc<ApiState>) -> Router {
         .route("/samples/large-logs", get(serve_large_logs))
         .route("/samples/response-times", get(serve_response_times))
         .route("/samples/detective-mystery", get(serve_detective_mystery))
+        .route("/samples/war-peace-characters", get(serve_war_peace_characters))
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10MB for large contexts
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -539,6 +540,47 @@ Lord Ashford had evidence and threatened to expose him.
 THE MURDERER IS: Colonel Arthur Pemberton
 "#
                     .to_string()
+                }
+            }
+        }
+    }
+}
+
+/// Serve pre-extracted War and Peace character data (57KB instead of 3.3MB)
+/// This file was created by deterministic extraction (L3 CLI) for efficient LLM processing
+async fn serve_war_peace_characters() -> String {
+    // Read the pre-extracted character data from the demo directory
+    match std::fs::read_to_string("demo/l4/data/war-peace-characters.txt") {
+        Ok(content) => content,
+        Err(_) => {
+            // Fallback: try relative to crate root
+            match std::fs::read_to_string("../demo/l4/data/war-peace-characters.txt") {
+                Ok(content) => content,
+                Err(_) => {
+                    // Minimal placeholder if file not found
+                    r#"=== MAIN CHARACTERS (by frequency) ===
+
+Pierre: 1784 mentions
+Prince: 1574 mentions
+Natasha: 1092 mentions
+Andrew: 1039 mentions
+Nicholas: 626 mentions
+Mary: 610 mentions
+Napoleon: 467 mentions
+
+=== RELATIONSHIP SENTENCES ===
+
+Prince Andrew was the son of old Prince Bolkonsky.
+Natasha was the daughter of Count and Countess Rostov.
+Pierre was the illegitimate son of Count Bezukhov.
+Princess Mary was Prince Andrew's sister.
+Nicholas was Natasha's elder brother.
+Sonya was the Rostovs' ward and Nicholas's cousin.
+Helene Kuragina married Pierre Bezukhov.
+Prince Vasili was Helene and Anatole's father.
+
+(Note: Full character data not found. Place war-peace-characters.txt in demo/l4/data/)"#
+                        .to_string()
                 }
             }
         }
@@ -1768,7 +1810,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
                         </optgroup>
                         <optgroup label="Level 4: Recursive LLM (Multi-hop Reasoning)">
                             <option value="l4_detective">L4: Detective Mystery (semantic analysis)</option>
-                            <option value="war_peace_family">War and Peace: Family Tree (3.2MB)</option>
+                            <option value="war_peace_family">War and Peace: Family Tree (57KB pre-extracted)</option>
                         </optgroup>
                         <optgroup label="Server-Side File Processing (Large Files)">
                             <option value="file_detective">📁 File: Detective Mystery (22 KB)</option>
@@ -2376,14 +2418,14 @@ Line 7: ERROR - Invalid input received</textarea>
                 description: 'Multi-hop reasoning: Semantic analysis of witness statements requiring llm_delegate for cross-referencing contradictions and evidence.'
             },
             war_peace_family: {
-                query: "Build a family tree for the main characters. Identify characters who appear multiple times and are related to each other (by blood or marriage). Show the relationships in a structured format.",
+                query: "Build family trees for the main families in War and Peace. Identify the Rostov, Bolkonsky, Kuragin, and Bezukhov families. Show parent-child, spouse, and sibling relationships. Format as structured trees.",
                 context: null,
-                loadUrl: '/samples/war-and-peace',
-                tags: ['llm', 'large-context', 'synthesis'],
+                loadUrl: '/samples/war-peace-characters',
+                tags: ['llm-delegation', 'semantic', 'efficient'],
                 benchmark: 'S-NIAH',
                 level: 'Level 4 (Recursive LLM)',
-                maxIterations: 20,
-                description: 'S-NIAH: Find scattered character mentions in 3.2MB text. Requires multi-hop LLM reasoning.'
+                maxIterations: 10,
+                description: 'Efficient approach: Pre-extracted 57KB character data (from 3.3MB novel). Uses llm_reduce for chunked semantic analysis.'
             },
 
             // ========================================
