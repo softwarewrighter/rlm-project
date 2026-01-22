@@ -424,7 +424,7 @@ impl RlmOrchestrator {
             let prompt = self.build_prompt(query, context, &history);
 
             // Call the LLM
-            let request = LlmRequest::new(&system_prompt, &prompt).with_max_tokens(2048);
+            let request = LlmRequest::new(&system_prompt, &prompt).with_max_tokens(4096);
             let response = self.pool.complete(&request, false).await?;
 
             // Track token usage
@@ -883,7 +883,7 @@ If no matches found:
             // Call the root LLM (with timing)
             emit(ProgressEvent::LlmCallStart { step });
             let llm_start = Instant::now();
-            let request = LlmRequest::new(&system_prompt, &prompt).with_max_tokens(2048); // Ensure enough tokens for WASM code
+            let request = LlmRequest::new(&system_prompt, &prompt).with_max_tokens(4096); // Ensure enough tokens for SVG/complex output
             let response = self.pool.complete(&request, false).await?;
             let llm_ms = llm_start.elapsed().as_millis() as u64;
 
@@ -2244,11 +2244,23 @@ Use the LOWEST level that can accomplish the task.
     fn truncate_output(&self, output: &str) -> String {
         if output.len() > self.config.output_limit {
             let half = self.config.output_limit / 2;
+            // Find valid UTF-8 character boundaries to avoid panics with multi-byte chars
+            let start_end = output
+                .char_indices()
+                .take_while(|(i, _)| *i < half)
+                .last()
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(0);
+            let end_start = output
+                .char_indices()
+                .find(|(i, _)| *i >= output.len().saturating_sub(half))
+                .map(|(i, _)| i)
+                .unwrap_or(output.len());
             format!(
                 "{}... [truncated {} chars] ...{}",
-                &output[..half],
+                &output[..start_end],
                 output.len() - self.config.output_limit,
-                &output[output.len() - half..]
+                &output[end_start..]
             )
         } else {
             output.to_string()

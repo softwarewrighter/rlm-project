@@ -2,7 +2,16 @@
 
 A practical implementation of Recursive Language Models based on the paper ["Recursive Language Models"](https://arxiv.org/html/2512.24601v1) by Zhang, Kraska, and Khattab (MIT CSAIL).
 
-- [explainer video](https://www.youtube.com/watch?v=5DhaTPuyhys)
+## Video Series
+
+Watch the full [RLM Implementations Playlist](https://www.youtube.com/playlist?list=PLKjvVAEaR4itAgRBOJGi-B2CCY2-Wvgem) on YouTube:
+
+| | | |
+|:---:|:---:|:---:|
+| [![Recursive Language Model implemented, evaluated, explained](rlm-orchestrator/images/thumbnail1.jpg)](https://www.youtube.com/watch?v=5DhaTPuyhys) | [![Can AI Find a Secret Hidden in War and Peace?](rlm-orchestrator/images/thumbnail2.jpg)](https://www.youtube.com/watch?v=d5gaL4iOdLA) | [![Custom Sandbox Code - RLM and WASM](rlm-orchestrator/images/thumbnail3.jpg)](https://www.youtube.com/watch?v=jMo5AaMRUkM) |
+| **RLM Explained** | **War and Peace Demo** | **WASM Sandboxing** |
+| [![Why I Let an LLM Compile Native Binaries](rlm-orchestrator/images/thumbnail4.jpg)](https://www.youtube.com/watch?v=oN6XyZdEHqY) | [![Can AI Catch a Killer?](rlm-orchestrator/images/thumbnail5.jpg)](https://www.youtube.com/watch?v=a-p4kojgJtM) | [![How AI Reads a Book Too Large for Its Context Window](rlm-orchestrator/images/thumbnail6.jpg)](https://www.youtube.com/watch?v=l6OjvtG2Nlk) |
+| **Native CLI Binaries** | **Detective Mystery Demo** | **Large Context Processing** |
 
 ## What is RLM?
 

@@ -1404,6 +1404,49 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
             border-top: 1px solid rgba(255,255,255,0.2);
             margin: 16px 0;
         }
+        /* SVG container for rendered family trees */
+        .svg-wrapper {
+            position: relative;
+            margin: 15px 0;
+        }
+        .svg-container {
+            background: #1a1a2e;
+            border-radius: 8px;
+            padding: 20px;
+            overflow: auto;
+            text-align: center;
+            max-height: 600px;
+            resize: both;
+        }
+        .svg-container svg {
+            /* Allow SVG to render at natural size for readability */
+            min-width: 800px;
+            height: auto;
+        }
+        .svg-download-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #4a6572;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+            z-index: 10;
+        }
+        .svg-download-btn:hover {
+            opacity: 1;
+            background: #5d7a8a;
+        }
+        .mermaid-loading {
+            color: #888;
+            padding: 40px;
+            font-style: italic;
+        }
 
         .results {
             display: grid;
@@ -1808,6 +1851,7 @@ const VISUALIZE_HTML: &str = r##"<!DOCTYPE html>
                         <optgroup label="Level 4: Recursive LLM (Multi-hop Reasoning)">
                             <option value="l4_detective">L4: Detective Mystery (22 KB)</option>
                             <option value="l4_war_peace">L4: War & Peace Family Tree (3.2 MB)</option>
+                            <option value="l4_war_peace_relations">L4: War & Peace Relationships (3.2 MB)</option>
                         </optgroup>
                     </select>
                     <div class="example-tags" id="exampleTags"></div>
@@ -2079,6 +2123,8 @@ Line 7: ERROR - Invalid input received</textarea>
             answerBox.className = 'answer-box' + (data.success ? '' : ' error');
             const answerText = data.success ? data.answer : (data.error || 'Failed');
             document.getElementById('modalAnswerText').innerHTML = formatAnswer(answerText);
+            // Process any pending Mermaid diagram renders
+            processPendingMermaidRenders();
 
             // Check for WASM usage
             const wasmSteps = data.history.filter(s => hasWasm(s.commands));
@@ -2412,7 +2458,7 @@ Line 7: ERROR - Invalid input received</textarea>
                 description: 'Multi-hop reasoning: Cross-reference witness statements with physical evidence to identify the killer.'
             },
             l4_war_peace: {
-                query: "Build ASCII family tree diagrams for the main noble families: Rostov, Bolkonsky, Bezukhov, and Kuragin. Use tree notation with └── and ├── to show parent-child relationships. Mark spouses with (m. Name). Example format:\\n\\nROSTOV FAMILY\\n├── Count Ilya Rostov (m. Countess Natalya)\\n│   ├── Nikolai\\n│   ├── Natasha\\n│   └── Petya\\n\\nShow ALL family members found in the text.",
+                query: "Build family trees for noble families Rostov, Bolkonsky, Bezukhov, Kuragin. OUTPUT FORMAT REQUIRED - use ONLY this exact tree notation:\\n\\nFAMILY NAME\\n└── Parent (m. Spouse)\\n    ├── Child1\\n    ├── Child2 (m. Their Spouse)\\n    │   └── Grandchild\\n    └── Child3\\n\\nDO NOT use bullet points or asterisks. Use ONLY └── ├── │ characters for the tree structure.",
                 context: null,
                 contextPath: '/Users/mike/Downloads/war-and-peace-tolstoy-clean.txt',
                 fileSize: '3.2 MB',
@@ -2421,6 +2467,17 @@ Line 7: ERROR - Invalid input received</textarea>
                 level: 'Level 4 (Recursive LLM)',
                 maxIterations: 20,
                 description: '5-phase processing of 3.2MB novel: assess → index → select → retrieve → analyze. Demonstrates RLM handling larger-than-context files.'
+            },
+            l4_war_peace_relations: {
+                query: "Identify the major characters and family relationships for: Rostov, Bolkonsky, Bezukhov, Kuragin families.\n\nPresent results in a CLEAR, VISUAL FORMAT. Choose whichever is most readable:\n- ASCII box-drawing tables (┌─┬─┐ │ ├─┼─┤ └─┴─┘)\n- HTML tables with borders\n- Simple structured text\n\nFor each family show: marriages, parent-child relationships, siblings, engagements.\n\nPrioritize CLARITY and READABILITY over completeness. Keep it concise.",
+                context: null,
+                contextPath: '/Users/mike/Downloads/war-and-peace-tolstoy-clean.txt',
+                fileSize: '3.2 MB',
+                tags: ['llm-delegation', 'phased-processing', 'tables'],
+                benchmark: 'Multi-hop',
+                level: 'Level 4 (Recursive LLM)',
+                maxIterations: 20,
+                description: 'Extracts family relationships as simple tables. Demonstrates large-context processing.'
             }
         };
 
@@ -2962,8 +3019,415 @@ Line 7: ERROR - Invalid input received</textarea>
                       .replace(/"/g, '&quot;');
         }
 
+        // Counter for unique diagram IDs
+        let svgCounter = 0;
+        // Pending Mermaid renders (processed after innerHTML is set)
+        let pendingMermaidRenders = [];
+        // Store mermaid code for download
+        let mermaidCodeStore = {};
+
+        // Process any pending Mermaid renders
+        function processPendingMermaidRenders() {
+            const renders = pendingMermaidRenders.slice();
+            pendingMermaidRenders = [];
+            for (const { mermaidCode, mermaidId } of renders) {
+                mermaidCodeStore[mermaidId] = mermaidCode;
+                renderMermaid(mermaidCode, mermaidId);
+            }
+        }
+
         // Convert markdown-like text to HTML for answer display
         function formatAnswer(text) {
+            if (!text) return '';
+
+            // First, extract SVG from markdown code blocks (```svg ... ``` or ``` ... ```)
+            let processed = text.replace(/```(?:svg|xml)?\s*\n?(<svg[\s\S]*?<\/svg>)\s*\n?```/gi, '$1');
+
+            // Check for Mermaid format - extract from code blocks
+            const mermaidMatch = processed.match(/```mermaid\s*\n([\s\S]*?)\n```/i)
+                              || processed.match(/```\s*\n((?:graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|quadrantChart|requirementDiagram|gitGraph|mindmap|timeline)[\s\S]*?)\n```/i);
+            if (mermaidMatch) {
+                const mermaidCode = mermaidMatch[1].trim();
+                const mermaidId = 'mermaid-' + (++svgCounter);
+                // Queue Mermaid rendering (will be processed after innerHTML is set)
+                pendingMermaidRenders.push({ mermaidCode, mermaidId });
+                // Return HTML with placeholder
+                return formatAnswerText(processed.replace(mermaidMatch[0], '')) +
+                    '<div class="svg-wrapper">' +
+                    '<button class="svg-download-btn" onclick="downloadMermaidHtml(\'' + mermaidId + '\')">⬇ Download HTML</button>' +
+                    '<div class="svg-container" id="' + mermaidId + '">' +
+                    '<div class="mermaid-loading">Rendering diagram...</div>' +
+                    '</div></div>';
+            }
+
+            // Check if text contains SVG - if so, extract and render it directly
+            const svgMatch = processed.match(/<svg[\s\S]*?<\/svg>/gi);
+            if (svgMatch) {
+                // Split text into parts: before SVG, SVG, after SVG
+                let result = '';
+                let remaining = processed;
+                for (const svg of svgMatch) {
+                    const idx = remaining.indexOf(svg);
+                    if (idx > 0) {
+                        // Format text before SVG
+                        result += formatAnswerText(remaining.substring(0, idx));
+                    }
+                    // Add SVG with download button
+                    const svgId = 'svg-' + (++svgCounter);
+                    const sanitized = sanitizeSvg(svg);
+                    result += '<div class="svg-wrapper">' +
+                        '<button class="svg-download-btn" onclick="downloadSvg(\'' + svgId + '\')">⬇ Download SVG</button>' +
+                        '<div class="svg-container" id="' + svgId + '">' + sanitized + '</div></div>';
+                    remaining = remaining.substring(idx + svg.length);
+                }
+                if (remaining.trim()) {
+                    result += formatAnswerText(remaining);
+                }
+                return result;
+            }
+
+            return formatAnswerText(text);
+        }
+
+        // Download SVG as file
+        function downloadSvg(containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            const svg = container.querySelector('svg');
+            if (!svg) return;
+
+            // Clone and add XML declaration
+            const svgClone = svg.cloneNode(true);
+            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            const svgData = '<?xml version="1.0" encoding="UTF-8"?>\n' + svgClone.outerHTML;
+
+            // Create download link
+            const blob = new Blob([svgData], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'family-tree.svg';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Render Mermaid diagram using mermaid.js from CDN
+        let mermaidPromise = null;
+
+        // Sanitize Mermaid code to prevent cycles from subgraph name references
+        // This is a GENERAL sanitizer that works for any flowchart with subgraphs
+        function sanitizeMermaidCode(code) {
+            const lines = code.split('\n');
+            const subgraphNames = new Set();
+
+            // First pass: collect all subgraph names (works for any diagram)
+            for (const line of lines) {
+                // Match: subgraph Name or subgraph Name["Label"]
+                const match = line.match(/^\s*subgraph\s+(\w+)/);
+                if (match) {
+                    subgraphNames.add(match[1]);
+                }
+            }
+
+            if (subgraphNames.size === 0) return code;
+
+            // Second pass: filter out lines that connect to/from subgraph names
+            // Handles all Mermaid arrow patterns: -->, --->, -.-, -..-, ==>, etc.
+            const filtered = lines.filter(line => {
+                // Match Mermaid connections: A --> B, A -.text.- B, A ==> B, etc.
+                // Also handles: A[Label] --> B[Label]
+                const connectionMatch = line.match(/(\w+)(?:\[[^\]]*\])?\s*(?:-->|--+>|-\.+>?-?\.?-|=+>|~~>|--\s+\w+\s+-->|-\.\s*\w+\s*\.-)\s*(\w+)/);
+                if (connectionMatch) {
+                    const [, source, target] = connectionMatch;
+                    // Remove if either source or target is a subgraph name (would create a cycle)
+                    if (subgraphNames.has(source) || subgraphNames.has(target)) {
+                        console.warn('Mermaid: Removed invalid connection to subgraph:', line.trim());
+                        return false;
+                    }
+                }
+                return true;
+            });
+
+            return filtered.join('\n');
+        }
+
+        async function renderMermaid(mermaidCode, containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            // Sanitize to prevent cycle errors from subgraph references
+            const sanitizedCode = sanitizeMermaidCode(mermaidCode);
+
+            try {
+                // Load mermaid.js on demand from CDN
+                if (!mermaidPromise) {
+                    mermaidPromise = new Promise((resolve, reject) => {
+                        const script = document.createElement('script');
+                        script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+                        script.onload = () => {
+                            window.mermaid.initialize({
+                                startOnLoad: false,
+                                theme: 'dark',
+                                flowchart: {
+                                    nodeSpacing: 50,
+                                    rankSpacing: 80,
+                                    useMaxWidth: false
+                                },
+                                themeVariables: {
+                                    fontSize: '24px',
+                                    primaryColor: '#2d4059',
+                                    primaryTextColor: '#ffffff',
+                                    primaryBorderColor: '#6c8ca0',
+                                    lineColor: '#8fa4b0',
+                                    secondaryColor: '#1a1a2e',
+                                    tertiaryColor: '#1a1a2e',
+                                    background: '#1a1a2e',
+                                    mainBkg: '#2d4059',
+                                    nodeBorder: '#6c8ca0',
+                                    clusterBkg: '#1e2a38',
+                                    clusterBorder: '#4a6572',
+                                    titleColor: '#ffffff',
+                                    edgeLabelBackground: '#1a1a2e'
+                                }
+                            });
+                            resolve(window.mermaid);
+                        };
+                        script.onerror = reject;
+                        document.head.appendChild(script);
+                    });
+                }
+
+                const mermaid = await mermaidPromise;
+                const { svg } = await mermaid.render('mermaid-svg-' + containerId, sanitizedCode);
+                container.innerHTML = svg;
+            } catch (e) {
+                console.error('Mermaid render failed:', e);
+                container.innerHTML = '<p class="error">Failed to render diagram: ' + e.message + '</p>' +
+                    '<pre style="text-align:left;font-size:11px;color:#888;white-space:pre-wrap;">' + escapeHtml(mermaidCode) + '</pre>';
+            }
+        }
+
+        // Download Mermaid diagram as standalone HTML file
+        function downloadMermaidHtml(containerId) {
+            const mermaidCode = mermaidCodeStore[containerId];
+            if (!mermaidCode) return;
+
+            const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagram</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"><\/script>
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            background: #1a1a2e;
+            margin: 0;
+            padding: 0;
+            overflow: auto;
+            font-family: system-ui, sans-serif;
+        }
+        .controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            background: rgba(26, 26, 46, 0.9);
+            padding: 8px;
+            border-radius: 8px;
+        }
+        .controls button {
+            background: #4a6572;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .controls button:hover { background: #5a7582; }
+        .zoom-info {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            color: #8fa4b0;
+            font-size: 12px;
+            z-index: 100;
+            background: rgba(26, 26, 46, 0.9);
+            padding: 8px 12px;
+            border-radius: 4px;
+        }
+        #diagram-container {
+            padding: 70px 20px 20px 20px;
+            display: inline-block;
+            min-width: 100vw;
+            min-height: 100vh;
+        }
+        #svg-wrapper {
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <button onclick="setZoom(0.5)">50%</button>
+        <button onclick="setZoom(1)">100%</button>
+        <button onclick="setZoom(1.5)">150%</button>
+        <button onclick="setZoom(2)">200%</button>
+        <button onclick="setZoom(3)">300%</button>
+        <button onclick="setZoom(4)">400%</button>
+    </div>
+    <div class="zoom-info" id="zoomLevel">Zoom: 100% - Scroll to pan</div>
+    <div id="diagram-container">
+        <div id="svg-wrapper">
+            <pre class="mermaid">
+${mermaidCode}
+            </pre>
+        </div>
+    </div>
+    <script>
+        let currentZoom = 1;
+        let baseWidth = 0;
+        let baseHeight = 0;
+
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            flowchart: {
+                nodeSpacing: 50,
+                rankSpacing: 80,
+                useMaxWidth: false
+            },
+            themeVariables: {
+                fontSize: '24px',
+                primaryColor: '#2d4059',
+                primaryTextColor: '#ffffff',
+                primaryBorderColor: '#6c8ca0',
+                lineColor: '#8fa4b0',
+                secondaryColor: '#1a1a2e',
+                tertiaryColor: '#1a1a2e',
+                background: '#1a1a2e',
+                mainBkg: '#2d4059',
+                nodeBorder: '#6c8ca0',
+                clusterBkg: '#1e2a38',
+                clusterBorder: '#4a6572',
+                titleColor: '#ffffff',
+                edgeLabelBackground: '#1a1a2e'
+            }
+        });
+
+        // Wait for Mermaid to render, then capture base size
+        setTimeout(() => {
+            const svg = document.querySelector('#svg-wrapper svg');
+            if (svg) {
+                const bbox = svg.getBBox();
+                baseWidth = bbox.width + 40;
+                baseHeight = bbox.height + 40;
+                // Set explicit size on SVG
+                svg.setAttribute('width', baseWidth);
+                svg.setAttribute('height', baseHeight);
+            }
+        }, 500);
+
+        function setZoom(level) {
+            currentZoom = level;
+            applyZoom();
+        }
+
+        function applyZoom() {
+            const svg = document.querySelector('#svg-wrapper svg');
+            if (svg && baseWidth && baseHeight) {
+                // Actually resize the SVG element so scrolling works
+                svg.setAttribute('width', baseWidth * currentZoom);
+                svg.setAttribute('height', baseHeight * currentZoom);
+                document.getElementById('zoomLevel').textContent = 'Zoom: ' + Math.round(currentZoom * 100) + '% - Scroll to pan';
+            }
+        }
+
+        // Mouse wheel zoom with Ctrl
+        document.addEventListener('wheel', (e) => {
+            if (e.ctrlKey) {
+                e.preventDefault();
+                const levels = [0.5, 1, 1.5, 2, 3, 4];
+                const currentIndex = levels.indexOf(currentZoom);
+                if (e.deltaY < 0 && currentIndex < levels.length - 1) {
+                    setZoom(levels[currentIndex + 1]);
+                } else if (e.deltaY > 0 && currentIndex > 0) {
+                    setZoom(levels[currentIndex - 1]);
+                }
+            }
+        }, { passive: false });
+    <\/script>
+</body>
+</html>`;
+
+            const blob = new Blob([html], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'diagram.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Sanitize SVG to prevent XSS (allow only safe elements/attributes)
+        function sanitizeSvg(svg) {
+            // Pre-process: fix common XML issues in LLM-generated SVG
+            let cleanedSvg = svg
+                // Ensure proper XML entities (but don't double-escape)
+                .replace(/&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;')
+                // Remove any control characters
+                .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+
+            // Try parsing as XML first
+            const parser = new DOMParser();
+            let doc = parser.parseFromString(cleanedSvg, 'image/svg+xml');
+            let svgEl = doc.querySelector('svg');
+            let parseError = doc.querySelector('parsererror');
+
+            // If XML parsing failed, try as HTML (more lenient)
+            if (!svgEl || parseError) {
+                console.log('SVG XML parse failed, trying HTML fallback');
+                doc = parser.parseFromString('<div>' + cleanedSvg + '</div>', 'text/html');
+                svgEl = doc.querySelector('svg');
+                if (!svgEl) {
+                    console.error('SVG parse failed:', parseError ? parseError.textContent : 'No SVG element found');
+                    return '<p class="error">Invalid SVG - could not parse</p>';
+                }
+            }
+
+            // Remove script tags and event handlers for security
+            svgEl.querySelectorAll('script').forEach(el => el.remove());
+            const allElements = svgEl.querySelectorAll('*');
+            allElements.forEach(el => {
+                // Remove event handlers (onclick, onload, etc.)
+                Array.from(el.attributes).forEach(attr => {
+                    if (attr.name.startsWith('on')) {
+                        el.removeAttribute(attr.name);
+                    }
+                });
+                // Remove href with javascript:
+                if (el.hasAttribute('href') && el.getAttribute('href').toLowerCase().startsWith('javascript:')) {
+                    el.removeAttribute('href');
+                }
+                if (el.hasAttribute('xlink:href') && el.getAttribute('xlink:href').toLowerCase().startsWith('javascript:')) {
+                    el.removeAttribute('xlink:href');
+                }
+            });
+
+            return svgEl.outerHTML;
+        }
+
+        // Format non-SVG answer text
+        function formatAnswerText(text) {
             if (!text) return '';
 
             // Escape HTML first
