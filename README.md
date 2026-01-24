@@ -214,3 +214,5 @@ MIT License
 - [Recursive Language Models Paper](https://arxiv.org/html/2512.24601v1)
 - [Ollama](https://ollama.ai)
 - [DeepSeek API](https://platform.deepseek.com)
+
+[@SoftwareWrighter playlists](https://www.youtube.com/@SoftwareWrighter/playlists)
